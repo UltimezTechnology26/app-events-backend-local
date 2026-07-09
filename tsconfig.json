@@ -23,11 +23,13 @@
     "controllers/**/*",
     "routes/**/*",
     "jobs/**/*",
+    "modules/**/*",
     "index.js"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.js"
+    "**/*.test.js",
+    "**/*.test.ts"
   ]
 }

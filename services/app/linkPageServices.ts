@@ -17,6 +17,7 @@ import professionals_awardsM from '../../models/app/users/professionals_awardsM'
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
 import app_exchangeM from '../../models/markets/app_exchangeM';
+import { resolveFundsRaisedCompanyStages, syndicateDetectionStages } from '../../modules/funding/funding.queries';
 
 interface UserDetailsResponse {
     status: boolean;
@@ -40,6 +41,118 @@ interface UserDetailParams {
     user_row_id: number;
     query: any;
     headers: any;
+}
+
+/**
+ * Builds the aggregation pipeline for an investor's public "funds invested"
+ * list (used by getUserOtherDetails). Extracted as a pure, exported function so
+ * it's independently testable without mocking the rest of getUserOtherDetails'
+ * many other dependencies. Reuses the shared resolveFundsRaisedCompanyStages
+ * and syndicateDetectionStages builders from modules/funding/funding.queries —
+ * this block was previously duplicated inline, field-for-field identical to
+ * what those two builders already produce.
+ */
+export function buildFundsInvestedListPipeline(investorRowId: number, query: any): any[] {
+    let raised_search_query: any = [{ verified_status: 1, investor_type: 1, investor_registered_type: 1, investor_row_id: investorRowId }]
+
+    if (query.start_date) {
+        const start_date = createDateTime(query.start_date);
+        if (start_date) {
+            raised_search_query.push({ announcement_date: { $gte: new Date(start_date) } })
+        }
+    }
+
+    if (query.end_date) {
+        const end_date = createEndDateOnly(query.end_date);
+        if (end_date) {
+            raised_search_query.push({ announcement_date: { $lte: new Date(end_date) } })
+        }
+    }
+    if (query.investor_category_row_id) {
+        raised_search_query.push({ investor_category_row_id: Number.parseInt(query.investor_category_row_id) });
+    }
+
+    let sort_order: any = { announcement_date: -1 }
+
+    if (!Number.isNaN(Number.parseInt(query.sort_order))) {
+        if (query.sort_order == 1) {
+            sort_order = { amount: -1 }
+        }
+        else if (query.sort_order == 2) {
+            sort_order = { amount: 1 }
+        }
+    }
+
+    if (query.category_row_id) {
+        raised_search_query.push({ category_row_id: Number.parseInt(query.category_row_id) });
+    }
+
+    const pipeline: any[] = [
+        { $match: { $and: raised_search_query } },
+        { $sort: sort_order },
+        {
+            $lookup: {
+                from: "cln_static_company_funding_rounds",
+                localField: "category_row_id",
+                foreignField: "_id",
+                as: "category_info"
+            }
+        },
+        { $unwind: { path: "$category_info", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup: {
+                from: "cln_static_funding_investor_types",
+                localField: "investor_category_row_id",
+                foreignField: "_id",
+                as: "investor_category_info",
+                pipeline: [{ $project: { category_name: 1 } }]
+            }
+        },
+        { $unwind: { path: "$investor_category_info", preserveNullAndEmptyArrays: true } },
+        ...resolveFundsRaisedCompanyStages({ rich: true }),
+        ...syndicateDetectionStages()
+    ];
+
+    if (query.search) {
+        pipeline.push({
+            $match: {
+                $or: [
+                    { "company_data.company_name": { $regex: query.search, $options: "i" } },
+                    { "company_data.company_id": { $regex: query.search, $options: "i" } }
+                ]
+            }
+        });
+    }
+
+    pipeline.push({
+        $project: {
+            _id: 1,
+            round_id: 1,
+            investor_row_id: 1,
+            investor_type: 1,
+            investor_registered_type: 1,
+            funds_raised_registered_type: 1,
+            funds_raised_company_row_id: 1,
+            company_approval_status: "$company_data.approval_status",
+            company_active_status: "$company_data.active_status",
+            company_row_id: "$company_data._id",
+            company_name: "$company_data.company_name",
+            company_id: "$company_data.company_id",
+            company_email_id: "$company_data.company_email_id",
+            website_link: "$company_data.website_link",
+            company_logo: "$company_data.company_logo",
+            announcement_date: 1,
+            category_row_id: 1,
+            amount: 1,
+            investor_category_row_id: 1,
+            investor_category_name: "$investor_category_info.category_name",
+            category_name: "$category_info.category_name",
+            round_investor_count: 1,
+            is_syndicate: 1
+        }
+    });
+
+    return pipeline;
 }
 
 export const getUserOtherDetails = async ({ username, user_row_id, query, headers }: UserDetailParams): Promise<UserDetailsResponse> => {
@@ -406,208 +519,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                     resultArray['user_experience'] = users_experience_qery
                 }
 
-                let raised_search_query: any = [{ verified_status: 1, investor_type: 1, investor_registered_type: 1, investor_row_id: query_run._id }]
-
-                if (query.start_date) {
-                    const start_date = createDateTime(query.start_date);
-                    if (start_date) {
-                        raised_search_query.push({ announcement_date: { $gte: new Date(start_date) } })
-                    }
-                }
-
-                if (query.end_date) {
-                    const end_date = createEndDateOnly(query.end_date);
-                    if (end_date) {
-                        raised_search_query.push({ announcement_date: { $lte: new Date(end_date) } })
-                    }
-                }
-                if (query.investor_category_row_id) {
-                    raised_search_query.push({ investor_category_row_id: Number.parseInt(query.investor_category_row_id) });
-                }
-
-                let sort_order: any = { announcement_date: -1 }
-
-                if (!Number.isNaN(Number.parseInt(query.sort_order))) {
-                    if (query.sort_order == 1) {
-                        sort_order = { amount: -1 }
-                    }
-                    else if (query.sort_order == 2) {
-                        sort_order = { amount: 1 }
-                    }
-                }
-
-                if (query.category_row_id) {
-                    raised_search_query.push({ category_row_id: Number.parseInt(query.category_row_id) });
-                }
-
-                // Build the base pipeline
-                const pipeline: any = [
-                    { $match: { $and: raised_search_query } },
-                    { $sort: sort_order },
-                    {
-                        $lookup: {
-                            from: "cln_static_company_funding_rounds",
-                            localField: "category_row_id",
-                            foreignField: "_id",
-                            as: "category_info"
-                        }
-                    },
-                    { $unwind: { path: "$category_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup: {
-                            from: "cln_static_funding_investor_types",
-                            localField: "investor_category_row_id",
-                            foreignField: "_id",
-                            as: "investor_category_info",
-                            pipeline: [{ $project: { category_name: 1 } }]
-                        }
-                    },
-                    { $unwind: { path: "$investor_category_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup: {
-                            from: "cln_company_lists",
-                            let: {
-                                funds_raised_registered_type: '$funds_raised_registered_type',
-                                funds_raised_company_row_id: '$funds_raised_company_row_id'
-                            },
-                            as: "company_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $and: [
-                                            {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$funds_raised_registered_type'] },
-                                                        { $eq: ['$_id', '$$funds_raised_company_row_id'] }
-                                                    ]
-                                                }
-                                            },
-                                            { active_status: 1 }
-                                        ]
-                                    }
-                                },
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        company_id: 1,
-                                        company_logo: 1,
-                                        company_name: 1,
-                                        company_email_id: 1,
-                                        website_link: 1,
-                                        active_status: 1,
-                                        approval_status: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup: {
-                            from: "cln_company_manual_retrievals",
-                            let: {
-                                funds_raised_registered_type: '$funds_raised_registered_type',
-                                funds_raised_company_row_id: '$funds_raised_company_row_id'
-                            },
-                            as: "manual_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, '$$funds_raised_registered_type'] },
-                                                { $eq: ['$_id', '$$funds_raised_company_row_id'] }
-                                            ]
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $set: {
-                            company_data: {
-                                $cond: {
-                                    if: { $eq: ['$funds_raised_registered_type', 1] },
-                                    then: "$company_info",
-                                    else: "$manual_info"
-                                }
-                            }
-                        }
-                    },
-                    {
-                        $match: {
-                            company_data: { $nin: ["", null] }
-                        }
-                    },
-                    // Self-lookup: count how many total rows (across all investors) share this
-                    // row's round_id, to detect syndicate (multi-investor) rounds. Used to show
-                    // a "co-invested as part of a syndicate" disclosure on this public page.
-                    {
-                        $lookup: {
-                            from: "cln_funding_investment_lists",
-                            let: { round_id: "$round_id" },
-                            as: "round_investor_rows",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: { $eq: ["$round_id", "$$round_id"] }
-                                    }
-                                },
-                                { $project: { _id: 1 } }
-                            ]
-                        }
-                    },
-                    {
-                        $set: {
-                            round_investor_count: { $size: "$round_investor_rows" },
-                            is_syndicate: { $gt: [{ $size: "$round_investor_rows" }, 1] }
-                        }
-                    }
-                ];
-
-                // Apply search filter conditionally
-                if (query.search) {
-                    pipeline.push({
-                        $match: {
-                            $or: [
-                                { "company_data.company_name": { $regex: query.search, $options: "i" } },
-                                { "company_data.company_id": { $regex: query.search, $options: "i" } }
-                            ]
-                        }
-                    });
-                }
-
-                // Final projection
-                pipeline.push({
-                    $project: {
-                        _id: 1,
-                        round_id: 1,
-                        investor_row_id: 1,
-                        investor_type: 1,
-                        investor_registered_type: 1,
-                        funds_raised_registered_type: 1,
-                        funds_raised_company_row_id: 1,
-                        company_approval_status: "$company_data.approval_status",
-                        company_active_status: "$company_data.active_status",
-                        company_row_id: "$company_data._id",
-                        company_name: "$company_data.company_name",
-                        company_id: "$company_data.company_id",
-                        company_email_id: "$company_data.company_email_id",
-                        website_link: "$company_data.website_link",
-                        company_logo: "$company_data.company_logo",
-                        announcement_date: 1,
-                        category_row_id: 1,
-                        amount: 1,
-                        investor_category_row_id: 1,
-                        investor_category_name: "$investor_category_info.category_name",
-                        category_name: "$category_info.category_name",
-                        round_investor_count: 1,
-                        is_syndicate: 1
-                    }
-                });
+                const pipeline = buildFundsInvestedListPipeline(query_run._id, query)
 
                 // 🟢 Run aggregation
                 resultArray['funds_invested_list'] = await fundingInvestmentM.aggregate(pipeline);

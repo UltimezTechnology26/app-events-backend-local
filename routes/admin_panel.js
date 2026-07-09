@@ -35,7 +35,7 @@ const requests_to_partners = require('../controllers/admin_panel/app/company/req
 const company_approvals = require('../controllers/admin_panel/app/company_approvals')
 const admin_feedback = require('../controllers/admin_panel/app/feedback')
 const company_employees = require('../controllers/admin_panel/app/company_employees')
-const funding = require('../controllers/admin_panel/app/funding')
+const { fundingRouter } = require('../modules/funding/funding.controller')
 const notifications = require('../controllers/admin_panel/app/notifications')
 const push_notification = require('../controllers/admin_panel/app/notifications/push_notification')
 
@@ -117,7 +117,7 @@ router.use('/sub_admin', sub_admin)
 router.use('/sub_admin_auth', sub_admin_auth)
 router.use('/company_approvals', company_approvals)
 router.use('/feedback', admin_feedback)
-router.use('/funding', funding)
+router.use('/funding', fundingRouter)
 router.use('/notifications', notifications)
 router.use('/notifications/push_notification', push_notification)
 

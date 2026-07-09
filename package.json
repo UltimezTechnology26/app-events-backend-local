@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "engines": {
         "node": "22.22.0"
-    },  
+    },
     "description": "app and events",
     "main": "index.js",
     "scripts": {
@@ -84,6 +84,7 @@
         "@types/supertest": "^6.0.3",
         "jest": "^30.2.0",
         "supertest": "^7.0.0",
+        "ts-jest": "^29.4.11",
         "ts-node": "^10.9.2",
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.9.3"
