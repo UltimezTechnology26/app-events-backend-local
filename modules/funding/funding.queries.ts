@@ -1,10 +1,75 @@
 import type { PipelineStage } from 'mongoose'
+import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
+
+/**
+ * Builds a Mongo aggregation expression that joins a resolved positions[] array
+ * (as produced by getPositionResolutionStages()) into a single display string,
+ * for consumers that can only show one position_name value per person. Mirrors
+ * utils/helpers/app_helper.js's joinPositionNames join convention — filter out
+ * falsy/unresolved names, then join with ", " except the last pair joined with
+ * " and" (2 names -> "A and B"; 3+ names -> "A, B and C") — ported as a Mongo
+ * expression (not a plain JS post-processing step, and without the JS helper's
+ * capitalizeWords() call, since position_name values here are already stored/
+ * resolved names) because this runs inside the aggregation pipeline itself, on
+ * a single matched work-experience document's positions[] array, not on a
+ * plain JS array after the query returns.
+ *
+ * Exported (not just used internally) because services/app/linkPageServices.ts's
+ * report_list_type 2/3/4 sections and getPopularProfessionalsDetails need the
+ * identical join convention for their own nested work-experience position
+ * resolution — linkPageServices.ts already imports resolveFundsRaisedCompanyStages
+ * and syndicateDetectionStages from this module, so reusing this export follows
+ * that same established precedent rather than duplicating the logic a 3rd time.
+ */
+export function joinPositionNamesExpr(positionsArrayField: string): object {
+  const names = {
+    $filter: {
+      input: { $map: { input: positionsArrayField, as: 'p', in: '$$p.position_name' } },
+      as: 'n',
+      cond: { $and: [{ $ne: ['$$n', null] }, { $ne: ['$$n', ''] }] }
+    }
+  }
+
+  return {
+    $let: {
+      vars: { names },
+      in: {
+        $switch: {
+          branches: [
+            { case: { $eq: [{ $size: '$$names' }, 0] }, then: '' },
+            { case: { $eq: [{ $size: '$$names' }, 1] }, then: { $arrayElemAt: ['$$names', 0] } }
+          ],
+          default: {
+            $concat: [
+              {
+                $reduce: {
+                  input: { $slice: ['$$names', 0, { $subtract: [{ $size: '$$names' }, 1] }] },
+                  initialValue: '',
+                  in: { $cond: { if: { $eq: ['$$value', ''] }, then: '$$this', else: { $concat: ['$$value', ', ', '$$this'] } } }
+                }
+              },
+              ' and ',
+              { $arrayElemAt: ['$$names', { $subtract: [{ $size: '$$names' }, 1] }] }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
 
 /**
  * Nested lookups added inside the "rich" professional resolution branch:
  * profile image + most recent public work experience (position + employer name).
  * userAccountType distinguishes registered (1) vs manual (2) professionals, since
- * cln_professionals_work_experiences filters on it.
+ * cln_professionals_work_experiences filters on it. Position resolution uses
+ * getPositionResolutionStages() to resolve the FULL positions[] array (both
+ * cln_static_professionals_work_positions and cln_manual_user_positions sources,
+ * plus its own legacy-field fallback for pre-migration docs) for the single
+ * latest-work-experience document already isolated by $match/$sort/$limit above,
+ * then joins any multiple resolved names into one display string via
+ * joinPositionNamesExpr — this feeds a single position_name field (resolveInvestorStages
+ * below), not a UI that renders individual position chips.
  */
 function richProfessionalNestedLookups(userAccountType: 1 | 2): PipelineStage[] {
   return [
@@ -26,16 +91,8 @@ function richProfessionalNestedLookups(userAccountType: 1 | 2): PipelineStage[] 
           { $match: { public_view: true, user_account_type: userAccountType } },
           { $sort: { start_date: -1 } },
           { $limit: 1 },
-          {
-            $lookup: {
-              from: 'cln_static_professionals_work_positions',
-              localField: 'position_row_id',
-              foreignField: '_id',
-              as: 'info_position',
-              pipeline: [{ $project: { _id: 1, position_name: 1 } }]
-            }
-          },
-          { $unwind: { path: '$info_position', preserveNullAndEmptyArrays: true } },
+          ...getPositionResolutionStages(),
+          { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
           {
             $lookup: {
               from: 'cln_company_lists',
@@ -69,7 +126,7 @@ function richProfessionalNestedLookups(userAccountType: 1 | 2): PipelineStage[] 
           { $unwind: { path: '$info_manual_company', preserveNullAndEmptyArrays: true } },
           {
             $project: {
-              position_name: '$info_position.position_name',
+              position_name: '$resolved_position_name',
               company_name: {
                 $cond: { if: '$info_company.company_name', then: '$info_company.company_name', else: '$info_manual_company.company_name' }
               }

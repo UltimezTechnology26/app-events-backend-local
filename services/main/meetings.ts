@@ -1,5 +1,7 @@
 import meetingM from "../../models/app/meetings/meetingM";
 import redisCache, { CacheDuration } from "../../config/redis";
+import { getPositionResolutionStages } from "../../modules/work-experience/work-experience.queries";
+import { joinPositionNamesExpr } from "../../modules/funding/funding.queries";
 
 export const getMeetingList = async (req: any, company_row_id: number, user_row_id: string) => {
     try {
@@ -169,24 +171,8 @@ export const getMeetingList = async (req: any, company_row_id: number, user_row_
                         { $match: { public_view: true, user_account_type: 1 } },//,public_view:true
                         { $sort: { start_date: -1 } },
                         { $limit: 1 },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_static_professionals_work_positions",
-                                localField: "position_row_id",
-                                foreignField: "_id",
-                                as: "info_position",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                        ...getPositionResolutionStages(),
+                        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
                         {
                             $lookup:
                             {
@@ -249,7 +235,7 @@ export const getMeetingList = async (req: any, company_row_id: number, user_row_
                         { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                         {
                             $project: {
-                                position_name: "$info_position.position_name",
+                                position_name: "$resolved_position_name",
                                 company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
                             }
                         },
@@ -284,23 +270,8 @@ export const getMeetingList = async (req: any, company_row_id: number, user_row_
                         { $match: { public_view: true, user_account_type: 1 } },
                         { $sort: { start_date: -1 } },
                         { $limit: 1 },
-                        {
-                            $lookup: {
-                                from: "cln_static_professionals_work_positions",
-                                localField: "position_row_id",
-                                foreignField: "_id",
-                                as: "info_position",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                        ...getPositionResolutionStages(),
+                        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
                         {
                             $lookup: {
                                 from: "cln_company_lists",
@@ -362,7 +333,7 @@ export const getMeetingList = async (req: any, company_row_id: number, user_row_
                         {
                             $project: {
                                 user_row_id: 1, // 👈 keep this for mapping later
-                                position_name: "$info_position.position_name",
+                                position_name: "$resolved_position_name",
                                 company_name: {
                                     $cond: {
                                         if: "$info_company.company_name",

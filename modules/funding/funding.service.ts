@@ -104,7 +104,8 @@ const { getPresentDateTime } = require('../../utils/helpers/helper')
 const { updateNotification } = require('../../utils/helpers/notification_helper')
 const { calculateUserProfileScore, calculateCompanyProfileScore } = require('../../utils/helpers/app_helper')
 import { invalidateFundingCaches } from './funding.cache'
-import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview } from './funding.queries'
+import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview, joinPositionNamesExpr } from './funding.queries'
+import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
 
 /**
  * Merged funds_raised_update_details (app + admin). Insert: one new round_id
@@ -794,14 +795,14 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
         as: 'outer_info_work',
         pipeline: [
           { $match: { $and: [{ user_row_id: { $nin: ['', null] } }, { $expr: { $and: [{ $eq: ['$user_row_id', '$$user_row_id'] }, { $eq: [1, '$$investor_type'] }, { $eq: ['$public_view', true] }, { $eq: ['$user_account_type', '$$investor_registered_type'] }] } }] } },
-          { $lookup: { from: 'cln_static_professionals_work_positions', localField: 'position_row_id', foreignField: '_id', as: 'info_position', pipeline: [{ $project: { _id: 1, position_name: 1 } }] } },
-          { $unwind: { path: '$info_position', preserveNullAndEmptyArrays: true } },
           { $limit: 1 },
+          ...getPositionResolutionStages(),
+          { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
           { $lookup: { from: 'cln_company_lists', let: { company_type: '$company_type', company_row_id: '$company_row_id' }, as: 'info_company', pipeline: [{ $match: { $expr: { $and: [{ $eq: [1, '$$company_type'] }, { $eq: ['$_id', '$$company_row_id'] }] } } }, { $project: { _id: 1, company_name: 1 } }] } },
           { $unwind: { path: '$info_company', preserveNullAndEmptyArrays: true } },
           { $lookup: { from: 'cln_company_manual_retrievals', let: { company_type: '$company_type', company_row_id: '$company_row_id' }, as: 'info_manual_company', pipeline: [{ $match: { $expr: { $and: [{ $eq: [2, '$$company_type'] }, { $eq: ['$_id', '$$company_row_id'] }] } } }, { $project: { _id: 1, company_name: 1 } }] } },
           { $unwind: { path: '$info_manual_company', preserveNullAndEmptyArrays: true } },
-          { $project: { position_name: '$info_position.position_name', company_name: { $cond: { if: '$info_company.company_name', then: '$info_company.company_name', else: '$info_manual_company.company_name' } } } }
+          { $project: { position_name: '$resolved_position_name', company_name: { $cond: { if: '$info_company.company_name', then: '$info_company.company_name', else: '$info_manual_company.company_name' } } } }
         ]
       }
     },

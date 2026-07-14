@@ -12,6 +12,7 @@ const { getCompanyListDetails, getPartnerListDetails, getCompanyIndividualDetail
 const { setCache, getCache } = require('../../../config/cache_helper')
 const { getTokenList, filterTokens, getCompanyProducts, getMatchedProducts, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { updateThreadNotification } = require('../../../utils/helpers/notification_helper')
+const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
 const JWT_CLAIM_SECRET_KEY = process.env.JWT_CLAIM_SECRET_KEY
 
 
@@ -9778,24 +9779,7 @@ router.get('/team_members', async (req, res) => {
 
         if (company_row_id_array) {
             const get_query = await professionals_work_experienceM.aggregate([
-                {
-                    $lookup:
-                    {
-                        from: "cln_static_professionals_work_positions",
-                        localField: "position_row_id",
-                        foreignField: "_id",
-                        as: "info_position",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1,
-                                    position_name: 1
-                                }
-                            }
-                        ]
-                    }
-                },
-                { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                ...getPositionResolutionStages(),
                 {
                     $lookup:
                     {
@@ -9941,7 +9925,7 @@ router.get('/team_members', async (req, res) => {
                         verified_status: 1,
                         verified_on: 1,
                         employment_type: 1,
-                        position_name: "$info_position.position_name",
+                        positions: 1,
                         location_type: 1,
                         designation_type: 1,
                         start_date: 1,

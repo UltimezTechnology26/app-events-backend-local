@@ -10,6 +10,219 @@ const { sendEventsEmail, sendEmail } = require('../../../config/email')
 const { DateFormatter, checkAttendee, deleteEvent, checkEventRowID, speakers_email, checkSubadminAccess, filterQuery, getEventsData, checkSpeaker, updateAttendeesCount, generateEventCard } = require('../../../utils/helpers/events_helper')
 const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { updateThreadNotification, updateNotification } = require('../../../utils/helpers/notification_helper')
+const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+
+/**
+ * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
+ * `info_work` lookup inside GET /speakers_list/:event_row_id. This was one of 2
+ * genuinely-broken locations in this file: it previously looked up positions from
+ * a misnamed collection ("users" instead of "professionals" in the name) that DOES
+ * NOT EXIST, so this lookup always returned empty and position_name was always
+ * blank. Now resolves position name(s)
+ * via getPositionResolutionStages() (both cln_static_professionals_work_positions
+ * and cln_manual_user_positions), joined into a single display string via
+ * joinPositionNamesExpr — fixing the typo/wrong-collection bug as a side effect of
+ * reusing the shared resolver. Downstream, the outer pipeline's final $project
+ * still reads `position_name` from `$info_work.position_name` — unchanged shape.
+ * `{ $limit: 1 }` kept in its original position: after position resolution, before
+ * company lookups.
+ */
+function buildSpeakersListInfoWorkPipeline() {
+    return [
+        {
+            $match: {
+                $and: [
+                    { user_row_id: { $nin: ["", null] } },
+                    {
+                        $expr: {
+                            $and: [
+                                { $eq: ['$user_row_id', '$$user_row_id'] },
+                                { $eq: ['$public_view', true] },
+                                { $eq: ['$user_account_type', '$$user_type'] }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        { $limit: 1 },
+        {
+            $lookup:
+            {
+                from: "cln_company_lists",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $and: [
+                                { active_status: 1 },
+                                {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: [1, '$$company_type'] },
+                                            { $eq: ['$_id', "$$company_row_id"] }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1,
+                            company_email_id: 1,
+                            company_logo: 1,
+                            website_link: 1,
+                            country_id: 1,
+                            company_location: 1,
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_company_manual_retrievals",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_manual_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1,
+                            company_email_id: 1,
+                            company_logo: 1,
+                            website_link: 1,
+                            country_id: 1,
+                            company_location: 1,
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                position_name: '$resolved_position_name',
+                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
+                company_email_id: { $cond: { if: "$info_company.company_email_id", then: "$info_company.company_email_id", else: "$info_manual_company.company_email_id" } },
+                company_logo: { $cond: { if: "$info_company.company_logo", then: "$info_company.company_logo", else: "$info_manual_company.company_logo" } },
+                website_link: { $cond: { if: "$info_company.website_link", then: "$info_company.website_link", else: "$info_manual_company.website_link" } },
+                country_id: { $cond: { if: "$info_company.country_id", then: "$info_company.country_id", else: "$info_manual_company.country_id" } },
+                company_location: { $cond: { if: "$info_company.company_location", then: "$info_company.company_location", else: "$info_manual_company.company_location" } },
+            }
+        }
+    ]
+}
+
+/**
+ * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
+ * `info_work` lookup inside GET /events_tags' `user_query` sub-aggregate. This was
+ * the 2nd genuinely-broken location in this file with the same misnamed/nonexistent
+ * collection bug as buildSpeakersListInfoWorkPipeline above — fixed the same way, via
+ * getPositionResolutionStages() + joinPositionNamesExpr. Downstream, the outer
+ * pipeline's final $project still reads `position_name` from
+ * `$info_work.position_name` — unchanged shape. Kept as a SEPARATE function (not
+ * merged with buildSpeakersListInfoWorkPipeline) since the two routes' surrounding
+ * pipelines are independent and may diverge later.
+ */
+function buildEventsTagsUserInfoWorkPipeline() {
+    return [
+        { $match: { public_view: true, user_account_type: 1 } },
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        { $limit: 1 },
+        {
+            $lookup:
+            {
+                from: "cln_company_lists",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [1, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_company_manual_retrievals",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_manual_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                position_name: '$resolved_position_name',
+                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
+            }
+        }
+    ]
+}
 import agenda from "../../../config/agenda"
 const puppeteer = require("puppeteer");
 
@@ -739,129 +952,7 @@ router.get('/speakers_list/:event_row_id', async (req, res) => {
                         user_type: '$user_type',
                         user_row_id: '$user_data._id'
                     },
-                    pipeline: [
-                        {
-                            $match: {
-                                $and: [
-                                    { user_row_id: { $nin: ["", null] } },
-                                    {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: ['$user_row_id', '$$user_row_id'] },
-                                                { $eq: ['$public_view', true] },
-                                                { $eq: ['$user_account_type', '$$user_type'] }
-                                            ]
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_static_users_work_positions",
-                                localField: "position_row_id",
-                                foreignField: "_id",
-                                as: "info_position",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                        { $limit: 1 },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_company_lists",
-                                let: {
-                                    company_type: '$company_type',
-                                    company_row_id: '$company_row_id'
-                                },
-                                as: "info_company",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $and: [
-                                                { active_status: 1 },
-                                                {
-                                                    $expr: {
-                                                        $and: [
-                                                            { $eq: [1, '$$company_type'] },
-                                                            { $eq: ['$_id', "$$company_row_id"] }
-                                                        ]
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            company_name: 1,
-                                            company_email_id: 1,
-                                            company_logo: 1,
-                                            website_link: 1,
-                                            country_id: 1,
-                                            company_location: 1,
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_company_manual_retrievals",
-                                let: {
-                                    company_type: '$company_type',
-                                    company_row_id: '$company_row_id'
-                                },
-                                as: "info_manual_company",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [2, '$$company_type'] },
-                                                    { $eq: ['$_id', "$$company_row_id"] }
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            company_name: 1,
-                                            company_email_id: 1,
-                                            company_logo: 1,
-                                            website_link: 1,
-                                            country_id: 1,
-                                            company_location: 1,
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                        {
-                            $project: {
-                                position_name: '$info_position.position_name',
-                                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
-                                company_email_id: { $cond: { if: "$info_company.company_email_id", then: "$info_company.company_email_id", else: "$info_manual_company.company_email_id" } },
-                                company_logo: { $cond: { if: "$info_company.company_logo", then: "$info_company.company_logo", else: "$info_manual_company.company_logo" } },
-                                website_link: { $cond: { if: "$info_company.website_link", then: "$info_company.website_link", else: "$info_manual_company.website_link" } },
-                                country_id: { $cond: { if: "$info_company.country_id", then: "$info_company.country_id", else: "$info_manual_company.country_id" } },
-                                company_location: { $cond: { if: "$info_company.company_location", then: "$info_company.company_location", else: "$info_manual_company.company_location" } },
-                            }
-                        }
-                    ],
+                    pipeline: buildSpeakersListInfoWorkPipeline(),
                     as: "info_work",
                 }
             },
@@ -1494,94 +1585,7 @@ router.get('/events_tags', async (req, res) => {
                         from: "cln_professionals_work_experiences",
                         localField: "_id",
                         foreignField: "user_row_id",
-                        pipeline: [
-                            { $match: { public_view: true, user_account_type: 1 } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_static_users_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                position_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            { $limit: 1 },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_lists",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_manual_retrievals",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_manual_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [2, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $project: {
-                                    position_name: '$info_position.position_name',
-                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
-                                }
-                            }
-                        ],
+                        pipeline: buildEventsTagsUserInfoWorkPipeline(),
                         as: "info_work",
                     }
                 },
@@ -3671,5 +3675,8 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
 
 
 
+
+router.buildSpeakersListInfoWorkPipeline = buildSpeakersListInfoWorkPipeline
+router.buildEventsTagsUserInfoWorkPipeline = buildEventsTagsUserInfoWorkPipeline
 
 module.exports = router

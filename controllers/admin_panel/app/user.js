@@ -8,7 +8,9 @@ const { arrangeValidation, validateAndSaveImage, getPresentDateOnly, getMinusDat
 const { checkAdminLoginToken, generateUserLoginToken, checkApiKey } = require('../../../middleware/authorization')
 const { sendEmail } = require('../../../config/email')
 const { shiftUserFromManualToRegister } = require('../../../utils/helpers/events_helper')
-const { addManualPosition, deleteUserDetais, deleteProfessionalDetails, calculateUserProfileScore, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
+const { deleteUserDetais, deleteProfessionalDetails, calculateUserProfileScore, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
+const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
 const MARKET_API_BASE_URL = process.env.MARKET_API_BASE_URL
 const MARKET_API_KEY = process.env.MARKET_API_KEY
 
@@ -51,7 +53,6 @@ const usersFollowersM = require('../../../models/app/professionals_followersM')
 const companyFollowersM = require('../../../models/app/company/followersM')
 const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
 const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
-const professional_positionsM = require('../../../models/app/static/professional_positionsM')
 const professionals_manual_retrievalsM = require('../../../models/app/users/professionals_manual_retrievalsM')
 const event_attendeesM = require('../../../models/app/events/event_attendeesM')
 const deleted_eventsM = require('../../../models/app/events/deleted_eventsM')
@@ -1273,40 +1274,8 @@ router.get('/list/:skip/:limit', async (req, res) => {
                         foreignField: "user_row_id",
                         pipeline: [
                             { $match: { public_view: true, user_account_type: 1 } },
-                            {
-                                $lookup: {
-                                    from: "cln_static_professionals_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [{ $project: { _id: 1, position_name: 1 } }]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup: {
-                                    from: "cln_manual_user_positions",
-                                    let: {
-                                        position_type: '$position_type',
-                                        sub_position_row_id: '$sub_position_row_id'
-                                    },
-                                    as: "manual_position_info",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [2, "$$position_type"] },
-                                                        { $eq: ["$_id", "$$sub_position_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        { $project: { _id: 1, position_name: 1 } }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$manual_position_info", preserveNullAndEmptyArrays: true } },
+                            ...getPositionResolutionStages(),
+                            { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
                             { $limit: 1 },
                             {
                                 $lookup: {
@@ -1358,13 +1327,8 @@ router.get('/list/:skip/:limit', async (req, res) => {
                             { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                             {
                                 $project: {
-                                    position_name: {
-                                        $cond: {
-                                            if: { $eq: ["$position_type", 2] },
-                                            then: "$manual_position_info.position_name",
-                                            else: "$info_position.position_name"
-                                        }
-                                    },
+                                    position_name: '$resolved_position_name',
+                                    positions: 1,
                                     company_name: {
                                         $cond: {
                                             if: "$info_company.company_name",
@@ -1434,6 +1398,7 @@ router.get('/list/:skip/:limit', async (req, res) => {
                         email_verify_status: 1,
                         approval_status: 1,
                         position_name: "$info_work.position_name",
+                        positions: "$info_work.positions",
                         company_name: "$info_work.company_name",
                         sub_admin_name: "$sub_admin_info.full_name",
                         sub_admin_row_id: 1,
@@ -1947,42 +1912,8 @@ router.get('/disabled/:skip/:limit', async (req, res) => {
                         foreignField: "user_row_id",
                         pipeline: [
                             { $match: { public_view: true, user_account_type: 1 } },
-                            // {
-                            //     $lookup:
-                            //     {
-                            //         from: "cln_static_professionals_work_positions",
-                            //         localField: "position_row_id",
-                            //         foreignField: "_id",
-                            //         as: "info_position",
-                            //         pipeline: [
-                            //             {
-                            //                 $project: {
-                            //                     _id: 1,
-                            //                     position_name: 1
-                            //                 }
-                            //             }
-                            //         ]
-                            //     }
-                            // },
-                            // { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_static_professionals_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                position_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                            ...getPositionResolutionStages(),
+                            { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
                             { $limit: 1 },
                             {
                                 $lookup:
@@ -2046,7 +1977,8 @@ router.get('/disabled/:skip/:limit', async (req, res) => {
                             { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                             {
                                 $project: {
-                                    position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
+                                    position_name: '$resolved_position_name',
+                                    positions: 1,
                                     company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
                                 }
                             }
@@ -2069,6 +2001,7 @@ router.get('/disabled/:skip/:limit', async (req, res) => {
                         email_id: 1,
                         email_verify_status: 1,
                         position_name: "$info_work.position_name",
+                        positions: "$info_work.positions",
                         company_name: "$info_work.company_name",
                         sub_admin_name: "$sub_admin_info.full_name",
                         sub_admin_row_id: 1,
@@ -4061,6 +3994,52 @@ router.get('/claim_request_pending/:skip/:limit', async (req, res) => {
                 },
                 { $match: { $and: query } },
                 {
+                    $lookup: {
+                        from: "cln_professionals_work_experiences",
+                        localField: "user_row_id",
+                        foreignField: "user_row_id",
+                        pipeline: [
+                            { $match: { public_view: true, user_account_type: 1 } },
+                            ...getPositionResolutionStages(),
+                            { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+                            { $limit: 1 },
+                            {
+                                $lookup: {
+                                    from: "cln_company_lists",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [1, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $lookup: {
+                                    from: "cln_company_manual_retrievals",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_manual_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [2, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $project: {
+                                    position_name: '$resolved_position_name',
+                                    positions: 1,
+                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
+                                }
+                            }
+                        ],
+                        as: "info_work"
+                    }
+                },
+                { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
+                {
                     $project: {
                         _id: 1,
                         user_row_id: 1,
@@ -4072,7 +4051,10 @@ router.get('/claim_request_pending/:skip/:limit', async (req, res) => {
                         login_status: "$user_info.login_status",
                         approval_status: "$user_info.approval_status",
                         full_name: "$user_info.full_name",
-                        existing_email_id: "$user_info.email_id"
+                        existing_email_id: "$user_info.email_id",
+                        position_name: "$info_work.position_name",
+                        positions: "$info_work.positions",
+                        company_name: "$info_work.company_name"
                     }
                 }
             ]).skip(skip).limit(limit)
@@ -4585,522 +4567,6 @@ router.get('/view_claim/:request_row_id', async (req, res) => {
 
 // professional details
 
-router.get('/individual_professional_details/:professional_details_id', async (req, res) => {
-    const checkToken = checkAdminLoginToken(req.headers, [1])
-    if (checkToken.status) {
-        try {
-            const professional_details_id = Number.parseInt(req.params.professional_details_id)
-            if (!Number.isNaN(professional_details_id)) {
-                const get_query = await professionals_work_experienceM.aggregate([
-                    { $match: { _id: professional_details_id } },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_static_professionals_work_positions",
-                            localField: "position_row_id",
-                            foreignField: "_id",
-                            as: "info_position",
-                            pipeline: [
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        position_name: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_manual_user_positions",
-                            let: {
-                                position_type: '$position_type',
-                                sub_position_row_id: '$sub_position_row_id'
-                            },
-                            as: "manual_position_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, "$$position_type"] },
-                                                { $eq: ["$_id", "$$sub_position_row_id"] }
-                                            ]
-                                        }
-                                    }
-                                },
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        position_name: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$manual_position_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup: {
-                            from: "cln_static_professionals_work_positions",
-                            let: { positions: { $ifNull: ["$positions", []] } },
-                            as: "resolved_static_positions",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $in: ["$_id", { $map: { input: "$$positions", as: "p", in: "$$p.position_row_id" } }]
-                                        }
-                                    }
-                                },
-                                { $project: { _id: 1, position_name: 1 } }
-                            ]
-                        }
-                    },
-                    {
-                        $lookup: {
-                            from: "cln_manual_user_positions",
-                            let: { positions: { $ifNull: ["$positions", []] } },
-                            as: "resolved_manual_positions",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $in: ["$_id", { $map: { input: "$$positions", as: "p", in: "$$p.sub_position_row_id" } }]
-                                        }
-                                    }
-                                },
-                                { $project: { _id: 1, position_name: 1 } }
-                            ]
-                        }
-                    },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_company_lists",
-                            let: {
-                                company_type: '$company_type',
-                                company_row_id: '$company_row_id'
-                            },
-                            as: "company_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [1, "$$company_type"] },
-                                                { $eq: ["$_id", "$$company_row_id"] }
-                                            ]
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_company_manual_retrievals",
-                            let: {
-                                company_type: '$company_type',
-                                company_row_id: '$company_row_id'
-                            },
-                            as: "manual_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, "$$company_type"] },
-                                                { $eq: ["$_id", "$$company_row_id"] }
-                                            ]
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $set: {
-                            position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
-                            company_name: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_name", else: "$manual_info.company_name" } },
-                            company_logo: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_logo", else: "$manual_info.company_logo" } },
-                            company_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_id", else: "" } },
-                            company_email_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_email_id", else: "$manual_info.company_email_id" } },
-                            positions: {
-                                $cond: {
-                                    if: { $gt: [{ $size: { $ifNull: ["$positions", []] } }, 0] },
-                                    then: {
-                                        $map: {
-                                            input: { $ifNull: ["$positions", []] },
-                                            as: "p",
-                                            in: {
-                                                position_type: "$$p.position_type",
-                                                position_row_id: "$$p.position_row_id",
-                                                sub_position_row_id: "$$p.sub_position_row_id",
-                                                position_name: {
-                                                    $cond: {
-                                                        if: { $eq: ["$$p.position_type", 2] },
-                                                        then: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_manual_positions", cond: { $eq: ["$$this._id", "$$p.sub_position_row_id"] } } }, in: "$$this.position_name" } }, 0] },
-                                                        else: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_static_positions", cond: { $eq: ["$$this._id", "$$p.position_row_id"] } } }, in: "$$this.position_name" } }, 0] }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                    else: [{
-                                        position_type: "$position_type",
-                                        position_row_id: "$position_row_id",
-                                        sub_position_row_id: "$sub_position_row_id",
-                                        position_name: {
-                                            $cond: {
-                                                if: { $eq: ["$position_type", 2] },
-                                                then: "$manual_position_info.position_name",
-                                                else: "$info_position.position_name"
-                                            }
-                                        }
-                                    }]
-                                }
-                            },
-                        }
-                    },
-                    {
-                        $project: {
-                            user_row_id: 1,
-                            position_row_id: 1,
-                            position_type: 1,
-                            position_name: 1,
-                            responsibilities: 1,
-                            employment_type: 1,
-                            location: 1,
-                            till_date_status: 1,
-                            start_date: 1,
-                            end_date: 1,
-                            location_type: 1,
-                            public_view: 1,
-                            company_type: 1,
-                            company_row_id: 1,
-                            company_name: 1,
-                            company_logo: 1,
-                            company_id: 1,
-                            company_email_id: 1,
-                            verified_status: 1,
-                            positions: 1,
-                        }
-                    }
-                ]).limit(1)
-
-                let result = {}
-                if (get_query[0]) {
-                    result['user_row_id'] = get_query[0].user_row_id
-                    result['position_row_id'] = get_query[0].position_row_id
-                    result['position_name'] = get_query[0].position_name
-                    if (get_query[0].position_type) {
-                        result['position_type'] = get_query[0].position_type
-                    }
-                    else {
-                        result['position_type'] = 1
-                    }
-
-                    result['responsibilities'] = get_query[0].responsibilities
-                    result['employment_type'] = get_query[0].employment_type
-                    result['location'] = get_query[0].location
-                    result['till_date_status'] = get_query[0].till_date_status
-                    result['start_date'] = get_query[0].start_date
-                    result['end_date'] = get_query[0].end_date
-                    result['location_type'] = get_query[0].location_type
-                    result['public_view'] = get_query[0].public_view
-                    result['company_type'] = get_query[0].company_type
-                    result['company_row_id'] = get_query[0].company_row_id
-                    result['company_name'] = get_query[0].company_name
-                    result['company_logo'] = get_query[0].company_logo
-                    result['company_id'] = get_query[0].company_id
-                    result['company_email_id'] = get_query[0].company_email_id
-                    result['positions'] = get_query[0].positions
-
-
-                    res.json({ status: true, message: result })
-                }
-                else {
-                    res.json({ status: false, message: { alert_message: 'Sorry, Invalid Professional row id' } })
-                }
-
-            }
-            else {
-                res.json({ status: false, message: { alert_message: 'Sorry, Invalid Professional row id' } })
-            }
-        }
-        catch (err) {
-            console.log('Individual professional details.', err.message)
-            res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
-        }
-    }
-    else {
-        res.json(checkToken)
-    }
-})
-
-router.get('/professional_detail_list/:user_row_id/:skip/:limit', async (req, res) => {
-    const checkToken = checkAdminLoginToken(req.headers, [1])
-    if (checkToken.status) {
-        const user_row_id = Number.parseInt(req.params.user_row_id)
-        try {
-            const skip = !Number.isNaN(Number.parseInt(req.params.skip)) ? Number.parseInt(req.params.skip) : 0
-            const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
-
-            if (!Number.isNaN(user_row_id)) {
-                const check_user = await professionalsM.findOne({ _id: user_row_id })
-                if (check_user) {
-                    const query = await professionals_work_experienceM.aggregate([
-                        {
-                            $lookup:
-                            {
-                                from: "cln_static_professionals_work_positions",
-                                localField: "position_row_id",
-                                foreignField: "_id",
-                                as: "info_position",
-                                pipeline: [
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_manual_user_positions",
-                                let: {
-                                    position_type: '$position_type',
-                                    sub_position_row_id: '$sub_position_row_id'
-                                },
-                                as: "manual_position_info",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [2, "$$position_type"] },
-                                                    { $eq: ["$_id", "$$sub_position_row_id"] }
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$manual_position_info", preserveNullAndEmptyArrays: true } },
-                        {
-                            $lookup: {
-                                from: "cln_static_professionals_work_positions",
-                                let: { positions: { $ifNull: ["$positions", []] } },
-                                as: "resolved_static_positions",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $in: ["$_id", { $map: { input: "$$positions", as: "p", in: "$$p.position_row_id" } }]
-                                            }
-                                        }
-                                    },
-                                    { $project: { _id: 1, position_name: 1 } }
-                                ]
-                            }
-                        },
-                        {
-                            $lookup: {
-                                from: "cln_manual_user_positions",
-                                let: { positions: { $ifNull: ["$positions", []] } },
-                                as: "resolved_manual_positions",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $in: ["$_id", { $map: { input: "$$positions", as: "p", in: "$$p.sub_position_row_id" } }]
-                                            }
-                                        }
-                                    },
-                                    { $project: { _id: 1, position_name: 1 } }
-                                ]
-                            }
-                        },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_company_lists",
-                                let: {
-                                    company_type: '$company_type',
-                                    company_row_id: '$company_row_id'
-                                },
-                                as: "company_info",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $and: [
-                                                {
-                                                    $expr: {
-                                                        $and: [
-                                                            { $eq: [1, "$$company_type"] },
-                                                            { $eq: ["$_id", "$$company_row_id"] }
-                                                        ]
-                                                    }
-                                                },
-                                                {
-                                                    active_status: 1
-                                                }
-                                            ]
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_company_manual_retrievals",
-                                let: {
-                                    company_type: '$company_type',
-                                    company_row_id: '$company_row_id'
-                                },
-                                as: "manual_info",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [2, "$$company_type"] },
-                                                    { $eq: ["$_id", "$$company_row_id"] }
-                                                ]
-                                            }
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
-                        {
-                            $set: {
-                                position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
-                                company_name: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_name", else: "$manual_info.company_name" } },
-                                company_logo: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_logo", else: "$manual_info.company_logo" } },
-                                company_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_id", else: "" } },
-                                company_email_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_email_id", else: "$manual_info.company_email_id" } },
-                                approval_status: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.approval_status", else: 0 } },
-                                positions: {
-                                    $cond: {
-                                        if: { $gt: [{ $size: { $ifNull: ["$positions", []] } }, 0] },
-                                        then: {
-                                            $map: {
-                                                input: { $ifNull: ["$positions", []] },
-                                                as: "p",
-                                                in: {
-                                                    position_type: "$$p.position_type",
-                                                    position_row_id: "$$p.position_row_id",
-                                                    sub_position_row_id: "$$p.sub_position_row_id",
-                                                    position_name: {
-                                                        $cond: {
-                                                            if: { $eq: ["$$p.position_type", 2] },
-                                                            then: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_manual_positions", cond: { $eq: ["$$this._id", "$$p.sub_position_row_id"] } } }, in: "$$this.position_name" } }, 0] },
-                                                            else: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_static_positions", cond: { $eq: ["$$this._id", "$$p.position_row_id"] } } }, in: "$$this.position_name" } }, 0] }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        else: [{
-                                            position_type: "$position_type",
-                                            position_row_id: "$position_row_id",
-                                            sub_position_row_id: "$sub_position_row_id",
-                                            position_name: {
-                                                $cond: {
-                                                    if: { $eq: ["$position_type", 2] },
-                                                    then: "$manual_position_info.position_name",
-                                                    else: "$info_position.position_name"
-                                                }
-                                            }
-                                        }]
-                                    }
-                                },
-
-                            }
-                        },
-                        { $match: { company_name: { $nin: ["", null] }, user_row_id: user_row_id } },
-                        {
-                            $project: {
-                                user_row_id: 1,
-                                position_name: 1,
-                                position_type: 1,
-                                position_row_id: 1,
-                                responsibilities: 1,
-                                employment_type: 1,
-                                location: 1,
-                                till_date_status: 1,
-                                start_date: 1,
-                                end_date: 1,
-                                location_type: 1,
-                                public_view: 1,
-                                company_type: 1,
-                                company_row_id: 1,
-                                company_name: 1,
-                                company_logo: 1,
-                                company_id: 1,
-                                company_email_id: 1,
-                                approval_status: 1,
-                                verified_status: 1,
-                                positions: 1,
-                            }
-                        },
-                        { $sort: { till_date_status: -1, start_date: -1, _id: -1 } },
-                        {
-                            $group: {
-                                _id: { company_type: "$company_type", company_row_id: "$company_row_id" },
-                                company_name: { $first: "$company_name" },
-                                company_logo: { $first: "$company_logo" },
-                                company_type: { $first: "$company_type" },
-                                company_row_id: { $first: "$company_row_id" },
-                                approval_status: { $first: "$approval_status" },
-                                company_id: { $first: "$company_id" },
-
-                                professional_details: { $push: "$$ROOT" }
-                            }
-                        }
-                    ]).skip(skip).limit(limit)
-
-                    res.json({ status: true, message: query })
-
-                }
-                else {
-                    res.json({ status: false, message: { alert_message: 'Sorry, Invalid User row id' } })
-                }
-            }
-            else {
-                res.json({ status: false, message: { alert_message: 'Sorry, Invalid User row id' } })
-            }
-        }
-        catch (err) {
-            console.log('Professional details list.', err.message)
-            res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
-        }
-    }
-    else {
-        res.json(checkToken)
-    }
-})
-
 router.get('/delete_professional_details/:user_row_id/:professional_details_id', async (req, res) => {
     const checkToken = checkAdminLoginToken(req.headers, [1])
     if (checkToken.status) {
@@ -5151,242 +4617,6 @@ router.get('/delete_professional_details/:user_row_id/:professional_details_id',
         res.json(checkToken)
     }
 })
-
-router.post('/update_professional_details', [
-    check('user_row_id')
-        .trim().not().isEmpty().withMessage('The User row id field is required.'),
-    check('company_type')
-        .trim().not().isEmpty().withMessage('The Company Type field is required.')
-        .isInt({ min: 1, max: 2 }).withMessage('The Company Type field must be contains only integers.'),
-    check('company_row_id')
-        .trim().not().isEmpty().withMessage('The Company Row ID field is required.'),
-    check('employment_type')
-        .trim().not().isEmpty().withMessage('The Employment Type field is required.')
-        .isInt({ min: 1, max: 5 }).withMessage('The Employment Type field must be contains only integers.'),
-    check('till_date_status')
-        .trim().not().isEmpty().withMessage('The Till Date Status field is required.')
-        .isInt({ min: 1, max: 2 }).withMessage('The Funding Type field must be contains only integers.'),
-
-], async (req, res) => {
-    try {
-        const errors = validationResult(req)
-        const errObj = arrangeValidation(errors)
-
-        const checkToken = checkAdminLoginToken(req.headers, [1])
-        if (checkToken.status) {
-            let company_type = 0
-            if (!Number.isNaN(Number.parseInt(req.body.company_type))) {
-                company_type = Number.parseInt(req.body.company_type)
-            }
-
-            let company_row_id = 0
-            if (!Number.isNaN(Number.parseInt(req.body.company_row_id))) {
-                company_row_id = Number.parseInt(req.body.company_row_id)
-            }
-
-            let till_date_status = 0 // 1:not present, 2:present
-            if (!Number.isNaN(Number.parseInt(req.body.till_date_status))) {
-                till_date_status = Number.parseInt(req.body.till_date_status)
-            }
-
-            let user_row_id = 0
-            if (!Number.isNaN(Number.parseInt(req.body.user_row_id))) {
-                user_row_id = Number.parseInt(req.body.user_row_id)
-            }
-
-            const check_access = await checkUserSubadminAccess({
-                admin_row_id: Number.parseInt(checkToken.message.admin_row_id),
-                admin_manager_type: checkToken.message.admin_manager_type,
-                sub_admin_type: Number.parseInt(checkToken.message.sub_admin_type),
-                user_row_id: user_row_id
-            })
-            if (!check_access.status) {
-                errObj['alert_message'] = check_access.message
-            }
-
-            let professional_row_id = 0
-            if (!Number.isNaN(Number.parseInt(req.body.professional_row_id))) {
-                professional_row_id = Number.parseInt(req.body.professional_row_id)
-            }
-
-            let positions = []
-            let position_row_id = 0
-            let sub_position_row_id = 0
-
-            let raw_positions = req.body.additional_positions
-            if (!raw_positions) {
-                errObj['additional_positions'] = 'At least one position is required.'
-            } else {
-                if (typeof raw_positions === 'string') {
-                    try { raw_positions = JSON.parse(raw_positions) } catch (e) { raw_positions = [] }
-                }
-                if (!Array.isArray(raw_positions) || raw_positions.length === 0) {
-                    errObj['additional_positions'] = 'At least one position is required.'
-                } else if (raw_positions.length > 3) {
-                    errObj['additional_positions'] = 'You can add a maximum of 3 positions.'
-                } else {
-                    for (const ap of raw_positions) {
-                        const ap_position_type = Number.parseInt(ap.position_type)
-                        const ap_position_row_id = Number.parseInt(ap.position_row_id)
-                        let ap_sub_position_row_id = 0
-
-                        if (Number.isNaN(ap_position_type) || ap_position_type < 1 || ap_position_type > 2) {
-                            errObj['additional_positions'] = 'Invalid position type.'
-                            break
-                        }
-                        if (Number.isNaN(ap_position_row_id)) {
-                            errObj['additional_positions'] = 'Invalid position.'
-                            break
-                        }
-                        const ap_get_query = await professional_positionsM.findOne({ _id: ap_position_row_id, active_status: true })
-                        if (!ap_get_query) {
-                            errObj['additional_positions'] = 'Sorry, invalid position.'
-                            break
-                        }
-                        if (ap_position_type === 2) {
-                            if (!ap.sub_position_name) {
-                                errObj['additional_positions'] = 'Position name is required for custom positions.'
-                                break
-                            }
-                            const ap_manual_query = await addManualPosition(ap.sub_position_name)
-                            if (ap_manual_query.status) {
-                                ap_sub_position_row_id = Number.parseInt(ap_manual_query.sub_position_row_id)
-                            } else {
-                                errObj['additional_positions'] = 'Invalid custom position name.'
-                                break
-                            }
-                        }
-                        const is_dupe = positions.some(p =>
-                            p.position_type === ap_position_type &&
-                            p.position_row_id === ap_position_row_id &&
-                            p.sub_position_row_id === ap_sub_position_row_id
-                        )
-                        if (is_dupe) {
-                            errObj['additional_positions'] = 'Duplicate position found.'
-                            break
-                        }
-                        positions.push({
-                            position_type: ap_position_type,
-                            position_row_id: ap_position_row_id,
-                            sub_position_row_id: ap_sub_position_row_id
-                        })
-                    }
-                    if (positions.length > 0) {
-                        position_row_id = positions[0].position_row_id
-                        sub_position_row_id = positions[0].sub_position_row_id
-                    }
-                }
-            }
-
-            if (company_type == 1) {
-                const company_reg_query = await companyM.findOne({ _id: company_row_id }, { _id: 1 })
-                if (!company_reg_query) {
-                    errObj['company_row_id'] = 'Sorry, Invalid registered company row id'
-                }
-            }
-            else if (company_type == 2) {
-                const company_manual_query = await company_manual_retrievalsM.findOne({ _id: company_row_id }, { _id: 1 })
-                if (!company_manual_query) {
-                    errObj['company_row_id'] = 'Sorry, Invalid manual company row id'
-                }
-            }
-
-            if (!professional_row_id) {
-                const check_time_range_query = await professionals_work_experienceM.findOne({ user_row_id: user_row_id, user_account_type: 1, company_type: company_type, company_row_id: company_row_id, start_date: { $lte: sanitize(req.body.start_date) }, end_date: { $gte: sanitize(req.body.end_date) } }, { _id: 1 })
-                if (check_time_range_query) {
-                    errObj['time_range'] = 'An experience with this duration is already exists'
-                }
-            }
-
-            if (till_date_status === 2) {
-                const company_reg_query = await professionals_work_experienceM.findOne({ _id: { $ne: professional_row_id }, user_account_type: 1, user_row_id: user_row_id, company_type: company_type, company_row_id: company_row_id, till_date_status: 2 }, { _id: 1 })
-                if (company_reg_query) {
-                    errObj['time_range'] = 'Sorry, your present working details already exist for this company. Please provide the end date for your previous experience.'
-                }
-            }
-
-
-            if (Object.keys(errObj).length > 0) {
-                res.json({ status: false, message: errObj })
-            }
-            else {
-
-                const check_user = await professionalsM.findOne({ _id: user_row_id })
-                if (check_user) {
-                    const insert_array = {}
-
-                    insert_array['responsibilities'] = req.body.responsibilities
-                    insert_array['employment_type'] = req.body.employment_type
-                    insert_array['till_date_status'] = till_date_status
-                    insert_array['start_date'] = req.body.start_date ? req.body.start_date : ""
-                    insert_array['location_type'] = req.body.location_type ? req.body.location_type : ""
-                    insert_array['end_date'] = till_date_status === 1 ? req.body.end_date : ""
-                    insert_array['positions'] = positions
-                    insert_array['position_row_id'] = position_row_id
-                    insert_array['position_type'] = positions[0]?.position_type || 1
-                    insert_array['sub_position_row_id'] = sub_position_row_id
-
-                    if (req.body.public_view) {
-                        insert_array['public_view'] = true
-                    }
-                    else if (Number.parseInt(req.body.public_status_id) == professional_row_id) {
-                        insert_array['public_view'] = true
-                    }
-                    else {
-                        insert_array['public_view'] = false
-                    }
-
-                    if (!professional_row_id) {
-                        if (req.body.public_view) {
-                            await professionals_work_experienceM.updateMany({ user_row_id: user_row_id, user_account_type: 1 }, { $set: { public_view: false } })
-                        }
-
-                        insert_array['user_account_type'] = 1
-                        insert_array['user_row_id'] = user_row_id
-                        insert_array['company_type'] = company_type
-                        insert_array['company_row_id'] = company_row_id
-
-                        await professionals_work_experienceM(insert_array).save()
-
-                        await professionalsM.updateOne({ _id: user_row_id }, { $set: { updated_date_n_time: getPresentDateTime() } })
-                        await calculateUserProfileScore(user_row_id, ['professional_detail'])
-
-                        res.json({ status: true, message: { alert_message: "Your professional details have been successfully submitted. " } })
-
-                    }
-                    else {
-                        if (req.body.public_view) {
-                            await professionals_work_experienceM.updateMany({ _id: { $ne: professional_row_id }, user_account_type: 1, user_row_id: user_row_id }, { $set: { public_view: false } })
-                            await deleteKeysByPattern('speakers_list_*');
-                            await deleteKeysByPattern('professional_detail_lists*')
-                            await deleteKeysByPattern('app_user_detail_*')
-                        }
-                        await professionals_work_experienceM.updateOne({ _id: professional_row_id }, { $set: insert_array })
-                        const updateFields = getUpdateTrackerFields(checkToken)
-                        await professionalsM.updateOne({ _id: user_row_id }, { $set: { updated_date_n_time: getPresentDateTime(), ...updateFields } })
-                        await deleteKeysByPattern('speakers_list_*');
-                        await deleteKeysByPattern('professional_detail_lists*')
-                        await deleteKeysByPattern('app_user_detail_*')
-                        res.json({ status: true, message: { alert_message: "We have successfully updated your professional details", cache_response: "cache expire from speaker list " } })
-
-                    }
-
-                }
-                else {
-                    res.json({ status: false, message: 'Invalid User Row ID' })
-                }
-            }
-        }
-        else {
-            res.json({ status: false, message: { alert_message: checkToken.message } })
-        }
-    }
-    catch (err) {
-        console.log('Update professional details.', err.message)
-        res.json({ status: false, message: 'An unexpected error occurred. Please try again later.', err: err.message })
-    }
-})
-
 
 router.get('/public_status_list/:user_row_id', async (req, res) => {
     const checkToken = checkAdminLoginToken(req.headers, [1])

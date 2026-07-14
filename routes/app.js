@@ -15,6 +15,8 @@ const user_event = require('../controllers/app/events/events_listed')
 const front_page_events = require('../controllers/app/events/front_page_events')
 
 const { fundingRouter, companyFundingDetailsHandler } = require('../modules/funding/funding.controller')
+const { appWorkExperienceRouter } = require('../modules/work-experience/work-experience.controller')
+const { appTeamMembersRouter } = require('../modules/team-members/team-members.controller')
 const email_newsletter = require('../controllers/app/newsletter/email_newsletter')
 const manual_users = require('../controllers/app/users/manual_users')
 
@@ -66,6 +68,7 @@ router.use('/search', search)
 router.use('/users/faq', users_faq)
 router.use('/users/awards', users_awards)
 router.use('/setting', setting)
+router.use('/setting', appWorkExperienceRouter)
 
 
 router.use('/feedback', feedback)
@@ -90,6 +93,7 @@ router.use('/company/front_page', company_front)
 // company_funding_details moved to modules/funding — mounted here directly to keep the original URL unchanged.
 router.get('/company/front_page/company_funding_details/:company_row_id', companyFundingDetailsHandler)
 router.use('/company/employee', company_employee)
+router.use('/company/employee', appTeamMembersRouter)
 router.use('/company/manual_company', manual_company)
 router.use('/company/faq', company_faq)
 router.use('/company/products_n_holding', products_n_holding)

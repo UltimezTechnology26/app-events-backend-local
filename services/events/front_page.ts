@@ -19,6 +19,8 @@ import deleted_eventsM from '../../models/app/events/deleted_eventsM';
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
 import event_watchlistsM from '../../models/app/watchlist/eventM';
+import { getPositionResolutionStages } from '../../modules/work-experience/work-experience.queries';
+import { joinPositionNamesExpr } from '../../modules/funding/funding.queries';
 
 interface EventParams {
     skip: number;
@@ -249,65 +251,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                         }
                                     },
 
-                                    // Static Position
-                                    {
-                                        $lookup: {
-                                            from: "cln_static_professionals_work_positions",
-                                            localField: "position_row_id",
-                                            foreignField: "_id",
-                                            as: "info_position",
-                                            pipeline: [
-                                                {
-                                                    $project: {
-                                                        _id: 1,
-                                                        position_name: 1
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    {
-                                        $unwind: {
-                                            path: "$info_position",
-                                            preserveNullAndEmptyArrays: true
-                                        }
-                                    },
-
-                                    // Manual Position
-                                    {
-                                        $lookup: {
-                                            from: "cln_manual_user_positions",
-                                            let: {
-                                                position_type: "$position_type",
-                                                sub_position_row_id: "$sub_position_row_id"
-                                            },
-                                            as: "manual_position_info",
-                                            pipeline: [
-                                                {
-                                                    $match: {
-                                                        $expr: {
-                                                            $and: [
-                                                                { $eq: ["$$position_type", 2] },
-                                                                { $eq: ["$_id", "$$sub_position_row_id"] }
-                                                            ]
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    $project: {
-                                                        _id: 1,
-                                                        position_name: 1
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    {
-                                        $unwind: {
-                                            path: "$manual_position_info",
-                                            preserveNullAndEmptyArrays: true
-                                        }
-                                    },
+                                    // Position (static + manual, full positions[] array)
+                                    ...getPositionResolutionStages(),
+                                    { $set: { resolved_position_name: joinPositionNamesExpr("$positions") } },
 
                                     // Static Company
                                     {
@@ -383,13 +329,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
                                     {
                                         $project: {
-                                            position_name: {
-                                                $cond: {
-                                                    if: { $eq: ["$position_type", 2] },
-                                                    then: "$manual_position_info.position_name",
-                                                    else: "$info_position.position_name"
-                                                }
-                                            },
+                                            position_name: "$resolved_position_name",
+                                            positions: 1,
                                             company_name: {
                                                 $cond: {
                                                     if: { $eq: ["$company_type", 1] },
@@ -413,6 +354,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                 full_name: 1,
                                 pro_batch: 1,
                                 position_name: "$info_work.position_name",
+                                positions: "$info_work.positions",
                                 company_name: "$info_work.company_name",
                                 user_tags: "$user_tags.designation_name",
                                 email_id: 1
@@ -611,6 +553,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                     user_pro_batch: "$user_info.pro_batch",
                     user_profile_image: "$img_info.profile_image",
                     user_position_name: "$user_info.position_name",
+                    user_positions: "$user_info.positions",
                     user_company_name: "$user_info.company_name",
                     user_username: "$user_info.user_name",
                     designation_id: "$user_info.designation_id",
@@ -727,6 +670,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             myArr['user_row_id'] = eventDetails.user_row_id
             myArr['user_profile_image'] = eventDetails.user_profile_image
             myArr['user_position_name'] = eventDetails.user_position_name
+            myArr['user_positions'] = eventDetails.user_positions
             myArr['user_company_name'] = eventDetails.user_company_name
             myArr['user_username'] = eventDetails.user_username
             myArr['user_tags'] = eventDetails.user_tags
@@ -1063,65 +1007,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                     }
                                 },
 
-                                // Static Position
-                                {
-                                    $lookup: {
-                                        from: "cln_static_professionals_work_positions",
-                                        localField: "position_row_id",
-                                        foreignField: "_id",
-                                        as: "info_position",
-                                        pipeline: [
-                                            {
-                                                $project: {
-                                                    _id: 1,
-                                                    position_name: 1
-                                                }
-                                            }
-                                        ]
-                                    }
-                                },
-                                {
-                                    $unwind: {
-                                        path: "$info_position",
-                                        preserveNullAndEmptyArrays: true
-                                    }
-                                },
-
-                                // Manual Position
-                                {
-                                    $lookup: {
-                                        from: "cln_manual_user_positions",
-                                        let: {
-                                            position_type: "$position_type",
-                                            sub_position_row_id: "$sub_position_row_id"
-                                        },
-                                        as: "manual_position_info",
-                                        pipeline: [
-                                            {
-                                                $match: {
-                                                    $expr: {
-                                                        $and: [
-                                                            { $eq: ["$$position_type", 2] },
-                                                            { $eq: ["$_id", "$$sub_position_row_id"] }
-                                                        ]
-                                                    }
-                                                }
-                                            },
-                                            {
-                                                $project: {
-                                                    _id: 1,
-                                                    position_name: 1
-                                                }
-                                            }
-                                        ]
-                                    }
-                                },
-                                {
-                                    $unwind: {
-                                        path: "$manual_position_info",
-                                        preserveNullAndEmptyArrays: true
-                                    }
-                                },
+                                // Position (static + manual, full positions[] array)
+                                ...getPositionResolutionStages(),
+                                { $set: { resolved_position_name: joinPositionNamesExpr("$positions") } },
 
                                 // Static Company
                                 {
@@ -1202,13 +1090,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
                                 {
                                     $project: {
-                                        position_name: {
-                                            $cond: {
-                                                if: { $eq: ["$position_type", 2] },
-                                                then: "$manual_position_info.position_name",
-                                                else: "$info_position.position_name"
-                                            }
-                                        },
+                                        position_name: "$resolved_position_name",
+                                        positions: 1,
                                         company_name: {
                                             $cond: {
                                                 if: { $eq: ["$company_type", 1] },
@@ -1244,6 +1127,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                             email_id: "$user_data.email_id",
                             profile_image: "$user_data.profile_image",
                             work_position: "$info_work.position_name",
+                            positions: "$info_work.positions",
                             company_name: "$info_work.company_name"
                         }
                     }
@@ -1422,24 +1306,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                         ]
                                     }
                                 },
-                                {
-                                    $lookup:
-                                    {
-                                        from: "cln_static_professionals_work_positions",
-                                        localField: "position_row_id",
-                                        foreignField: "_id",
-                                        as: "info_position",
-                                        pipeline: [
-                                            {
-                                                $project: {
-                                                    _id: 1,
-                                                    position_name: 1
-                                                }
-                                            }
-                                        ]
-                                    }
-                                },
-                                { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                                // Position (static + manual, full positions[] array)
+                                ...getPositionResolutionStages(),
+                                { $set: { resolved_position_name: joinPositionNamesExpr("$positions") } },
                                 { $limit: 1 },
                                 {
                                     $lookup:
@@ -1503,7 +1372,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                 { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                                 {
                                     $project: {
-                                        position_name: '$info_position.position_name',
+                                        position_name: "$resolved_position_name",
+                                        positions: 1,
                                         company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
                                     }
                                 }
@@ -1511,7 +1381,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         }
                     },
                     { $unwind: { path: "$outer_info_work", preserveNullAndEmptyArrays: true } },
-                    // 
+                    //
                     {
                         $match: { event_row_id: eventDetails._id, invitation_status: 1, user_data: { $exists: true, $ne: "" } }
                     },
@@ -1522,6 +1392,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                             user_type: 1,
                             invitation_status: 1,
                             position_name: "$outer_info_work.position_name",
+                            positions: "$outer_info_work.positions",
                             company_name: "$outer_info_work.company_name",
                             user_name: "$user_data.user_name",
                             full_name: "$user_data.full_name",
@@ -1750,24 +1621,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                         ]
                                     }
                                 },
-                                {
-                                    $lookup:
-                                    {
-                                        from: "cln_static_professionals_work_positions",
-                                        localField: "position_row_id",
-                                        foreignField: "_id",
-                                        as: "info_position",
-                                        pipeline: [
-                                            {
-                                                $project: {
-                                                    _id: 1,
-                                                    position_name: 1
-                                                }
-                                            }
-                                        ]
-                                    }
-                                },
-                                { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                                // Position (static + manual, full positions[] array)
+                                ...getPositionResolutionStages(),
+                                { $set: { resolved_position_name: joinPositionNamesExpr("$positions") } },
                                 { $limit: 1 },
                                 {
                                     $lookup:
@@ -1831,7 +1687,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                 { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                                 {
                                     $project: {
-                                        position_name: '$info_position.position_name',
+                                        position_name: "$resolved_position_name",
+                                        positions: 1,
                                         company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
                                     }
                                 }
@@ -1907,6 +1764,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                             manual_type: 1,
                             created_date_n_time: 1,
                             sp_user_position_name: { $cond: { if: "$outer_info_work.position_name", then: "$outer_info_work.position_name", else: "" } },
+                            sp_user_positions: "$outer_info_work.positions",
                             sp_user_company_name: { $cond: { if: "$outer_info_work.company_name", then: "$outer_info_work.company_name", else: "" } },
                             sp_image: { $cond: { if: "$sp_data.profile_image", then: "$sp_data.profile_image", else: "$sp_data.company_logo" } },
                             sp_name: { $cond: { if: "$sp_data.full_name", then: "$sp_data.full_name", else: "$sp_data.company_name" } },
@@ -2149,24 +2007,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                         ]
                                     }
                                 },
-                                {
-                                    $lookup:
-                                    {
-                                        from: "cln_static_professionals_work_positions",
-                                        localField: "position_row_id",
-                                        foreignField: "_id",
-                                        as: "info_position",
-                                        pipeline: [
-                                            {
-                                                $project: {
-                                                    _id: 1,
-                                                    position_name: 1
-                                                }
-                                            }
-                                        ]
-                                    }
-                                },
-                                { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                                // Position (static + manual, full positions[] array)
+                                ...getPositionResolutionStages(),
+                                { $set: { resolved_position_name: joinPositionNamesExpr("$positions") } },
                                 { $limit: 1 },
                                 {
                                     $lookup:
@@ -2230,7 +2073,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                 { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                                 {
                                     $project: {
-                                        position_name: '$info_position.position_name',
+                                        position_name: "$resolved_position_name",
+                                        positions: 1,
                                         company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
                                     }
                                 }
@@ -2306,6 +2150,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                             official_partner_status: 1,
                             partner_category_name: "$info_partner_category.partnership_name",
                             sp_user_position_name: { $cond: { if: "$outer_info_work.position_name", then: "$outer_info_work.position_name", else: "" } },
+                            sp_user_positions: "$outer_info_work.positions",
                             sp_user_company_name: { $cond: { if: "$outer_info_work.company_name", then: "$outer_info_work.company_name", else: "" } },
                             sp_image: { $cond: { if: "$sp_data.profile_image", then: "$sp_data.profile_image", else: "$sp_data.company_logo" } },
                             sp_name: { $cond: { if: "$sp_data.full_name", then: "$sp_data.full_name", else: "$sp_data.company_name" } },
@@ -2582,59 +2427,41 @@ export const getSpeakerList = async (req: any, skip: number, limit: number, user
                         //         position_name: '$info_position.position_name'
                         //     }
                         // }
-                        {
-                            $lookup:
-                            {
-                                from: "cln_static_professionals_work_positions",
-                                localField: "position_row_id",
-                                foreignField: "_id",
-                                as: "info_position",
-                                pipeline: [
-                                    { $limit: 1 },
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                        {
-                            $lookup:
-                            {
-                                from: "cln_manual_user_positions",
-                                let: {
-                                    position_type: '$position_type',
-                                    sub_position_row_id: '$sub_position_row_id'
-                                },
-                                as: "manual_position_info",
-                                pipeline: [
-                                    {
-                                        $match: {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [2, "$$position_type"] },
-                                                    { $eq: ["$_id", "$$sub_position_row_id"] }
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    {
-                                        $project: {
-                                            _id: 1,
-                                            position_name: 1
-                                        }
-                                    }
-                                ]
-                            }
-                        },
-                        { $unwind: { path: "$manual_position_info", preserveNullAndEmptyArrays: true } },
+                        // Position (static + manual, full positions[] array)
+                        ...getPositionResolutionStages(),
                         {
                             $set: {
 
-                                position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
+                                position_name: joinPositionNamesExpr("$positions"),
+                            }
+                        },
+                        {
+                            $lookup: {
+                                from: "cln_company_lists",
+                                let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                as: "info_company",
+                                pipeline: [
+                                    { $match: { $expr: { $and: [{ $eq: [1, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                    { $project: { _id: 1, company_name: 1 } }
+                                ]
+                            }
+                        },
+                        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                        {
+                            $lookup: {
+                                from: "cln_company_manual_retrievals",
+                                let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                as: "info_manual_company",
+                                pipeline: [
+                                    { $match: { $expr: { $and: [{ $eq: [2, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                    { $project: { _id: 1, company_name: 1 } }
+                                ]
+                            }
+                        },
+                        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                        {
+                            $set: {
+                                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
                             }
                         },
                     ],
@@ -2660,7 +2487,9 @@ export const getSpeakerList = async (req: any, skip: number, limit: number, user
                     designation_id: "$user_info.designation_id",
                     full_name: "$user_info.full_name",
                     pro_batch: "$user_info.pro_batch",
-                    position_name: "$info_work.position_name"
+                    position_name: "$info_work.position_name",
+                    positions: "$info_work.positions",
+                    company_name: "$info_work.company_name"
                 }
             },
             { $match: query },
@@ -2675,6 +2504,7 @@ export const getSpeakerList = async (req: any, skip: number, limit: number, user
                     user_name: 1,
                     company_name: 1,
                     position_name: 1,
+                    positions: 1,
                     count: 1,
                     user_followed_status: { $cond: { if: "$user_followed.confirm_request_status", then: "$user_followed.confirm_request_status", else: 0 } }
 

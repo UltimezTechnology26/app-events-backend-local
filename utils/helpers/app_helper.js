@@ -1,4 +1,5 @@
 const { marketDB } = require('../../config/database_connector');
+const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries');
 
 const sanitize = require('mongo-sanitize')
 const axios = require('axios')
@@ -2425,6 +2426,89 @@ export const capitalizeWords = (text = "") => {
 
 
 
+// Joins a resolved positions[] array (from getPositionResolutionStages()) into a single
+// human-readable string for plain-text/email contexts that can only show one job-title
+// value per person, e.g. [{position_name:"Founder"},{position_name:"CEO"}] -> "Founder and CEO"
+// or three-plus -> "Founder, Co Founder and CEO". Mirrors the frontend's own join convention
+// (no existing backend precedent for this pattern was found — see task report).
+export const joinPositionNames = (positions = []) => {
+  // Capitalize each position name individually BEFORE joining, so the joiner words
+  // (", " / " and ") stay literal lowercase and never get re-processed by a downstream
+  // capitalizeWords() call on the whole joined string (which would capitalize "and" and
+  // defeat this join convention - see task-18 report). Consumers should use the returned
+  // string as-is and must NOT wrap it in capitalizeWords() again.
+  const names = (positions || [])
+    .map(p => p && p.position_name)
+    .filter(Boolean)
+    .map(name => capitalizeWords(name));
+
+  if (!names.length) return "";
+
+  return names.join(", ").replace(/,([^,]*)$/, " and$1");
+};
+
+
+
+
+// Pipeline for sendCompanyWatchlist's "newly-verified employees" sub-aggregate. Extracted so the
+// positions[] multi-position resolution (getPositionResolutionStages()) can be regression-tested
+// in isolation, without mocking the many unrelated models the rest of sendCompanyWatchlist touches.
+export const buildNewEmployeesWatchlistPipeline = (company_row_id, referenceDate) => ([
+  {
+    $match: {
+      company_row_id,
+      verified_status: true,
+      till_date_status: 2,
+      verified_on: { $gt: referenceDate }
+    }
+  },
+  ...getPositionResolutionStages(),
+  {
+    $lookup: {
+      from: "cln_professionals",
+      foreignField: "_id",
+      localField: "user_row_id",
+      pipeline: [
+        {
+          $lookup: {
+            from: "cln_professionals_profile_images",
+            localField: "_id",
+            foreignField: "user_row_id",
+            as: "img"
+          }
+        },
+        { $unwind: { path: "$img", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            full_name: 1,
+            email_id: 1,
+            profile_image: "$img.profile_image"
+          }
+        }
+      ],
+      as: "user_info"
+    }
+  },
+  { $unwind: "$user_info" },
+  {
+    $addFields: {
+      full_name: "$user_info.full_name"
+    }
+  },
+  {
+    $project: {
+      _id: 1,
+      full_name: 1,
+      positions: 1,
+      verified_on: 1
+    }
+  },
+  { $sort: { verified_on: -1 } }
+]);
+
+
+
+
 export const sendCompanyWatchlist = async () => {
 
   const users = await company_watchlistM.distinct("user_row_id");
@@ -2479,94 +2563,9 @@ export const sendCompanyWatchlist = async () => {
           ]
         }),
 
-        professionals_work_experienceM.aggregate([
-          {
-            $match: {
-              company_row_id,
-              verified_status: true,
-              till_date_status: 2,
-              verified_on: { $gt: referenceDate }
-            }
-          },
-          {
-            $lookup: {
-              from: "cln_static_professionals_work_positions",
-              localField: "position_row_id",
-              foreignField: "_id",
-              as: "static_position"
-            }
-          },
-          { $unwind: { path: "$static_position", preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: "cln_manual_user_positions",
-              let: { sub_position_row_id: "$sub_position_row_id", position_type: "$position_type" },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $and: [
-                        { $eq: ["$_id", "$$sub_position_row_id"] },
-                        { $eq: [2, "$$position_type"] }
-                      ]
-                    }
-                  }
-                },
-                { $project: { position_name: 1 } }
-              ],
-              as: "manual_position"
-            }
-          },
-          { $unwind: { path: "$manual_position", preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: "cln_professionals",
-              foreignField: "_id",
-              localField: "user_row_id",
-              pipeline: [
-                {
-                  $lookup: {
-                    from: "cln_professionals_profile_images",
-                    localField: "_id",
-                    foreignField: "user_row_id",
-                    as: "img"
-                  }
-                },
-                { $unwind: { path: "$img", preserveNullAndEmptyArrays: true } },
-                {
-                  $project: {
-                    full_name: 1,
-                    email_id: 1,
-                    profile_image: "$img.profile_image"
-                  }
-                }
-              ],
-              as: "user_info"
-            }
-          },
-          { $unwind: "$user_info" },
-          {
-            $addFields: {
-              full_name: "$user_info.full_name",
-              position_name: {
-                $cond: {
-                  if: { $eq: ["$position_type", 2] },
-                  then: "$manual_position.position_name",
-                  else: "$static_position.position_name"
-                }
-              }
-            }
-          },
-          {
-            $project: {
-              _id: 1,
-              full_name: 1,
-              position_name: 1,
-              verified_on: 1
-            }
-          },
-          { $sort: { verified_on: -1 } }
-        ]),
+        professionals_work_experienceM.aggregate(
+          buildNewEmployeesWatchlistPipeline(company_row_id, referenceDate)
+        ),
 
         jobsM.find({
           company_row_id,
@@ -2747,6 +2746,14 @@ export const sendCompanyWatchlist = async () => {
         ])
       ])
 
+      // positions[] (multi-position feature) is resolved by getPositionResolutionStages() in
+      // the newEmployees aggregate above; join it down to a single display string here since
+      // this is a plain-text email that can only show one job title per person (unlike UI
+      // surfaces that render position chips). Downstream rendering (below) still reads
+      // emp.position_name, unchanged.
+      newEmployees.forEach(emp => {
+        emp.position_name = joinPositionNames(emp.positions);
+      });
 
       let sectionsHtml = "";
       let hasSection = false;
@@ -3081,7 +3088,10 @@ export const sendCompanyWatchlist = async () => {
 
         const formatted = latest.map(emp => {
           const name = capitalizeWords(emp.full_name) || "New Member";
-          const role = capitalizeWords(emp.position_name) || "Position";
+          // emp.position_name was already capitalized per-position inside joinPositionNames();
+          // do NOT re-wrap in capitalizeWords() here - that would re-capitalize the lowercase
+          // "and"/", " joiners and defeat the join convention (see task-18 report).
+          const role = emp.position_name || "Position";
           return `<b style="text-transform:capitalize;">${name}</b> (${role})`;
         });
 
@@ -3091,7 +3101,8 @@ export const sendCompanyWatchlist = async () => {
           const emp = latest[0];
 
           const name = capitalizeWords(emp.full_name) || "A new member";
-          const role = capitalizeWords(emp.position_name) || "a new role";
+          // See comment above: emp.position_name is already capitalized by joinPositionNames().
+          const role = emp.position_name || "a new role";
 
           sentence = `<b style="text-transform:capitalize;">${name}</b> is now part of the team as <b style="text-transform:capitalize;">${role}</b>.`;
         }
