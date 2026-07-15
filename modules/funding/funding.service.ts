@@ -846,6 +846,13 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
     { $set: { investor_name: { $cond: { if: '$investor_data.full_name', then: '$investor_data.full_name', else: '$investor_data.company_name' } }, category_name: '$category_info.category_name' } }
   ]
 
+  // EXCLUSION FIX: an investor whose underlying professional/company account
+  // no longer resolves (deactivated, not logged in, etc — see the login_status/
+  // active_status filters above) must never appear in the investors[] array at
+  // all, and a round left with zero resolvable investors must not appear
+  // either. Previously this was only tracked via row_matches/round_matches
+  const investorResolvedStage = { $match: { $expr: { $not: [{ $in: ['$investor_data', ['', null]] }] } } }
+
   const matchExprStages: any[] = []
   if (query.search) {
     const escaped = escapeRegex(String(query.search))
@@ -860,7 +867,6 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
     $set: {
       row_matches: {
         $and: [
-          { $not: [{ $in: ['$investor_data', ['', null]] }] },
           { $eq: ['$funds_raised_registered_type', 1] },
           { $eq: ['$funds_raised_company_row_id', companyRowId] },
           ...matchExprStages
@@ -902,6 +908,7 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
   const list = await fundingInvestmentM.aggregate([
     earlyMatchStage,
     ...resolveInvestorAndWorkStages,
+    investorResolvedStage,
     rowMatchStage,
     groupByRoundStage,
     { $match: { round_matches: true } },
@@ -914,6 +921,7 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
   const [countResult] = await fundingInvestmentM.aggregate([
     earlyMatchStage,
     ...resolveInvestorAndWorkStages,
+    investorResolvedStage,
     rowMatchStage,
     groupByRoundStage,
     { $match: { round_matches: true } },
