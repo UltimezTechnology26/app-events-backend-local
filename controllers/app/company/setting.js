@@ -2312,7 +2312,24 @@ router.post('/update_company_seo', [
             twitter_description
         };
 
-        await company_seo_detailsM.updateOne({ company_row_id: Number(module_id) }, updateData);
+        console.log(`update_company_seo: company_row_id=${module_id} existingSeoDoc=${!!checkQuery} seoChanged=${seoChanged}`)
+
+        const updateResult = await company_seo_detailsM.updateOne(
+            { company_row_id: Number(module_id) },
+            { $set: updateData },
+            { upsert: true }
+        );
+
+        console.log(`update_company_seo: matchedCount=${updateResult.matchedCount} modifiedCount=${updateResult.modifiedCount} upsertedCount=${updateResult.upsertedCount}`)
+
+        if (!updateResult.acknowledged || (updateResult.matchedCount === 0 && !updateResult.upsertedCount)) {
+            console.log(`update_company_seo: write did not take effect for company_row_id=${module_id}`, updateResult)
+            return res.json({
+                status: false,
+                message: { alert_message: "Company SEO details could not be saved. Please try again." }
+            });
+        }
+
         await deleteKeysByPattern('app_user_detail_*')
         await deleteKeysByPattern('individual_event_*')
         await deleteKeysByPattern('app_company_individual_details_*')
@@ -2326,7 +2343,7 @@ router.post('/update_company_seo', [
         });
 
     } catch (err) {
-        console.log("Update company SEO error:", err);
+        console.log("Update company SEO error:", err.message, err)
         return res.json({
             status: false,
             message: { alert_message: "An unexpected error occurred. Please try again later." }
