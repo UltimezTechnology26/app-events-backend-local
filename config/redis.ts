@@ -17,13 +17,20 @@ interface CacheSetParams {
     ttl: CacheDuration | number;
 }
 
+const CONNECT_TIMEOUT_MS = 8000;
+const COMMAND_TIMEOUT_MS = 8000;
+
 class RedisCache {
     private readonly client: RedisClientType;
     private isConnected: boolean = false;
+    private connectingPromise: Promise<void> | null = null;
 
     constructor() {
         this.client = createClient({
-            url: process.env.REDIS_CACHE_URL
+            url: process.env.REDIS_CACHE_URL,
+            socket: {
+                connectTimeout: CONNECT_TIMEOUT_MS
+            }
         });
 
         this.setupEventListeners();
@@ -45,10 +52,39 @@ class RedisCache {
         });
     }
 
+    // Bounds any single Redis command so a hung connection can never stall a request indefinitely.
+    private withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error(`Redis ${label} timed out after ${COMMAND_TIMEOUT_MS}ms`));
+            }, COMMAND_TIMEOUT_MS);
+
+            promise
+                .then((result) => {
+                    clearTimeout(timer);
+                    resolve(result);
+                })
+                .catch((err) => {
+                    clearTimeout(timer);
+                    reject(err);
+                });
+        });
+    }
+
+    // Concurrent callers await the SAME in-flight connect attempt instead of each
+    // calling client.connect() independently, which node-redis does not tolerate.
     private async ensureConnection(): Promise<void> {
-        if (!this.isConnected) {
-            await this.client.connect();
+        if (this.isConnected) return;
+
+        if (!this.connectingPromise) {
+            this.connectingPromise = this.withTimeout(this.client.connect() as unknown as Promise<any>, 'connect')
+                .then(() => undefined)
+                .finally(() => {
+                    this.connectingPromise = null;
+                });
         }
+
+        await this.connectingPromise;
     }
 
     async setCache({ key, value, ttl }: CacheSetParams): Promise<CacheResponse> {
@@ -60,7 +96,7 @@ class RedisCache {
             await this.ensureConnection();
 
             const serializedValue = JSON.stringify(value);
-            await this.client.setEx(key, ttl, serializedValue);
+            await this.withTimeout(this.client.setEx(key, ttl, serializedValue), 'setEx');
 
             return { status: true, message: { alert_message: 'Cache set successful.' } };
         } catch (error) {
@@ -77,7 +113,7 @@ class RedisCache {
 
             await this.ensureConnection();
 
-            const data = await this.client.get(key);
+            const data = await this.withTimeout(this.client.get(key), 'get');
 
             if (data) {
                 const parsedData = JSON.parse(data);
@@ -99,10 +135,10 @@ class RedisCache {
 
             await this.ensureConnection();
 
-            const keys = await this.client.keys(pattern);
+            const keys = await this.withTimeout(this.client.keys(pattern), 'keys');
 
             if (keys.length > 0) {
-                await this.client.del(keys);
+                await this.withTimeout(this.client.del(keys), 'del');
                 console.log(`Deleted ${keys.length} Redis keys matching: ${pattern}`);
                 return { status: true, message: `Deleted ${keys.length} keys` };
             } else {
@@ -122,7 +158,7 @@ class RedisCache {
             }
 
             await this.ensureConnection();
-            const result = await this.client.del(key);
+            const result = await this.withTimeout(this.client.del(key), 'del');
 
             return { status: true, message: result > 0 };
         } catch (error) {
@@ -138,7 +174,7 @@ class RedisCache {
             }
 
             await this.ensureConnection();
-            const ttl = await this.client.ttl(key);
+            const ttl = await this.withTimeout(this.client.ttl(key), 'ttl');
 
             return { status: true, message: ttl };
         } catch (error) {
@@ -154,7 +190,7 @@ class RedisCache {
             }
 
             await this.ensureConnection();
-            const exists = await this.client.exists(key);
+            const exists = await this.withTimeout(this.client.exists(key), 'exists');
 
             return { status: true, message: exists === 1 };
         } catch (error) {

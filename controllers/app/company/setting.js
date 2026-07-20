@@ -621,7 +621,7 @@ router.post('/update_basic_company_details', [
                 await deleteKeysByPattern('company_watchlist_list_*')
                 await deleteKeysByPattern('professional_detail_list_*')
 
-                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray })
+                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray }, { upsert: true })
 
                 await calculateCompanyProfileScore(company_row_id, ['basic', 'team_detail'])
 
@@ -869,8 +869,8 @@ router.post('/update_new_basic_company_details', checkApiKey, [
                 await companyM.updateOne({ _id: company_row_id }, { $set: insertArray })
 
 
-                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray })
-                await company_social_linksM.updateOne({ company_row_id: company_row_id }, { $set: socialArray })
+                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray }, { upsert: true })
+                await company_social_linksM.updateOne({ company_row_id: company_row_id }, { $set: socialArray }, { upsert: true })
 
                 res.json({
                     status: true, message: {

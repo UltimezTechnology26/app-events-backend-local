@@ -610,6 +610,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                             company_name: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_name", else: "$manual_info.company_name" } },
                             company_logo: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_logo", else: "$manual_info.company_logo" } },
                             approval_status: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.approval_status", else: 0 } },
+                            active_status: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.active_status", else: 0 } },
                             company_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_id", else: "" } },
                             company_email_id: { $cond: { if: { $eq: ["$company_type", 1] }, then: "$company_info.company_email_id", else: "$manual_info.company_email_id" } },
                             positions: {
@@ -661,6 +662,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                             user_row_id: 1,
                             position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
                             approval_status: 1,
+                            active_status: 1,
                             responsibilities: 1,
                             employment_type: 1,
                             location: 1,
@@ -684,6 +686,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                             _id: { company_type: "$company_type", company_row_id: "$company_row_id" },
                             company_id: { $first: "$company_id" },
                             approval_status: { $first: "$approval_status" },
+                            active_status: { $first: "$active_status" },
                             company_name: { $first: "$company_name" },
                             company_logo: { $first: "$company_logo" },
                             company_type: { $first: "$company_type" },
@@ -1963,15 +1966,15 @@ export const getUserDetails = async ({ username, user_row_id }: UserDetailParams
         // Try to get from cache first
         const cacheHitResponse = await redisCache.getCache({ key });
 
-        // if (cacheHitResponse.status) {
-        //     const responseTime = Date.now() - startTime;
-        //     logger.info(`getUserDetails(${username}) - Response time: ${responseTime}ms (cache hit)`);
-        //     return {
-        //         status: true,
-        //         message: cacheHitResponse.message,
-        //         cache_response_status: true
-        //     };
-        // }
+        if (cacheHitResponse.status) {
+            const responseTime = Date.now() - startTime;
+            logger.info(`getUserDetails(${username}) - Response time: ${responseTime}ms (cache hit)`);
+            return {
+                status: true,
+                message: cacheHitResponse.message,
+                cache_response_status: true
+            };
+        }
 
         // Cache miss - fetch from database
         let resultArray: any = {}
