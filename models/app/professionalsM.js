@@ -201,6 +201,7 @@ saveSchema.index({ approval_status: 1, login_status: 1, designation_id: 1 });
 saveSchema.index({ approval_status: 1, login_status: 1, user_name: 1, full_name: 1 });
 saveSchema.index({ approval_status: 1, login_status: 1, email_id: 1 });
 saveSchema.index({ login_status: 1, user_name: 1, full_name: 1 }); // For user suggestions
+saveSchema.index({ login_status: 1, approval_status: 1 }); // login_status-led: serves $or branches that constrain login_status without approval_status (e.g. admin_panel/app/user.js list/count filters)
 
 // Text search indexes for regex search optimization
 saveSchema.index({ user_name: "text", full_name: "text" });

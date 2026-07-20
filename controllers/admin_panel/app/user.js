@@ -1118,32 +1118,41 @@ router.get('/list/:skip/:limit', async (req, res) => {
 
             let matchConditions = [];
 
+            // cln_static_user_designations/cln_static_user_looking_for_lists are tiny,
+            // fully-loaded static tables (dozens/single-digit rows). Fetching their active
+            // _ids once and testing membership in-memory (via $setIntersection) replaces
+            // the old approach of running a $lookup per matched professional document,
+            // which was the actual cost of these two filters (~15s+ for ~73k documents).
+            const designationStatus = Number.parseInt(req.query.designation_status);
+            const lookingForStatus = Number.parseInt(req.query.looking_for_status);
+            const needsDesignationIds = designationStatus === 0 || designationStatus === 1;
+            const needsLookingForIds = lookingForStatus === 0 || lookingForStatus === 1;
+
+            const [activeDesignationIds, activeLookingForIds] = await Promise.all([
+                needsDesignationIds ? user_designationsM.distinct('_id', { active_status: true }) : null,
+                needsLookingForIds ? user_looking_forM.distinct('_id', { active_status: true }) : null
+            ]);
+
             /* ---------------- DESIGNATION STATUS FILTER ---------------- */
-            if (!Number.isNaN(Number.parseInt(req.query.designation_status))) {
-                const designationStatus = Number.parseInt(req.query.designation_status);
-                if (designationStatus === 1) {
-                    matchConditions.push({ designation_info: { $ne: null } });
-                } else if (designationStatus === 0) {
-                    matchConditions.push({ designation_info: null });
-                }
+            if (needsDesignationIds) {
+                const hasActiveDesignation = {
+                    $gt: [
+                        { $size: { $setIntersection: [{ $ifNull: ["$designation_id", []] }, activeDesignationIds] } },
+                        0
+                    ]
+                };
+                matchConditions.push({ $expr: designationStatus === 1 ? hasActiveDesignation : { $not: hasActiveDesignation } });
             }
 
             /* ---------------- LOOKING FOR STATUS FILTER ---------------- */
-            if (!Number.isNaN(Number.parseInt(req.query.looking_for_status))) {
-                const lookingForStatus = Number.parseInt(req.query.looking_for_status);
-                if (lookingForStatus === 1) {
-                    matchConditions.push({
-                        $expr: {
-                            $gt: [{ $size: { $ifNull: ["$other_info", []] } }, 0]
-                        }
-                    });
-                } else if (lookingForStatus === 0) {
-                    matchConditions.push({
-                        $expr: {
-                            $eq: [{ $size: { $ifNull: ["$other_info", []] } }, 0]
-                        }
-                    });
-                }
+            if (needsLookingForIds) {
+                const hasActiveLookingFor = {
+                    $gt: [
+                        { $size: { $setIntersection: [{ $ifNull: ["$looking_for_id", []] }, activeLookingForIds] } },
+                        0
+                    ]
+                };
+                matchConditions.push({ $expr: lookingForStatus === 1 ? hasActiveLookingFor : { $not: hasActiveLookingFor } });
             }
 
             const queryRun = await professionalsM.aggregate([
@@ -1462,52 +1471,12 @@ router.get('/list/:skip/:limit', async (req, res) => {
                     }
                 }
             ])
+            // matchConditions (designation_status/looking_for_status) now test array
+            // membership against precomputed active-id sets directly via $expr — no
+            // $lookup needed, so there's nothing left to skip/include conditionally.
             const countPipeline = [
                 { $match: { $and: query } },
-
-                {
-                    $lookup: {
-                        from: "cln_static_user_looking_for_lists",
-                        localField: "looking_for_id",
-                        foreignField: "_id",
-                        as: "other_info",
-                        pipeline: [
-                            { $match: { active_status: true } },
-                            { $project: { _id: 1, name: 1 } }
-                        ]
-                    }
-                },
-                // ✅ No $unwind here — one document per user
-
-                {
-                    $lookup: {
-                        from: "cln_static_user_designations",
-                        localField: "designation_id",
-                        foreignField: "_id",
-                        as: "designation_info",
-                        pipeline: [
-                            { $match: { active_status: true } },
-                            { $project: { _id: 0, designation_name: 1 } }
-                        ]
-                    }
-                },
-
-                {
-                    $set: {
-                        designation_info: {
-                            $cond: [
-                                { $gt: [{ $size: "$designation_info" }, 0] },
-                                "$designation_info",
-                                null
-                            ]
-                        }
-                    }
-                },
-
-                ...(matchConditions.length
-                    ? [{ $match: { $and: matchConditions } }]
-                    : []),
-
+                ...(matchConditions.length ? [{ $match: { $and: matchConditions } }] : []),
                 { $count: "count" }
             ];
 

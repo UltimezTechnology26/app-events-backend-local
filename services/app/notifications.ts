@@ -40,7 +40,7 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
     try {
         const start_notification_row_id = await getNotificationsStartRowID({ user_row_id });
 
-        const get_query = notificationsM.aggregate([
+        const notificationsPipeline: any[] = [
             {
                 $match: {
                     $and: [
@@ -75,26 +75,22 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
                 $lookup:
                 {
                     from: "cln_professionals",
+                    localField: "notify_type_row_id",
+                    foreignField: "_id",
                     let: {
                         notify_type: '$notify_type',
-                        notify_type_row_id: '$notify_type_row_id',
                         thread_type: '$thread_type'
                     },
                     as: "info_user",
                     pipeline: [
                         {
                             $match: {
-                                $and: [
-                                    {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [1, '$$thread_type'] },
-                                                { $eq: [1, '$$notify_type'] },
-                                                { $eq: ['$_id', '$$notify_type_row_id'] }
-                                            ]
-                                        }
-                                    }
-                                ]
+                                $expr: {
+                                    $and: [
+                                        { $eq: [1, '$$thread_type'] },
+                                        { $eq: [1, '$$notify_type'] }
+                                    ]
+                                }
                             }
                         },
                         {
@@ -125,25 +121,19 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
                 $lookup:
                 {
                     from: "cln_notifications_globals",
+                    localField: "_id",
+                    foreignField: "notification_row_id",
                     let: {
-                        notify_user_row_id: '$user_row_id',
-                        notification_row_id: '$_id'
+                        notify_user_row_id: '$user_row_id'
                     },
                     as: "info_globals",
                     pipeline: [
                         {
                             $match: {
-                                $and: [
-                                    {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [0, '$$notify_user_row_id'] },
-                                                { $eq: ['$user_row_id', user_row_id] },
-                                                { $eq: ['$notification_row_id', '$$notification_row_id'] }
-                                            ]
-                                        }
-                                    }
-                                ]
+                                user_row_id: user_row_id,
+                                $expr: {
+                                    $eq: [0, '$$notify_user_row_id']
+                                }
                             }
                         },
                         {
@@ -256,10 +246,17 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
                     date_n_time: 1
                 }
             }
-        ]).skip(skip).limit(limit);
+        ];
 
+        // The hint targets {user_row_id:1, _id:-1}. If that index is ever renamed/dropped,
+        // fall back to letting the planner choose instead of hard-failing the request.
+        const get_query = notificationsM.aggregate(notificationsPipeline).hint({ user_row_id: 1, _id: -1 }).skip(skip).limit(limit)
+            .catch((err: any) => {
+                logger.warn(`listNotificationService: index hint failed (${err instanceof Error ? err.message : String(err)}), retrying without hint`);
+                return notificationsM.aggregate(notificationsPipeline).skip(skip).limit(limit);
+            });
 
-        const count_query = notificationsM.aggregate([
+        const countPipeline: any[] = [
             {
                 $match: {
                     $and: [
@@ -289,26 +286,22 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
                 $lookup:
                 {
                     from: "cln_professionals",
+                    localField: "notify_type_row_id",
+                    foreignField: "_id",
                     let: {
                         notify_type: '$notify_type',
-                        notify_type_row_id: '$notify_type_row_id',
                         thread_type: '$thread_type'
                     },
                     as: "info_user",
                     pipeline: [
                         {
                             $match: {
-                                $and: [
-                                    {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [1, '$$thread_type'] },
-                                                { $eq: [1, '$$notify_type'] },
-                                                { $eq: ['$_id', '$$notify_type_row_id'] }
-                                            ]
-                                        }
-                                    }
-                                ]
+                                $expr: {
+                                    $and: [
+                                        { $eq: [1, '$$thread_type'] },
+                                        { $eq: [1, '$$notify_type'] }
+                                    ]
+                                }
                             }
                         },
                         {
@@ -392,7 +385,14 @@ const listNotificationService = async (user_row_id: number, skip: number = 0, li
             {
                 $count: 'count'
             }
-        ]);
+        ];
+
+        const count_query = notificationsM.aggregate(countPipeline).hint({ user_row_id: 1, _id: -1 })
+            .catch((err: any) => {
+                logger.warn(`listNotificationService: count hint failed (${err instanceof Error ? err.message : String(err)}), retrying without hint`);
+                return notificationsM.aggregate(countPipeline);
+            });
+
         const [result1, result2] = await Promise.all([get_query, count_query])
 
         let count = 0

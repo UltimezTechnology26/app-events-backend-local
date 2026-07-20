@@ -1167,13 +1167,19 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
             const attendees_query_promise = link_attendee_list_status
                 ? event_attendeesM.aggregate([
+                    // Filter to this event's accepted attendees FIRST (uses the
+                    // {event_row_id:1, invitation_status:1} index) — previously this
+                    // ran after every lookup below, so the professionals/manual/work-
+                    // experience lookups executed for every attendee of every event.
+                    { $match: { event_row_id: eventDetails._id, invitation_status: 1 } },
                     {
                         $lookup:
                         {
                             from: "cln_professionals",
+                            localField: "user_row_id",
+                            foreignField: "_id",
                             let: {
-                                user_type: '$user_type',
-                                user_row_id: '$user_row_id'
+                                user_type: '$user_type'
                             },
                             as: "user_info",
                             pipeline: [
@@ -1181,12 +1187,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                                     $match: {
                                         $and: [
                                             {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$user_type'] },
-                                                        { $eq: ['$_id', '$$user_row_id'] }
-                                                    ]
-                                                }
+                                                $expr: { $eq: [1, '$$user_type'] }
                                             },
                                             {
                                                 login_status: 1
@@ -1222,20 +1223,16 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         $lookup:
                         {
                             from: "cln_professionals_manual_retrievals",
+                            localField: "user_row_id",
+                            foreignField: "_id",
                             let: {
-                                user_type: '$user_type',
-                                user_row_id: '$user_row_id'
+                                user_type: '$user_type'
                             },
                             as: "manual_info",
                             pipeline: [
                                 {
                                     $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, '$$user_type'] },
-                                                { $eq: ['$_id', '$$user_row_id'] }
-                                            ]
-                                        }
+                                        $expr: { $eq: [2, '$$user_type'] }
                                     }
                                 },
 
@@ -1284,24 +1281,19 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         $lookup:
                         {
                             from: "cln_professionals_work_experiences",
+                            localField: "user_row_id",
+                            foreignField: "user_row_id",
                             let: {
-                                user_type: '$user_type',
-                                user_row_id: '$user_row_id'
+                                user_type: '$user_type'
                             },
                             as: "outer_info_work",
                             pipeline: [
                                 {
                                     $match: {
                                         $and: [
-                                            { user_row_id: { $nin: ["", null] } },
+                                            { public_view: true },
                                             {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: ['$user_row_id', '$$user_row_id'] },
-                                                        { $eq: ['$public_view', true] },
-                                                        { $eq: ['$user_account_type', '$$user_type'] }
-                                                    ]
-                                                }
+                                                $expr: { $eq: ['$user_account_type', '$$user_type'] }
                                             }
                                         ]
                                     }
@@ -1381,9 +1373,10 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         }
                     },
                     { $unwind: { path: "$outer_info_work", preserveNullAndEmptyArrays: true } },
-                    //
+                    // event_row_id/invitation_status already filtered at the top of the
+                    // pipeline — only the lookup-derived user_data check remains here.
                     {
-                        $match: { event_row_id: eventDetails._id, invitation_status: 1, user_data: { $exists: true, $ne: "" } }
+                        $match: { user_data: { $exists: true, $ne: "" } }
                     },
                     {
                         $project: {
