@@ -8842,6 +8842,32 @@ export const companyOtherDetails = async ({ user_row_id, company_row_id, req }: 
                         },
                         { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
                         {
+                            $lookup:
+                            {
+                                from: "cln_professionals_social_links",
+                                localField: "_id",
+                                foreignField: "user_row_id",
+                                as: "social_info",
+                                pipeline: [
+                                    {
+                                        $project: {
+                                            _id: 0,
+                                            website: 1,
+                                            facebook: 1,
+                                            twitter: 1,
+                                            linkedin: 1,
+                                            instagram: 1,
+                                            telegram: 1,
+                                            medium: 1,
+                                            reddit: 1,
+                                            feed_url: 1
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        { $unwind: { path: "$social_info", preserveNullAndEmptyArrays: true } },
+                        {
                             $project: {
                                 _id: 1,
                                 user_name: 1,
@@ -8849,7 +8875,8 @@ export const companyOtherDetails = async ({ user_row_id, company_row_id, req }: 
                                 email_id: 1,
                                 profile_image: "$img_info.profile_image",
                                 pro_batch: 1,
-                                approval_status: 1
+                                approval_status: 1,
+                                social_links: "$social_info"
 
                             }
                         }
@@ -8972,32 +8999,6 @@ export const companyOtherDetails = async ({ user_row_id, company_row_id, req }: 
             },
             { $unwind: { path: "$user_followed", preserveNullAndEmptyArrays: true } },
             {
-                $lookup:
-                {
-                    from: "cln_professionals_social_links",
-                    localField: "user_row_id",
-                    foreignField: "user_row_id",
-                    as: "social_info",
-                    pipeline: [
-                        {
-                            $project: {
-                                _id: 0,
-                                website: 1,
-                                facebook: 1,
-                                twitter: 1,
-                                linkedin: 1,
-                                instagram: 1,
-                                telegram: 1,
-                                medium: 1,
-                                reddit: 1,
-                                feed_url: 1
-                            }
-                        }
-                    ]
-                }
-            },
-            { $unwind: { path: "$social_info", preserveNullAndEmptyArrays: true } },
-            {
                 $match: {
                     user_data: { $exists: true, $ne: "" }
                 }
@@ -9021,7 +9022,13 @@ export const companyOtherDetails = async ({ user_row_id, company_row_id, req }: 
                     start_date: 1,
                     responsibilities: 1,
                     positions: 1,
-                    social_links: "$social_info",
+                    social_links: {
+                        $cond: {
+                            if: { $eq: ["$user_account_type", 1] },
+                            then: "$user_data.social_links",
+                            else: null
+                        }
+                    },
                     user_followed_status: { $cond: { if: "$user_followed.confirm_request_status", then: "$user_followed.confirm_request_status", else: 0 } },
                 }
             }
