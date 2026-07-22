@@ -25,7 +25,7 @@ const getDatabaseConfig = () => {
                         socketTimeoutMS: 30000,
                         bufferCommands: false,
 
-                        connectTimeoutMS: 5000,
+                        connectTimeoutMS: 10000,
                         heartbeatFrequencyMS: 5000,
                 };
         }

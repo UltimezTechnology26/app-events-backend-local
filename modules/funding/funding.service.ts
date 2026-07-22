@@ -846,11 +846,6 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
     { $set: { investor_name: { $cond: { if: '$investor_data.full_name', then: '$investor_data.full_name', else: '$investor_data.company_name' } }, category_name: '$category_info.category_name' } }
   ]
 
-  // EXCLUSION FIX: an investor whose underlying professional/company account
-  // no longer resolves (deactivated, not logged in, etc — see the login_status/
-  // active_status filters above) must never appear in the investors[] array at
-  // all, and a round left with zero resolvable investors must not appear
-  // either. Previously this was only tracked via row_matches/round_matches
   const investorResolvedStage = { $match: { $expr: { $not: [{ $in: ['$investor_data', ['', null]] }] } } }
 
   const matchExprStages: any[] = []
