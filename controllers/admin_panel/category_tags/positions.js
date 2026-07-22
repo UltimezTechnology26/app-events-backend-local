@@ -7,6 +7,7 @@ const { checkAdminLoginToken } = require('../../../middleware/authorization')
 
 const professional_positionsM = require('../../../models/app/static/professional_positionsM')
 const { deleteKeysByPattern } = require('../../../config/cache_helper')
+const { invalidateStaticPositionsListCache } = require('../../../modules/work-experience/work-experience.cache')
 
 router.get('/list', async (req, res) => {
     try {
@@ -240,6 +241,7 @@ router.post('/update_position_details', [
                 if (position_row_id) {
                     await professional_positionsM.updateOne({ _id: position_row_id }, { $set: update_array })
                     const delted_key = await deleteKeysByPattern('app_positions_list*')
+                    await invalidateStaticPositionsListCache()
                     res.json({ status: true, delted_key: delted_key, message: { alert_message: "The users work position details has been updated successfully." } })
                 }
                 else {
@@ -248,6 +250,7 @@ router.post('/update_position_details', [
 
                     await professional_positionsM(update_array).save()
                     await deleteKeysByPattern('app_positions_list*')
+                    await invalidateStaticPositionsListCache()
                     res.json({ status: true, message: { alert_message: "This users work position details has been added successfully." } })
                 }
 
@@ -273,6 +276,7 @@ router.get('/enable_position/:position_row_id', async (req, res) => {
             if (checkQuery) {
                 await professional_positionsM.updateOne({ _id: position_row_id }, { $set: { active_status: true } })
                 await deleteKeysByPattern('app_positions_list*')
+                await invalidateStaticPositionsListCache()
                 res.json({ status: true, message: { alert_message: "This position details has been enabled successfully." } })
             }
             else {
@@ -299,6 +303,7 @@ router.get('/disable_position/:position_row_id', async (req, res) => {
             if (checkQuery) {
                 await professional_positionsM.updateOne({ _id: position_row_id }, { $set: { active_status: false } })
                 await deleteKeysByPattern('app_positions_list*')
+                await invalidateStaticPositionsListCache()
                 res.json({ status: true, message: { alert_message: "This position details has been disabled successfully." } })
             }
             else {
@@ -325,6 +330,7 @@ router.get('/delete_position/:position_row_id', async (req, res) => {
             if (checkQuery) {
                 await professional_positionsM.deleteOne({ _id: position_row_id })
                 await deleteKeysByPattern('app_positions_list*')
+                await invalidateStaticPositionsListCache()
                 res.json({ status: true, message: { alert_message: "This position details has been deleted successfully." } })
             }
             else {

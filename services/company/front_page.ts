@@ -8514,6 +8514,7 @@ const companyIndividualDetails = async ({ user_row_id, company_id }: { user_row_
                             nft_wallet_address: 1,
                             sub_admin_row_id: 1,
                             claim_status: 1,
+                            updated_date_n_time: 1,
                             profile_scores: {
                                 basic_details_score: "$basic_details_score",
                                 seo_details_score: "$seo_details_score",

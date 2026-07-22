@@ -13,6 +13,8 @@ import event_attendeesM from "../../models/app/events/event_attendeesM";
 import event_watchlistsM from "../../models/app/watchlist/eventM";
 import { getIntIdFromArray, getPresentDateTime } from "../../utils/helpers/helper";
 import event_seo_detailsM from "../../models/app/events/event_seo_detailsM";
+import { getPositionResolutionStages } from "../../modules/work-experience/work-experience.queries";
+import { joinPositionNamesExpr } from "../../modules/funding/funding.queries";
 
 export const getManageEventsList = async (req: any, skip: number, limit: number, user_row_id: number) => {
     try {
@@ -364,18 +366,8 @@ export const getViewDetails = async (request_row_id: number, user_row_id: number
                                             ]
                                         }
                                     },
-                                    {
-                                        $lookup: {
-                                            from: "cln_static_professionals_work_positions",
-                                            localField: "position_row_id",
-                                            foreignField: "_id",
-                                            as: "info_position",
-                                            pipeline: [
-                                                { $project: { _id: 1, position_name: 1 } }
-                                            ]
-                                        }
-                                    },
-                                    { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+                                    ...getPositionResolutionStages(),
+                                    { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
                                     { $limit: 1 },
                                     {
                                         $lookup: {
@@ -432,7 +424,7 @@ export const getViewDetails = async (request_row_id: number, user_row_id: number
                                     { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
                                     {
                                         $project: {
-                                            position_name: '$info_position.position_name',
+                                            position_name: '$resolved_position_name',
                                             company_name: {
                                                 $cond: {
                                                     if: "$info_company.company_name",

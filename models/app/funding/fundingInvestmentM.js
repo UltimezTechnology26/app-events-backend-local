@@ -26,9 +26,8 @@ const saveSchema = mongoose.Schema({
         index: true
     },
     category_row_id: {
-        type: Number,
-        index: true
-    }, //funding rounds
+        type: Number
+    }, //funding rounds — index defined once below via schema.index(), not here too
     investor_category_row_id: {
         type: Number,
         index: true
@@ -77,6 +76,11 @@ saveSchema.index({ category_row_id: 1 });
 
 saveSchema.index({ funds_raised_company_row_id: 1, verified_status: 1 });
 saveSchema.index({ investor_type: 1, investor_registered_type: 1, funds_raised_company_row_id: 1, verified_status: 1 });
+
+// Added for the funding module refactor — verified these 3 don't already exist above:
+saveSchema.index({ funds_raised_company_row_id: 1, announcement_date: -1 }); // funds_raised_list / company_funding_details date sort within a company
+saveSchema.index({ investor_row_id: 1, announcement_date: -1 }); // investment_graph / investor overview date sort within an investor
+saveSchema.index({ round_id: 1, verified_status: 1 }); // verifyRound / rejectRound / createOrUpdateRound pending-round lookups
 
 saveSchema.pre('save', async function (next) {
     if (!this._id) {

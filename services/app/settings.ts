@@ -505,17 +505,6 @@ export const getUserIndividualDetails = async (user_row_id: number) => {
 export const getUserSuggestionDetails = async (search_value: string): Promise<ServiceResponse> => {
     const startTime = Date.now();
     try {
-        // Check cache first
-        const cacheKey = `user_suggestion_${search_value}`;
-        const cache_response = await redisCache.getCache({ key: cacheKey });
-        if (cache_response.status) {
-            return {
-                status: true,
-                message: cache_response.message,
-                user_type: 1,
-                cache_response_status: true,
-            };
-        }
 
         const get_query = await professionalsM.aggregate([
             { $match: { login_status: 1 } },

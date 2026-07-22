@@ -22,6 +22,302 @@ const streaksM = require('../../models/main/academy/streaksM')
 const professionals_pointsM = require('../../models/app/users/professionals_pointsM')
 const community_postsM = require('../../models/main/community/community_postsM')
 const { deleteKeysByPattern } = require('../../config/cache_helper')
+const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../modules/funding/funding.queries')
+
+/**
+ * Extracted pipeline for GET /user_details/:type/:user_name (person branch).
+ * Resolves the professional's most recent public work experience, including
+ * position name — now via getPositionResolutionStages() (both
+ * cln_static_professionals_work_positions and cln_manual_user_positions),
+ * joined into a single display string via joinPositionNamesExpr. Previously
+ * only resolved cln_static_professionals_work_positions, so manually-entered
+ * (position_type===2) positions produced a blank position_name.
+ */
+function buildUserDetailsPersonPipeline(user_name) {
+    return [
+        { $match: { user_name: user_name } },
+        {
+            $lookup: {
+                from: "cln_professionals_profile_images",
+                localField: "_id",
+                foreignField: "user_row_id",
+                as: "userImage"
+            }
+        },
+        { $unwind: { path: "$userImage", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_social_links",
+                localField: "_id",
+                foreignField: "user_row_id",
+                as: "userSocial"
+            }
+        },
+        { $unwind: { path: "$userSocial", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_work_experiences",
+                localField: "_id",
+                foreignField: "user_row_id",
+                pipeline: [
+                    { $match: { public_view: true, user_account_type: 1 } },
+                    { $limit: 1 },
+                    ...getPositionResolutionStages(),
+                    { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_company_lists",
+                            let: {
+                                company_type: '$company_type',
+                                company_row_id: '$company_row_id'
+                            },
+                            as: "info_company",
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: [1, '$$company_type'] },
+                                                { $eq: ['$_id', "$$company_row_id"] }
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    $project: {
+                                        _id: 1,
+                                        company_name: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_company_manual_retrievals",
+                            let: {
+                                company_type: '$company_type',
+                                company_row_id: '$company_row_id'
+                            },
+                            as: "info_manual_company",
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: [2, '$$company_type'] },
+                                                { $eq: ['$_id', "$$company_row_id"] }
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    $project: {
+                                        _id: 1,
+                                        company_name: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                    {
+                        $project: {
+                            position_name: '$resolved_position_name',
+                            company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
+                        }
+                    }
+                ],
+                as: "info_work",
+            }
+        },
+        { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                _id: 1,
+                user_name: 1,
+                email_id: 1,
+                full_name: 1,
+                pro_batch: 1,
+                gender: 1,
+                position_name: "$info_work.position_name",
+                company_name: "$info_work.company_name",
+                designation_id: 1,
+                user_bio: 1,
+                profile_image_type: "$userImage.profile_image_type",
+                profile_image: "$userImage.profile_image",
+                twitter: "$userSocial.twitter",
+                facebook: "$userSocial.facebook",
+                linkedin: "$userSocial.linkedin",
+                instagram: "$userSocial.instagram",
+                telegram: "$userSocial.telegram",
+                medium: "$userSocial.medium",
+                reddit: "$userSocial.reddit",
+                video_link: "$userSocial.video_link",
+            }
+        }
+    ]
+}
+
+/**
+ * Extracted pipeline for GET /user_details/:type/:user_name (company branch,
+ * team_members sub-aggregate). Resolves each team member's position name via
+ * getPositionResolutionStages() (both cln_static_professionals_work_positions
+ * and cln_manual_user_positions) joined via joinPositionNamesExpr, instead of
+ * the previous static-only lookup.
+ */
+function buildUserDetailsCompanyTeamMembersPipeline(companyRowId) {
+    return [
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals",
+                let: {
+                    user_row_id: '$user_row_id',
+                    user_account_type: '$user_account_type'
+                },
+                as: "user_info",
+                pipeline: [
+                    {
+                        $match: {
+                            $and: [
+                                {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: [1, "$$user_account_type"] },
+                                            { $eq: ["$_id", "$$user_row_id"] }
+                                        ]
+                                    }
+                                },
+                                {
+                                    login_status: 1
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_professionals_profile_images",
+                            localField: "_id",
+                            foreignField: "user_row_id",
+                            as: "img_info"
+                        }
+                    },
+                    { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
+                    {
+                        $project: {
+                            _id: 1,
+                            user_name: 1,
+                            full_name: 1,
+                            pro_batch: 1,
+                            email_id: 1,
+                            approval_status: 1,
+                            profile_image: "$img_info.profile_image"
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_manual_retrievals",
+                let: {
+                    user_row_id: '$user_row_id',
+                    user_account_type: '$user_account_type'
+                },
+                as: "manual_info",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, "$$user_account_type"] },
+                                    { $eq: ["$_id", "$$user_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            full_name: 1,
+                            email_id: 1,
+                            profile_image: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
+        {
+            $set:
+            {
+                user_data: {
+                    $switch: {
+                        branches: [
+                            {
+                                case: {
+                                    $and: [
+                                        { $eq: ['$user_account_type', 1] }
+                                    ]
+                                },
+                                then: "$user_info"
+                            },
+                            {
+                                case: {
+                                    $and: [
+                                        { $eq: ['$user_account_type', 2] }
+                                    ]
+                                },
+                                then: "$manual_info"
+                            },
+                        ],
+                        default: ""
+                    }
+                }
+            }
+        },
+        {
+            $match: {
+                user_data: { $exists: true, $ne: "" },
+                company_type: 1,
+                company_row_id: companyRowId,
+                till_date_status: 2
+            }
+        },
+        {
+            $project: {
+                _id: 1,
+                user_account_type: 1,
+                user_row_id: 1,
+                user_name: "$user_data.user_name",
+                full_name: "$user_data.full_name",
+                pro_batch: "$user_data.pro_batch",
+                email_id: "$user_data.email_id",
+                profile_image: "$user_data.profile_image",
+                user_approval_status: "$user_data.approval_status",
+                verified_status: 1,
+                verified_on: 1,
+                employment_type: 1,
+                position_name: "$resolved_position_name",
+                location_type: 1,
+                start_date: 1,
+                responsibilities: 1,
+            }
+        }
+    ]
+}
 
 
 //type 1:user, 2:company
@@ -30,150 +326,7 @@ router.get('/user_details/:type/:user_name', async (req, res) => {
         const type = req.params.type
         const user_name = req.params.user_name
         if (type == 'person') {
-            const usersQuery = await professionalsM.aggregate([
-                { $match: { user_name: user_name } },
-                {
-                    $lookup: {
-                        from: "cln_professionals_profile_images",
-                        localField: "_id",
-                        foreignField: "user_row_id",
-                        as: "userImage"
-                    }
-                },
-                { $unwind: { path: "$userImage", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup:
-                    {
-                        from: "cln_professionals_social_links",
-                        localField: "_id",
-                        foreignField: "user_row_id",
-                        as: "userSocial"
-                    }
-                },
-                { $unwind: { path: "$userSocial", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup:
-                    {
-                        from: "cln_professionals_work_experiences",
-                        localField: "_id",
-                        foreignField: "user_row_id",
-                        pipeline: [
-                            { $match: { public_view: true, user_account_type: 1 } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_static_professionals_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                position_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            { $limit: 1 },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_lists",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_manual_retrievals",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_manual_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [2, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $project: {
-                                    position_name: '$info_position.position_name',
-                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
-                                }
-                            }
-                        ],
-                        as: "info_work",
-                    }
-                },
-                { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
-                {
-                    $project: {
-                        _id: 1,
-                        user_name: 1,
-                        email_id: 1,
-                        full_name: 1,
-                        pro_batch: 1,
-                        gender: 1,
-                        position_name: "$info_work.position_name",
-                        company_name: "$info_work.company_name",
-                        designation_id: 1,
-                        user_bio: 1,
-                        profile_image_type: "$userImage.profile_image_type",
-                        profile_image: "$userImage.profile_image",
-                        twitter: "$userSocial.twitter",
-                        facebook: "$userSocial.facebook",
-                        linkedin: "$userSocial.linkedin",
-                        instagram: "$userSocial.instagram",
-                        telegram: "$userSocial.telegram",
-                        medium: "$userSocial.medium",
-                        reddit: "$userSocial.reddit",
-                        video_link: "$userSocial.video_link",
-                    }
-                }
-            ])
+            const usersQuery = await professionalsM.aggregate(buildUserDetailsPersonPipeline(user_name))
 
             if (usersQuery.length > 0) {
                 let resultArray = {}
@@ -254,166 +407,7 @@ router.get('/user_details/:type/:user_name', async (req, res) => {
 
                 resultArray['total_followers'] = await companyFollowersM.countDocuments({ company_row_id: companyQuery._id })
 
-                resultArray['team_members'] = await professionals_work_experienceM.aggregate([
-                    {
-                        $lookup:
-                        {
-                            from: "cln_static_professionals_work_positions",
-                            localField: "position_row_id",
-                            foreignField: "_id",
-                            as: "info_position",
-                            pipeline: [
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        position_name: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_professionals",
-                            let: {
-                                user_row_id: '$user_row_id',
-                                user_account_type: '$user_account_type'
-                            },
-                            as: "user_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $and: [
-                                            {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, "$$user_account_type"] },
-                                                        { $eq: ["$_id", "$$user_row_id"] }
-                                                    ]
-                                                }
-                                            },
-                                            {
-                                                login_status: 1
-                                            }
-                                        ]
-                                    }
-                                },
-                                {
-                                    $lookup:
-                                    {
-                                        from: "cln_professionals_profile_images",
-                                        localField: "_id",
-                                        foreignField: "user_row_id",
-                                        as: "img_info"
-                                    }
-                                },
-                                { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        user_name: 1,
-                                        full_name: 1,
-                                        pro_batch: 1,
-                                        email_id: 1,
-                                        approval_status: 1,
-                                        profile_image: "$img_info.profile_image"
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_professionals_manual_retrievals",
-                            let: {
-                                user_row_id: '$user_row_id',
-                                user_account_type: '$user_account_type'
-                            },
-                            as: "manual_info",
-                            pipeline: [
-                                {
-                                    $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, "$$user_account_type"] },
-                                                { $eq: ["$_id", "$$user_row_id"] }
-                                            ]
-                                        }
-                                    }
-                                },
-                                {
-                                    $project: {
-                                        _id: 1,
-                                        full_name: 1,
-                                        email_id: 1,
-                                        profile_image: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $set:
-                        {
-                            user_data: {
-                                $switch: {
-                                    branches: [
-                                        {
-                                            case: {
-                                                $and: [
-                                                    { $eq: ['$user_account_type', 1] }
-                                                ]
-                                            },
-                                            then: "$user_info"
-                                        },
-                                        {
-                                            case: {
-                                                $and: [
-                                                    { $eq: ['$user_account_type', 2] }
-                                                ]
-                                            },
-                                            then: "$manual_info"
-                                        },
-                                    ],
-                                    default: ""
-                                }
-                            }
-                        }
-                    },
-                    {
-                        $match: {
-                            user_data: { $exists: true, $ne: "" },
-                            company_type: 1,
-                            company_row_id: companyQuery._id,
-                            till_date_status: 2
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 1,
-                            user_account_type: 1,
-                            user_row_id: 1,
-                            user_name: "$user_data.user_name",
-                            full_name: "$user_data.full_name",
-                            pro_batch: "$user_data.pro_batch",
-                            email_id: "$user_data.email_id",
-                            profile_image: "$user_data.profile_image",
-                            user_approval_status: "$user_data.approval_status",
-                            verified_status: 1,
-                            verified_on: 1,
-                            employment_type: 1,
-                            position_name: "$info_position.position_name",
-                            location_type: 1,
-                            start_date: 1,
-                            responsibilities: 1,
-                        }
-                    }
-                ]).limit(8)
+                resultArray['team_members'] = await professionals_work_experienceM.aggregate(buildUserDetailsCompanyTeamMembersPipeline(companyQuery._id)).limit(8)
 
 
                 res.json({ status: true, message: resultArray })
@@ -435,158 +429,153 @@ router.get('/user_details/:type/:user_name', async (req, res) => {
 
 
 
+/**
+ * Extracted pipeline for GET /top_profile_list/:category. Resolves each
+ * profile's most recent public work experience position name via
+ * getPositionResolutionStages() (both cln_static_professionals_work_positions
+ * and cln_manual_user_positions), joined via joinPositionNamesExpr, instead
+ * of the previous static-only lookup.
+ */
+function buildTopProfileListPipeline(categoryRowId) {
+    return [
+        { $match: { designation_id: { $in: [categoryRowId] } } },
+        { $sample: { size: 10 } },
+        { $sort: { _id: 1 } },
+        {
+            $lookup: {
+                from: "cln_professionals_profile_images",
+                localField: "_id",
+                foreignField: "user_row_id",
+                as: "userImage"
+            }
+        },
+        { $unwind: { path: "$userImage", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_followers",
+                localField: "_id",
+                foreignField: "following_user_row_id",
+                pipeline: [{ $match: { "confirm_request_status": 2 } }],
+                as: "count_following"
+            }
+        },
+        {
+            $lookup: {
+                from: "cln_static_user_designations",
+                localField: "designation_id",
+                foreignField: "_id",
+                as: "desi"
+            }
+        },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_work_experiences",
+                localField: "_id",
+                foreignField: "user_row_id",
+                pipeline: [
+                    { $match: { public_view: true, user_account_type: 1 } },//,public_view:true
+                    { $sort: { start_date: -1 } },
+                    { $limit: 1 },
+                    ...getPositionResolutionStages(),
+                    { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_company_lists",
+                            let: {
+                                company_type: '$company_type',
+                                company_row_id: '$company_row_id'
+                            },
+                            as: "info_company",
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: [1, '$$company_type'] },
+                                                { $eq: ['$_id', "$$company_row_id"] }
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    $project: {
+                                        _id: 0,
+                                        company_name: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_company_manual_retrievals",
+                            let: {
+                                company_type: '$company_type',
+                                company_row_id: '$company_row_id'
+                            },
+                            as: "info_manual_company",
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: [2, '$$company_type'] },
+                                                { $eq: ['$_id', "$$company_row_id"] }
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    $project: {
+                                        _id: 0,
+                                        company_name: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                    {
+                        $project: {
+                            position_name: "$resolved_position_name",
+                            company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
+                        }
+                    },
+                ],
+                as: "info_work",
+            }
+        },
+        { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                _id: 1,
+                user_name: 1,
+                email_id: 1,
+                full_name: 1,
+                pro_batch: 1,
+                gender: 1,
+                work_position: "$info_work.position_name",
+                company_name: "$info_work.company_name",
+                profile_image: { $cond: { if: "$userImage.profile_image", then: "$userImage.profile_image", else: "default.png" } },
+                total_followers: { $size: "$count_following" },
+                designations: "$desi.designation_name"
+            }
+        }
+    ]
+}
+
 router.get('/top_profile_list/:category', async (req, res) => {
     try {
         const category = (req.params.category).toLowerCase()
         const categoryQuery = await userDesignationM.findOne({ designation_name: { '$regex': category, $options: 'i' } })
         if (categoryQuery) {
             const category_row_id = categoryQuery._id
-            const usersQuery = await professionalsM.aggregate([
-                { $match: { designation_id: { $in: [category_row_id] } } },
-                { $sample: { size: 10 } },
-                { $sort: { _id: 1 } },
-                {
-                    $lookup: {
-                        from: "cln_professionals_profile_images",
-                        localField: "_id",
-                        foreignField: "user_row_id",
-                        as: "userImage"
-                    }
-                },
-                { $unwind: { path: "$userImage", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup:
-                    {
-                        from: "cln_professionals_followers",
-                        localField: "_id",
-                        foreignField: "following_user_row_id",
-                        pipeline: [{ $match: { "confirm_request_status": 2 } }],
-                        as: "count_following"
-                    }
-                },
-                {
-                    $lookup: {
-                        from: "cln_static_user_designations",
-                        localField: "designation_id",
-                        foreignField: "_id",
-                        as: "desi"
-                    }
-                },
-                {
-                    $lookup:
-                    {
-                        from: "cln_professionals_work_experiences",
-                        localField: "_id",
-                        foreignField: "user_row_id",
-                        pipeline: [
-                            { $match: { public_view: true, user_account_type: 1 } },//,public_view:true
-                            { $sort: { start_date: -1 } },
-                            { $limit: 1 },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_static_professionals_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                position_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_lists",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 0,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_manual_retrievals",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_manual_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [2, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 0,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $project: {
-                                    position_name: "$info_position.position_name",
-                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
-                                }
-                            },
-                        ],
-                        as: "info_work",
-                    }
-                },
-                { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
-                {
-                    $project: {
-                        _id: 1,
-                        user_name: 1,
-                        email_id: 1,
-                        full_name: 1,
-                        pro_batch: 1,
-                        gender: 1,
-                        work_position: "$info_work.position_name",
-                        company_name: "$info_work.company_name",
-                        profile_image: { $cond: { if: "$userImage.profile_image", then: "$userImage.profile_image", else: "default.png" } },
-                        total_followers: { $size: "$count_following" },
-                        designations: "$desi.designation_name"
-                    }
-                }
-            ]).limit(6)
+            const usersQuery = await professionalsM.aggregate(buildTopProfileListPipeline(category_row_id)).limit(6)
 
             res.json({ status: true, message: usersQuery })
         }
@@ -601,173 +590,170 @@ router.get('/top_profile_list/:category', async (req, res) => {
 })
 
 
-router.get('/team_members/:company_id', async (req, res) => {
-    try {
-        //, approval_status:2, active_status:1 
-        const company_id = req.params.company_id
-        const companyQuery = await companyM.findOne({ company_id: company_id }, { _id: 1, user_row_id: 1 })
-        if (companyQuery) {
-            const resultArray = await professionals_work_experienceM.aggregate([
-                {
-                    $lookup:
-                    {
-                        from: "cln_static_professionals_work_positions",
-                        localField: "position_row_id",
-                        foreignField: "_id",
-                        as: "info_position",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1,
-                                    position_name: 1
-                                }
-                            }
-                        ]
-                    }
+/**
+ * Extracted pipeline for GET /team_members/:company_id. Resolves each team
+ * member's position name via getPositionResolutionStages() (both
+ * cln_static_professionals_work_positions and cln_manual_user_positions),
+ * joined via joinPositionNamesExpr, instead of the previous static-only
+ * lookup. Deliberately NOT merged with buildUserDetailsCompanyTeamMembersPipeline
+ * even though the pipelines are structurally similar — the two are separate
+ * routes with independently evolving response shapes.
+ */
+function buildTeamMembersPipeline(companyRowId) {
+    return [
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals",
+                let: {
+                    user_row_id: '$user_row_id',
+                    user_account_type: '$user_account_type'
                 },
-                { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup:
+                as: "user_info",
+                pipeline: [
                     {
-                        from: "cln_professionals",
-                        let: {
-                            user_row_id: '$user_row_id',
-                            user_account_type: '$user_account_type'
-                        },
-                        as: "user_info",
-                        pipeline: [
-                            {
-                                $match: {
-                                    $and: [
-                                        {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [1, "$$user_account_type"] },
-                                                    { $eq: ["$_id", "$$user_row_id"] }
-                                                ]
-                                            }
-                                        },
-                                        {
-                                            login_status: 1
-                                        }
-                                    ]
-                                }
-                            },
-                            {
-                                $lookup:
+                        $match: {
+                            $and: [
                                 {
-                                    from: "cln_professionals_profile_images",
-                                    localField: "_id",
-                                    foreignField: "user_row_id",
-                                    as: "img_info"
-                                }
-                            },
-                            { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
-                            {
-                                $project: {
-                                    _id: 1,
-                                    user_name: 1,
-                                    full_name: 1,
-                                    pro_batch: 1,
-                                    email_id: 1,
-                                    approval_status: 1,
-                                    profile_image: "$img_info.profile_image"
-                                }
-                            }
-                        ]
-                    }
-                },
-                { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
-                {
-                    $lookup:
-                    {
-                        from: "cln_professionals_manual_retrievals",
-                        let: {
-                            user_row_id: '$user_row_id',
-                            user_account_type: '$user_account_type'
-                        },
-                        as: "manual_info",
-                        pipeline: [
-                            {
-                                $match: {
                                     $expr: {
                                         $and: [
-                                            { $eq: [2, "$$user_account_type"] },
+                                            { $eq: [1, "$$user_account_type"] },
                                             { $eq: ["$_id", "$$user_row_id"] }
                                         ]
                                     }
+                                },
+                                {
+                                    login_status: 1
                                 }
-                            },
-                            {
-                                $project: {
-                                    _id: 1,
-                                    full_name: 1,
-                                    pro_batch: 1,
-                                    email_id: 1,
-                                    profile_image: 1
-                                }
-                            }
-                        ]
-                    }
-                },
-                { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
-                {
-                    $set:
+                            ]
+                        }
+                    },
                     {
-                        user_data: {
-                            $switch: {
-                                branches: [
-                                    {
-                                        case: {
-                                            $and: [
-                                                { $eq: ['$user_account_type', 1] }
-                                            ]
-                                        },
-                                        then: "$user_info"
-                                    },
-                                    {
-                                        case: {
-                                            $and: [
-                                                { $eq: ['$user_account_type', 2] }
-                                            ]
-                                        },
-                                        then: "$manual_info"
-                                    },
-                                ],
-                                default: ""
-                            }
+                        $lookup:
+                        {
+                            from: "cln_professionals_profile_images",
+                            localField: "_id",
+                            foreignField: "user_row_id",
+                            as: "img_info"
+                        }
+                    },
+                    { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
+                    {
+                        $project: {
+                            _id: 1,
+                            user_name: 1,
+                            full_name: 1,
+                            pro_batch: 1,
+                            email_id: 1,
+                            approval_status: 1,
+                            profile_image: "$img_info.profile_image"
                         }
                     }
+                ]
+            }
+        },
+        { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_professionals_manual_retrievals",
+                let: {
+                    user_row_id: '$user_row_id',
+                    user_account_type: '$user_account_type'
                 },
-                {
-                    $match: {
-                        user_data: { $exists: true, $ne: "" },
-                        company_type: 1,
-                        company_row_id: companyQuery._id,
-                        till_date_status: 2
+                as: "manual_info",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, "$$user_account_type"] },
+                                    { $eq: ["$_id", "$$user_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            full_name: 1,
+                            pro_batch: 1,
+                            email_id: 1,
+                            profile_image: 1
+                        }
                     }
-                },
-                {
-                    $project: {
-                        _id: 1,
-                        user_account_type: 1,
-                        user_row_id: 1,
-                        user_name: "$user_data.user_name",
-                        full_name: "$user_data.full_name",
-                        pro_batch: "$user_data.pro_batch",
-                        email_id: "$user_data.email_id",
-                        profile_image: "$user_data.profile_image",
-                        user_approval_status: "$user_data.approval_status",
-                        verified_status: 1,
-                        verified_on: 1,
-                        employment_type: 1,
-                        position_name: "$info_position.position_name",
-                        location_type: 1,
-                        start_date: 1,
-                        responsibilities: 1,
+                ]
+            }
+        },
+        { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
+        {
+            $set:
+            {
+                user_data: {
+                    $switch: {
+                        branches: [
+                            {
+                                case: {
+                                    $and: [
+                                        { $eq: ['$user_account_type', 1] }
+                                    ]
+                                },
+                                then: "$user_info"
+                            },
+                            {
+                                case: {
+                                    $and: [
+                                        { $eq: ['$user_account_type', 2] }
+                                    ]
+                                },
+                                then: "$manual_info"
+                            },
+                        ],
+                        default: ""
                     }
                 }
-            ]).limit(8)
+            }
+        },
+        {
+            $match: {
+                user_data: { $exists: true, $ne: "" },
+                company_type: 1,
+                company_row_id: companyRowId,
+                till_date_status: 2
+            }
+        },
+        {
+            $project: {
+                _id: 1,
+                user_account_type: 1,
+                user_row_id: 1,
+                user_name: "$user_data.user_name",
+                full_name: "$user_data.full_name",
+                pro_batch: "$user_data.pro_batch",
+                email_id: "$user_data.email_id",
+                profile_image: "$user_data.profile_image",
+                user_approval_status: "$user_data.approval_status",
+                verified_status: 1,
+                verified_on: 1,
+                employment_type: 1,
+                position_name: "$resolved_position_name",
+                location_type: 1,
+                start_date: 1,
+                responsibilities: 1,
+            }
+        }
+    ]
+}
+
+router.get('/team_members/:company_id', async (req, res) => {
+    try {
+        //, approval_status:2, active_status:1
+        const company_id = req.params.company_id
+        const companyQuery = await companyM.findOne({ company_id: company_id }, { _id: 1, user_row_id: 1 })
+        if (companyQuery) {
+            const resultArray = await professionals_work_experienceM.aggregate(buildTeamMembersPipeline(companyQuery._id)).limit(8)
 
             res.json({ status: true, message: resultArray })
         }
@@ -1445,3 +1431,7 @@ router.get("/user_streak", async (req, res) => {
 
 
 module.exports = router
+module.exports.buildUserDetailsPersonPipeline = buildUserDetailsPersonPipeline
+module.exports.buildUserDetailsCompanyTeamMembersPipeline = buildUserDetailsCompanyTeamMembersPipeline
+module.exports.buildTopProfileListPipeline = buildTopProfileListPipeline
+module.exports.buildTeamMembersPipeline = buildTeamMembersPipeline

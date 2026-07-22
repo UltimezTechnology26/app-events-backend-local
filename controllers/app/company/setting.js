@@ -9,6 +9,93 @@ const { sendEmail } = require('../../../config/email')
 const { updateNotification, updateThreadNotification } = require('../../../utils/helpers/notification_helper')
 const { checkCompanyRowID, calculateCompanyProfileScore, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { shiftCompanyFromManualToRegister } = require('../../../utils/helpers/events_helper')
+const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+
+/**
+ * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
+ * `info_work` lookup inside GET /company_followers/:company_row_id. Resolves
+ * position name(s) via getPositionResolutionStages() (both
+ * cln_static_professionals_work_positions and cln_manual_user_positions), joined
+ * into a single display string via joinPositionNamesExpr, instead of the previous
+ * static-only lookup. Downstream, the outer pipeline's final $project still reads
+ * `position_name` from `$info_work.position_name` — unchanged shape. `{ $limit: 1 }`
+ * kept in its original position: after position resolution, before company lookups.
+ */
+function buildCompanyFollowersInfoWorkPipeline() {
+    return [
+        { $match: { public_view: true, user_account_type: 1 } },
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        { $limit: 1 },
+        {
+            $lookup:
+            {
+                from: "cln_company_lists",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [1, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_company_manual_retrievals",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_manual_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                position_name: '$resolved_position_name',
+                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
+            }
+        }
+    ]
+}
 
 
 const professionalsM = require('../../../models/app/professionalsM')
@@ -534,7 +621,7 @@ router.post('/update_basic_company_details', [
                 await deleteKeysByPattern('company_watchlist_list_*')
                 await deleteKeysByPattern('professional_detail_list_*')
 
-                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray })
+                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray }, { upsert: true })
 
                 await calculateCompanyProfileScore(company_row_id, ['basic', 'team_detail'])
 
@@ -782,8 +869,8 @@ router.post('/update_new_basic_company_details', checkApiKey, [
                 await companyM.updateOne({ _id: company_row_id }, { $set: insertArray })
 
 
-                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray })
-                await company_social_linksM.updateOne({ company_row_id: company_row_id }, { $set: socialArray })
+                await company_seo_detailsM.updateOne({ company_row_id: company_row_id }, { $set: seoArray }, { upsert: true })
+                await company_social_linksM.updateOne({ company_row_id: company_row_id }, { $set: socialArray }, { upsert: true })
 
                 res.json({
                     status: true, message: {
@@ -1754,94 +1841,7 @@ router.get('/company_followers/:company_row_id', async (req, res) => {
                         from: "cln_professionals_work_experiences",
                         localField: "user_row_id",
                         foreignField: "user_row_id",
-                        pipeline: [
-                            { $match: { public_view: true, user_account_type: 1 } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_static_professionals_work_positions",
-                                    localField: "position_row_id",
-                                    foreignField: "_id",
-                                    as: "info_position",
-                                    pipeline: [
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                position_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                            { $limit: 1 },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_lists",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $lookup:
-                                {
-                                    from: "cln_company_manual_retrievals",
-                                    let: {
-                                        company_type: '$company_type',
-                                        company_row_id: '$company_row_id'
-                                    },
-                                    as: "info_manual_company",
-                                    pipeline: [
-                                        {
-                                            $match: {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [2, '$$company_type'] },
-                                                        { $eq: ['$_id', "$$company_row_id"] }
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        {
-                                            $project: {
-                                                _id: 1,
-                                                company_name: 1
-                                            }
-                                        }
-                                    ]
-                                }
-                            },
-                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                            {
-                                $project: {
-                                    position_name: '$info_position.position_name',
-                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
-                                }
-                            }
-                        ],
+                        pipeline: buildCompanyFollowersInfoWorkPipeline(),
                         as: "info_work",
                     }
                 },
@@ -2312,7 +2312,24 @@ router.post('/update_company_seo', [
             twitter_description
         };
 
-        await company_seo_detailsM.updateOne({ company_row_id: Number(module_id) }, updateData);
+        console.log(`update_company_seo: company_row_id=${module_id} existingSeoDoc=${!!checkQuery} seoChanged=${seoChanged}`)
+
+        const updateResult = await company_seo_detailsM.updateOne(
+            { company_row_id: Number(module_id) },
+            { $set: updateData },
+            { upsert: true }
+        );
+
+        console.log(`update_company_seo: matchedCount=${updateResult.matchedCount} modifiedCount=${updateResult.modifiedCount} upsertedCount=${updateResult.upsertedCount}`)
+
+        if (!updateResult.acknowledged || (updateResult.matchedCount === 0 && !updateResult.upsertedCount)) {
+            console.log(`update_company_seo: write did not take effect for company_row_id=${module_id}`, updateResult)
+            return res.json({
+                status: false,
+                message: { alert_message: "Company SEO details could not be saved. Please try again." }
+            });
+        }
+
         await deleteKeysByPattern('app_user_detail_*')
         await deleteKeysByPattern('individual_event_*')
         await deleteKeysByPattern('app_company_individual_details_*')
@@ -2326,7 +2343,7 @@ router.post('/update_company_seo', [
         });
 
     } catch (err) {
-        console.log("Update company SEO error:", err);
+        console.log("Update company SEO error:", err.message, err)
         return res.json({
             status: false,
             message: { alert_message: "An unexpected error occurred. Please try again later." }
@@ -2510,5 +2527,7 @@ router.get('/get_company_seo/:company_id', async (req, res) => {
 });
 
 
+
+router.buildCompanyFollowersInfoWorkPipeline = buildCompanyFollowersInfoWorkPipeline
 
 module.exports = router

@@ -10,6 +10,8 @@ const email_newslettersM = require('../../../../models/app/newsletter/email_news
 const email_newsletters_sent_usersM = require('../../../../models/app/newsletter/email_newsletters_sent_usersM')
 const email_newsletters_sent_reportsM = require('../../../../models/app/newsletter/email_newsletters_sent_reportsM')
 const { sendAcademyEmail } = require('../../../../config/email')
+const { getPositionResolutionStages } = require('../../../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../../modules/funding/funding.queries')
 
 
 router.post('/update_save_details', [
@@ -662,6 +664,52 @@ router.get('/users_list/:category_row_id/:skip/:limit', async (req, res) => {
                     $match: { $and: query }
                 },
                 {
+                    $lookup: {
+                        from: "cln_professionals_work_experiences",
+                        localField: "user_row_id",
+                        foreignField: "user_row_id",
+                        pipeline: [
+                            { $match: { public_view: true, user_account_type: 1 } },
+                            ...getPositionResolutionStages(),
+                            { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+                            { $limit: 1 },
+                            {
+                                $lookup: {
+                                    from: "cln_company_lists",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [1, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $lookup: {
+                                    from: "cln_company_manual_retrievals",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_manual_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [2, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $project: {
+                                    position_name: '$resolved_position_name',
+                                    positions: 1,
+                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
+                                }
+                            }
+                        ],
+                        as: "info_work"
+                    }
+                },
+                { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
+                {
                     $project:
                     {
                         _id: 1,
@@ -673,7 +721,10 @@ router.get('/users_list/:category_row_id/:skip/:limit', async (req, res) => {
                         email_id: "$info_users.email_id",
                         country_name: "$info_users.country_name",
                         country_flag: "$info_users.country_flag",
-                        profile_image: "$info_users.profile_image"
+                        profile_image: "$info_users.profile_image",
+                        position_name: "$info_work.position_name",
+                        positions: "$info_work.positions",
+                        company_name: "$info_work.company_name"
                     }
                 }
             ]).skip(skip).limit(limit)
@@ -1131,6 +1182,52 @@ router.get('/sent_report_users_list/:sent_report_row_id/:skip/:limit', async (re
                     $match: { $and: query }
                 },
                 {
+                    $lookup: {
+                        from: "cln_professionals_work_experiences",
+                        localField: "user_row_id",
+                        foreignField: "user_row_id",
+                        pipeline: [
+                            { $match: { public_view: true, user_account_type: 1 } },
+                            ...getPositionResolutionStages(),
+                            { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+                            { $limit: 1 },
+                            {
+                                $lookup: {
+                                    from: "cln_company_lists",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [1, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $lookup: {
+                                    from: "cln_company_manual_retrievals",
+                                    let: { company_type: '$company_type', company_row_id: '$company_row_id' },
+                                    as: "info_manual_company",
+                                    pipeline: [
+                                        { $match: { $expr: { $and: [{ $eq: [2, '$$company_type'] }, { $eq: ['$_id', "$$company_row_id"] }] } } },
+                                        { $project: { _id: 1, company_name: 1 } }
+                                    ]
+                                }
+                            },
+                            { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+                            {
+                                $project: {
+                                    position_name: '$resolved_position_name',
+                                    positions: 1,
+                                    company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } }
+                                }
+                            }
+                        ],
+                        as: "info_work"
+                    }
+                },
+                { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
+                {
                     $project:
                     {
                         _id: 1,
@@ -1141,7 +1238,10 @@ router.get('/sent_report_users_list/:sent_report_row_id/:skip/:limit', async (re
                         email_id: 1,
                         country_name: "$info_users.country_name",
                         country_flag: "$info_users.country_flag",
-                        profile_image: "$info_users.profile_image"
+                        profile_image: "$info_users.profile_image",
+                        position_name: "$info_work.position_name",
+                        positions: "$info_work.positions",
+                        company_name: "$info_work.company_name"
                     }
                 }
             ]).skip(skip).limit(limit)

@@ -378,27 +378,17 @@ router.get('/company_overview', checkApiKey, async (req, res) => {
                     $lookup:
                     {
                         from: "cln_company_lists",
+                        localField: "funds_raised_company_row_id",
+                        foreignField: "_id",
                         let: {
-                            funds_raised_registered_type: '$funds_raised_registered_type',
-                            funds_raised_company_row_id: '$funds_raised_company_row_id'
+                            funds_raised_registered_type: '$funds_raised_registered_type'
                         },
                         as: "company_info",
                         pipeline: [
                             {
                                 $match: {
-                                    $and: [
-                                        {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [1, '$$funds_raised_registered_type'] },
-                                                    { $eq: ['$_id', '$$funds_raised_company_row_id'] }
-                                                ]
-                                            }
-                                        },
-                                        {
-                                            active_status: 1
-                                        }
-                                    ]
+                                    $expr: { $eq: [1, '$$funds_raised_registered_type'] },
+                                    active_status: 1
                                 }
                             },
                             {
@@ -1343,27 +1333,17 @@ router.get('/overview', async (req, res) => {
                     $lookup:
                     {
                         from: "cln_company_lists",
+                        localField: "funds_raised_company_row_id",
+                        foreignField: "_id",
                         let: {
-                            funds_raised_registered_type: '$funds_raised_registered_type',
-                            funds_raised_company_row_id: '$funds_raised_company_row_id'
+                            funds_raised_registered_type: '$funds_raised_registered_type'
                         },
                         as: "company_info",
                         pipeline: [
                             {
                                 $match: {
-                                    $and: [
-                                        {
-                                            $expr: {
-                                                $and: [
-                                                    { $eq: [1, '$$funds_raised_registered_type'] },
-                                                    { $eq: ['$_id', '$$funds_raised_company_row_id'] }
-                                                ]
-                                            }
-                                        },
-                                        {
-                                            active_status: 1
-                                        }
-                                    ]
+                                    $expr: { $eq: [1, '$$funds_raised_registered_type'] },
+                                    active_status: 1
                                 }
                             },
                             {

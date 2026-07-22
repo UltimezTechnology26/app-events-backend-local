@@ -17,6 +17,93 @@ const { deleteTickets, checkSubadminAccess } = require('../../../utils/helpers/e
 const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { getCache, setCache, deleteKeysByPattern } = require('../../../config/cache_helper')
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
+const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+
+/**
+ * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
+ * `info_work` lookup inside GET /notify_users_list/:event_row_id. Resolves
+ * position name(s) via getPositionResolutionStages() (both
+ * cln_static_professionals_work_positions and cln_manual_user_positions), joined
+ * into a single display string via joinPositionNamesExpr, instead of the previous
+ * static-only lookup. Downstream, the outer pipeline's final $project still reads
+ * `work_position` from `$info_work.position_name` — unchanged shape. `{ $limit: 1 }`
+ * kept in its original position: after position resolution, before company lookups.
+ */
+function buildNotifyUsersInfoWorkPipeline() {
+    return [
+        { $match: { public_view: true, user_account_type: 1 } },
+        ...getPositionResolutionStages(),
+        { $set: { resolved_position_name: joinPositionNamesExpr('$positions') } },
+        { $limit: 1 },
+        {
+            $lookup:
+            {
+                from: "cln_company_lists",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [1, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
+        {
+            $lookup:
+            {
+                from: "cln_company_manual_retrievals",
+                let: {
+                    company_type: '$company_type',
+                    company_row_id: '$company_row_id'
+                },
+                as: "info_manual_company",
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: [2, '$$company_type'] },
+                                    { $eq: ['$_id', "$$company_row_id"] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            company_name: 1
+                        }
+                    }
+                ]
+            }
+        },
+        { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
+        {
+            $project: {
+                position_name: '$resolved_position_name',
+                company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
+            }
+        }
+    ]
+}
 
 router.post('/create_edit_ticket', [
     check('event_row_id')
@@ -588,94 +675,7 @@ router.get('/notify_users_list/:event_row_id', async (req, res) => {
                                 from: "cln_professionals_work_experiences",
                                 localField: "user_row_id",
                                 foreignField: "user_row_id",
-                                pipeline: [
-                                    { $match: { public_view: true, user_account_type: 1 } },
-                                    {
-                                        $lookup:
-                                        {
-                                            from: "cln_static_professionals_work_positions",
-                                            localField: "position_row_id",
-                                            foreignField: "_id",
-                                            as: "info_position",
-                                            pipeline: [
-                                                {
-                                                    $project: {
-                                                        _id: 1,
-                                                        position_name: 1
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
-                                    { $limit: 1 },
-                                    {
-                                        $lookup:
-                                        {
-                                            from: "cln_company_lists",
-                                            let: {
-                                                company_type: '$company_type',
-                                                company_row_id: '$company_row_id'
-                                            },
-                                            as: "info_company",
-                                            pipeline: [
-                                                {
-                                                    $match: {
-                                                        $expr: {
-                                                            $and: [
-                                                                { $eq: [1, '$$company_type'] },
-                                                                { $eq: ['$_id', "$$company_row_id"] }
-                                                            ]
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    $project: {
-                                                        _id: 1,
-                                                        company_name: 1
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    { $unwind: { path: "$info_company", preserveNullAndEmptyArrays: true } },
-                                    {
-                                        $lookup:
-                                        {
-                                            from: "cln_company_manual_retrievals",
-                                            let: {
-                                                company_type: '$company_type',
-                                                company_row_id: '$company_row_id'
-                                            },
-                                            as: "info_manual_company",
-                                            pipeline: [
-                                                {
-                                                    $match: {
-                                                        $expr: {
-                                                            $and: [
-                                                                { $eq: [2, '$$company_type'] },
-                                                                { $eq: ['$_id', "$$company_row_id"] }
-                                                            ]
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    $project: {
-                                                        _id: 1,
-                                                        company_name: 1
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    { $unwind: { path: "$info_manual_company", preserveNullAndEmptyArrays: true } },
-                                    {
-                                        $project: {
-                                            position_name: '$info_position.position_name',
-                                            company_name: { $cond: { if: "$info_company.company_name", then: "$info_company.company_name", else: "$info_manual_company.company_name" } },
-                                        }
-                                    }
-                                ],
+                                pipeline: buildNotifyUsersInfoWorkPipeline(),
                                 as: "info_work",
                             }
                         },
@@ -1002,5 +1002,7 @@ router.get('/notify_user/:notify_row_id/:event_row_id', async (req, res) => {
 })
 
 
+
+router.buildNotifyUsersInfoWorkPipeline = buildNotifyUsersInfoWorkPipeline
 
 module.exports = router
