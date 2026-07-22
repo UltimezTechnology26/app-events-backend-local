@@ -34,6 +34,18 @@ companyAcquisitionsRouter.post('/submit', async (req, res) => {
     const auth = await checkAllLoginToken(req.headers, [1, 7])
     if (!auth.status) return res.json(auth)
 
+    // The submitter must own the registered company on at least one side of
+    // the deal — never trust a client-supplied company_row_id on its own
+    // (same reasoning as funding.controller.ts's resolveOwnCompanyId guard).
+    const ownCompanyId = await service.resolveOwnCompanyId(auth.message.user_row_id)
+    const claimsAcquirer =
+      Number(req.body.acquirer_registered_type) === 1 && Number(req.body.acquirer_company_row_id) === ownCompanyId
+    const claimsAcquired =
+      Number(req.body.acquired_registered_type) === 1 && Number(req.body.acquired_company_row_id) === ownCompanyId
+    if (!ownCompanyId || (!claimsAcquirer && !claimsAcquired)) {
+      return res.json({ status: false, message: { alert_message: 'Sorry, you can only submit acquisitions involving your own company.' } })
+    }
+
     const result = await service.createOrUpdateAcquisition({
       input: req.body,
       submittedByType: 2

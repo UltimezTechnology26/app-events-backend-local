@@ -4,6 +4,17 @@ import { validateAcquisitionInput, AcquisitionInput } from './company_acquisitio
 import { buildCompanyAcquisitionsListStages } from './company_acquisitions.queries'
 import { invalidateCompanyAcquisitionsCaches } from './company_acquisitions.cache'
 
+/**
+ * Resolves the registered company row owned by this user, if any. Mirrors
+ * funding.service.ts's resolveOwnCompanyId — used to stop a company-owner
+ * submission from naming an arbitrary company on either side of the deal.
+ */
+export async function resolveOwnCompanyId(userRowId: number): Promise<number | null> {
+  const companyM = require('../../models/app/company/companyM')
+  const company = await companyM.findOne({ user_row_id: userRowId, approval_status: 1, active_status: 1 }, { _id: 1 })
+  return company ? Number.parseInt(company._id) : null
+}
+
 export async function createOrUpdateAcquisition(params: {
   acquisition_row_id?: number
   input: AcquisitionInput
