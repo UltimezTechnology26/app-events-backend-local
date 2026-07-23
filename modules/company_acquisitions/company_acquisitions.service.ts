@@ -15,14 +15,50 @@ export async function resolveOwnCompanyId(userRowId: number): Promise<number | n
   return company ? Number.parseInt(company._id) : null
 }
 
+/**
+ * True if an active (pending or approved) record already exists for the exact
+ * same acquirer/acquired pair ON THE SAME acquisition_date. Real-world M&A
+ * allows the same two companies to appear together more than once (staged/
+ * tranche acquisitions, a later re-acquisition after a divestment, etc.), so
+ * the pair alone isn't a duplicate — only re-submitting the same dated event
+ * is. Rejected records (verified_status 2) don't count, so a corrected
+ * resubmission after rejection is still allowed. Excludes the record being
+ * edited (excludeId), so updating an existing record doesn't flag itself as
+ * a duplicate of itself.
+ */
+async function findDuplicateAcquisition(input: AcquisitionInput, excludeId?: number): Promise<boolean> {
+  const query: Record<string, any> = {
+    acquirer_company_row_id: input.acquirer_company_row_id,
+    acquirer_registered_type: input.acquirer_registered_type,
+    acquired_company_row_id: input.acquired_company_row_id,
+    acquired_registered_type: input.acquired_registered_type,
+    acquisition_date: new Date(input.acquisition_date),
+    verified_status: { $in: [0, 1] }
+  }
+  if (excludeId) {
+    query._id = { $ne: excludeId }
+  }
+  const existing = await companyAcquisitionsM.findOne(query, { _id: 1 })
+  return !!existing
+}
+
 export async function createOrUpdateAcquisition(params: {
   acquisition_row_id?: number
   input: AcquisitionInput
   submittedByType: 1 | 2
+  submittedByCompanyRowId?: number
 }): Promise<{ status: boolean; message: any }> {
   const { valid, errObj } = validateAcquisitionInput(params.input)
   if (!valid) {
     return { status: false, message: errObj }
+  }
+
+  const isDuplicate = await findDuplicateAcquisition(params.input, params.acquisition_row_id)
+  if (isDuplicate) {
+    return {
+      status: false,
+      message: { acquired_company_row_id: 'An acquisition between these companies on this date has already been recorded and is pending or approved.' }
+    }
   }
 
   const isAdminSubmission = params.submittedByType === 1
@@ -32,6 +68,7 @@ export async function createOrUpdateAcquisition(params: {
     ...params.input,
     acquisition_date: new Date(params.input.acquisition_date),
     submitted_by_type: params.submittedByType,
+    submitted_by_company_row_id: isAdminSubmission ? undefined : params.submittedByCompanyRowId,
     verified_status: isAdminSubmission ? 1 : 0,
     verified_on: isAdminSubmission ? getPresentDateTime() : undefined,
     date_n_time: getPresentDateTime()
@@ -91,6 +128,53 @@ export async function deleteAcquisition(acquisitionRowId: number): Promise<{ sta
   }
   await invalidateCompanyAcquisitionsCaches()
   return { status: true, message: { alert_message: 'Acquisition deleted.' } }
+}
+
+/** True if companyId is the acquirer or acquired side (as a registered company) of this record. */
+function isPartyToAcquisition(record: any, companyId: number): boolean {
+  const ownsAcquirerSide = record.acquirer_registered_type === 1 && record.acquirer_company_row_id === companyId
+  const ownsAcquiredSide = record.acquired_registered_type === 1 && record.acquired_company_row_id === companyId
+  return ownsAcquirerSide || ownsAcquiredSide
+}
+
+/**
+ * Company-owner delete: same effect as deleteAcquisition, but restricted to
+ * the company that originally submitted the record (submitted_by_company_row_id)
+ * — never trust a client-supplied acquisition_row_id alone (same reasoning
+ * as the /submit ownership guard). The counterparty can approve or reject,
+ * but never delete — that's the submitter's call alone, at any status
+ * (pending, rejected, or even after approval, since it's their own
+ * submission to retract). Admin-direct records (no submitting company) can't
+ * be self-deleted by anyone via this path — only through the separate
+ * admin-only /delete route.
+ */
+export async function deleteOwnAcquisition(params: {
+  acquisitionRowId: number
+  ownCompanyId: number
+}): Promise<{ status: boolean; message: any }> {
+  const record = await companyAcquisitionsM.findById(params.acquisitionRowId)
+  if (!record) {
+    return { status: false, message: { alert_message: 'Acquisition record not found.' } }
+  }
+
+  if (record.submitted_by_company_row_id !== params.ownCompanyId) {
+    return { status: false, message: { alert_message: 'Sorry, only the company that submitted this acquisition can delete it.' } }
+  }
+
+  return deleteAcquisition(params.acquisitionRowId)
+}
+
+/**
+ * True if ownCompanyId may approve/reject this record as the counterparty:
+ * a party to the deal, but NOT the company that submitted it (a submitter
+ * can't approve their own submission). Admin's own authorization is handled
+ * separately at the controller and doesn't call this.
+ */
+export async function isCounterpartyForAcquisition(acquisitionRowId: number, ownCompanyId: number): Promise<boolean> {
+  const record = await companyAcquisitionsM.findById(acquisitionRowId)
+  if (!record) return false
+  if (record.submitted_by_company_row_id === ownCompanyId) return false
+  return isPartyToAcquisition(record, ownCompanyId)
 }
 
 export async function getCompanyAcquisitionsList(params: {

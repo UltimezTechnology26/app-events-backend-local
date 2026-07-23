@@ -27,7 +27,7 @@ export function resolveCompanySideStages(prefix: 'acquirer' | 'acquired', as: st
               }
             }
           },
-          { $project: { _id: 1, company_name: 1, company_id: 1, active_status: 1, approval_status: 1 } }
+          { $project: { _id: 1, company_name: 1, company_id: 1, active_status: 1, approval_status: 1, company_logo: 1 } }
         ]
       }
     },
@@ -47,7 +47,7 @@ export function resolveCompanySideStages(prefix: 'acquirer' | 'acquired', as: st
               }
             }
           },
-          { $project: { _id: 1, company_name: 1 } }
+          { $project: { _id: 1, company_name: 1, company_logo: 1 } }
         ]
       }
     },

@@ -9,6 +9,10 @@ function unauthorizedAdminOnly() {
   return { status: false, message: { alert_message: 'Sorry, this action requires admin access.' } }
 }
 
+function unauthorizedApprover() {
+  return { status: false, message: { alert_message: 'Sorry, only an admin or the other company involved in this acquisition can approve or reject it.' } }
+}
+
 // --- Admin-only: create or update a record (auto-approved) ---
 companyAcquisitionsRouter.post('/update_details', async (req, res) => {
   try {
@@ -48,11 +52,60 @@ companyAcquisitionsRouter.post('/submit', async (req, res) => {
 
     const result = await service.createOrUpdateAcquisition({
       input: req.body,
-      submittedByType: 2
+      submittedByType: 2,
+      submittedByCompanyRowId: ownCompanyId
     })
     return res.json(result)
   } catch (err: any) {
     console.log('Company acquisitions submit.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+// --- App-user: "my own company"'s acquisitions, all statuses (pending/
+// approved/rejected) — so a submitter can see why something is still pending
+// or was rejected. Scoped to the caller's own company only; there is no
+// company_row_id URL param to request someone else's, unlike admin_list. ---
+companyAcquisitionsRouter.get('/my_list/:skip/:limit', async (req, res) => {
+  try {
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+
+    const ownCompanyId = await service.resolveOwnCompanyId(auth.message.user_row_id)
+    if (!ownCompanyId) {
+      return res.json({ status: false, message: { alert_message: 'Sorry, Company not listed.' } })
+    }
+
+    const skip = Number.parseInt(req.params.skip)
+    const limit = Number.parseInt(req.params.limit)
+    const result = await service.getAdminCompanyAcquisitionsList({ companyRowId: ownCompanyId, skip, limit })
+    return res.json(result)
+  } catch (err: any) {
+    console.log('Company acquisitions my_list.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+// --- App-user: delete an acquisition involving "my own company", but only
+// while it's still pending or rejected — approved records are public and
+// can only be removed by an admin. ---
+companyAcquisitionsRouter.get('/my_delete/:acquisition_row_id', async (req, res) => {
+  try {
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+
+    const ownCompanyId = await service.resolveOwnCompanyId(auth.message.user_row_id)
+    if (!ownCompanyId) {
+      return res.json({ status: false, message: { alert_message: 'Sorry, Company not listed.' } })
+    }
+
+    const result = await service.deleteOwnAcquisition({
+      acquisitionRowId: Number.parseInt(req.params.acquisition_row_id),
+      ownCompanyId
+    })
+    return res.json(result)
+  } catch (err: any) {
+    console.log('Company acquisitions my_delete.', err.message)
     res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
   }
 })
@@ -96,14 +149,23 @@ companyAcquisitionsRouter.get('/admin_list/:company_row_id/:skip/:limit', async 
   }
 })
 
-// --- Admin-only: approve ---
+// --- Admin OR the counterparty company's owner: approve. Whoever acts first
+// decides — a single shared gate, not two separate ones (the submitter
+// themselves is excluded by isCounterpartyForAcquisition). ---
 companyAcquisitionsRouter.get('/verify/:acquisition_row_id', async (req, res) => {
   try {
     const auth = await checkAllLoginToken(req.headers, [1, 7])
     if (!auth.status) return res.json(auth)
-    if (auth.message.user_type !== 2) return res.json(unauthorizedAdminOnly())
 
-    const result = await service.verifyAcquisition(Number.parseInt(req.params.acquisition_row_id))
+    const acquisitionRowId = Number.parseInt(req.params.acquisition_row_id)
+    const isAdmin = auth.message.user_type === 2
+    if (!isAdmin) {
+      const ownCompanyId = await service.resolveOwnCompanyId(auth.message.user_row_id)
+      const isCounterparty = ownCompanyId ? await service.isCounterpartyForAcquisition(acquisitionRowId, ownCompanyId) : false
+      if (!isCounterparty) return res.json(unauthorizedApprover())
+    }
+
+    const result = await service.verifyAcquisition(acquisitionRowId)
     return res.json(result)
   } catch (err: any) {
     console.log('Company acquisitions verify.', err.message)
@@ -111,15 +173,23 @@ companyAcquisitionsRouter.get('/verify/:acquisition_row_id', async (req, res) =>
   }
 })
 
-// --- Admin-only: reject ---
+// --- Admin OR the counterparty company's owner: reject. Same shared-gate
+// reasoning as verify above. ---
 companyAcquisitionsRouter.post('/reject', async (req, res) => {
   try {
     const auth = await checkAllLoginToken(req.headers, [1, 7])
     if (!auth.status) return res.json(auth)
-    if (auth.message.user_type !== 2) return res.json(unauthorizedAdminOnly())
+
+    const acquisitionRowId = Number.parseInt(req.body.acquisition_row_id)
+    const isAdmin = auth.message.user_type === 2
+    if (!isAdmin) {
+      const ownCompanyId = await service.resolveOwnCompanyId(auth.message.user_row_id)
+      const isCounterparty = ownCompanyId ? await service.isCounterpartyForAcquisition(acquisitionRowId, ownCompanyId) : false
+      if (!isCounterparty) return res.json(unauthorizedApprover())
+    }
 
     const result = await service.rejectAcquisition({
-      acquisitionRowId: req.body.acquisition_row_id,
+      acquisitionRowId,
       rejectType: req.body.reject_type,
       rejectReason: req.body.reject_reason
     })

@@ -52,6 +52,11 @@ const saveSchema = mongoose.Schema({
     submitted_by_type: {
         type: Number
     }, // 1: admin, 2: company owner
+    submitted_by_company_row_id: {
+        type: Number,
+        index: true
+    }, // set only when submitted_by_type is 2 — the submitting company, so the
+       // OTHER side (the counterparty) can be identified for approval purposes
     date_n_time: {
         type: Date
     }
