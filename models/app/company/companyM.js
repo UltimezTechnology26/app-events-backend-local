@@ -52,8 +52,10 @@ const saveSchema = mongoose.Schema({
         type: String
     },
     describe_in_one_line: {
-        type: String,
-        index: true
+        type: String
+        // index removed: no query anywhere filters/sorts on this field alone —
+        // only ever read/projected for display or profile-completeness scoring
+        // (confirmed via full-codebase search, Part 2 §2.7).
     },
     main_business_model_id: {
         type: Number,
@@ -63,16 +65,20 @@ const saveSchema = mongoose.Schema({
         type: Object
     },
     investor_model_id: {
-        type: Number,
-        index: true
+        type: Number
+        // index removed: never queried alone anywhere in the codebase (only
+        // appears in the schema and an unrelated BigQuery export mapping) —
+        // confirmed dead, not just unused-in-window (Part 2 §2.7).
     },
     country_id: {
         type: Number,
         index: true
     },
     country_mobile_id: {
-        type: Number,
-        index: true
+        type: Number
+        // index removed: every occurrence in the codebase is a $lookup
+        // localField, a $project, or a write-side assignment — never a
+        // $match/find/sort filter (Part 2 §2.7).
     },
     company_location: {
         type: String,
@@ -118,7 +124,13 @@ const saveSchema = mongoose.Schema({
         type: Date
     },
     created_date_n_time: {
-        type: Date
+        type: Date,
+        index: true
+        // Added Part 3 §7 Phase B step 8, confirmed with the user before adding: .explain()
+        // showed the default company_list sort ('recent', used whenever no sort_by param is
+        // passed) had zero index support, paying for an in-memory SORT stage (~171ms) unlike
+        // the view_counts/company_name sort options (16-19ms, both index-order scans) — this
+        // matches that same simple single-field pattern, not a 3-field compound.
     },
     approval_status: {
         type: Number,
@@ -203,22 +215,38 @@ const saveSchema = mongoose.Schema({
 })
 
 saveSchema.index({ approval_status: 1, active_status: 1 });
-saveSchema.index({ approval_status: 1, active_status: 1, followers_count: -1 });
+// Removed: saveSchema.index({ approval_status: 1, active_status: 1, followers_count: -1 })
+// `followers_count` is not a schema field and is never written anywhere —
+// it only ever exists as a computed $addFields value sourced from
+// cln_company_followers, so this index could never structurally serve any
+// query (Part 2 §2.7).
 saveSchema.index({ approval_status: 1, active_status: 1, company_valuation: -1 });
 saveSchema.index({ approval_status: 1, active_status: 1, business_model_id: 1 });
-saveSchema.index({ approval_status: 1, active_status: 1, company_name: "text", company_id: "text" });
+// Removed: saveSchema.index({ approval_status: 1, active_status: 1, company_name: "text", company_id: "text" })
+// Confirmed zero `$text` operator usage anywhere in the codebase — all
+// search functionality uses $regex instead, so this text index was never
+// reachable (Part 2 §2.7).
 saveSchema.index({ main_business_model_id: 1, active_status: 1, approval_status: 1 });
 saveSchema.index({ _id: 1, active_status: 1, approval_status: 1 });
-saveSchema.index({ _id: 1, approval_status: 1, active_status: 1, country_id: 1 });
+// Removed: saveSchema.index({ _id: 1, approval_status: 1, active_status: 1, country_id: 1 })
+// No query anywhere combines all four fields; the real country-filter query
+// path omits `_id` entirely, so this compound was never selectable
+// (Part 2 §2.7).
 saveSchema.index({ _id: 1, approval_status: 1, active_status: 1, company_location: 1 });
-saveSchema.index({ latitude: 1, longitude: 1 });
+// Removed: saveSchema.index({ latitude: 1, longitude: 1 })
+// The geo radius-search feature is real and active (services/company/front_page.ts),
+// but it filters on computed lat_num/lon_num fields produced by $addFields+$convert,
+// not the raw latitude/longitude fields — this index could never be selected
+// by the query planner for that pipeline (Part 2 §2.7).
 
 saveSchema.index({ company_id: 1 }, { unique: true });
 saveSchema.index({ user_row_id: 1 }, { unique: true });
 saveSchema.index({ company_name: 1 });
 saveSchema.index({ business_model_id: 1 });
-saveSchema.index({ country_id: 1 });
-saveSchema.index({ main_business_model_id: 1 });
+// country_id and main_business_model_id already have field-level `index: true`
+// above (lines 69-72, 58-61) — the two explicit declarations that used to be
+// here were exact duplicates of those, confirmed via `getIndexes()` showing
+// two indexes on the same single field (Part 1 §3, Part 2 §2.4).
 saveSchema.index({ _id: 1, active_status: 1 });
 
 

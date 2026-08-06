@@ -2317,13 +2317,17 @@ router.get('/delete_professional_details/:professional_details_id', async (req, 
             const user_row_id = checkToken.message
             const professional_details_id = Number.parseInt(req.params.professional_details_id)
             if (!Number.isNaN(professional_details_id)) {
-                const query = await professionals_work_experienceM.findOne({ _id: professional_details_id, user_row_id: user_row_id }, { company_row_id: 1, till_date_status: 1 })
+                const query = await professionals_work_experienceM.findOne({ _id: professional_details_id, user_row_id: user_row_id }, { company_row_id: 1, till_date_status: 1, company_type: 1 })
                 if (query) {
 
                     await deleteProfessionalDetails({ professional_details_id: professional_details_id, type: 1 })
                     await deleteKeysByPattern('app_user_other_details_*')
 
                     await deleteKeysByPattern('professional_detail_list_*')
+                    if (query.company_type === 1 && query.company_row_id) {
+                        await deleteKeysByPattern('employee_list_*')
+                        await deleteKeysByPattern('app_company_individual_other_details_*')
+                    }
                     await calculateUserProfileScore(user_row_id, ['professional_detail'])
 
 

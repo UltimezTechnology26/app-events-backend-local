@@ -42,6 +42,7 @@
         "express": "^4.22.1",
         "express-fileupload": "^1.5.1",
         "express-ip": "^1.0.4",
+        "express-rate-limit": "^8.6.1",
         "express-validator": "^7.2.1",
         "fs-extra": "^11.3.3",
         "geolib": "^3.3.4",
@@ -89,7 +90,4 @@
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.9.3"
     }
-    
 }
-
-

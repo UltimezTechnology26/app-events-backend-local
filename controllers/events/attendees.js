@@ -3316,6 +3316,7 @@ router.get('/accept_invitation_request/:invitation_id', async (req, res) => {
 
                         await updateAttendeesCount({ event_row_id })
                         await deleteKeysByPattern('all_events_*')
+                        await deleteKeysByPattern('users_registered_list_*')
 
 
 

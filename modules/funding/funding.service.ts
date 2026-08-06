@@ -30,6 +30,7 @@ const companyM = require('../../models/app/company/companyM')
 const company_manual_retrievalsM = require('../../models/app/company/company_manual_retrievalsM')
 const professionals_manual_retrievalsM = require('../../models/app/users/professionals_manual_retrievalsM')
 const funding_investor_typesM = require('../../models/app/static/funding_investor_typesM')
+const funding_roundsM = require('../../models/app/static/funding_roundsM')
 
 export interface ValidatedInvestor {
   investor_type: number
@@ -104,8 +105,9 @@ const { getPresentDateTime } = require('../../utils/helpers/helper')
 const { updateNotification } = require('../../utils/helpers/notification_helper')
 const { calculateUserProfileScore, calculateCompanyProfileScore } = require('../../utils/helpers/app_helper')
 import { invalidateFundingCaches } from './funding.cache'
-import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview, joinPositionNamesExpr } from './funding.queries'
+import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview, joinPositionNamesExpr, buildCompanyListFundsRaisedPipeline, buildCompanyListFundsInvestedPipeline, buildPartnersListFundsRaisedPipeline, buildPartnersListFundsInvestedPipeline, buildVerifiedInvestorCountPipeline, buildVerifiedFundsInvestedTotalPipeline, buildVerifiedFundsRaisedTotalPipeline } from './funding.queries'
 import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
+import { extractPaginatedResult } from '../common/common.pagination'
 
 /**
  * Merged funds_raised_update_details (app + admin). Insert: one new round_id
@@ -129,6 +131,22 @@ export async function createOrUpdateRound(params: {
     return { status: false, message: errObj }
   }
 
+  // CONFIRMED BUG FIX: neither the funds-raised company nor the category were ever
+  // validated to actually exist — restoring both checks (legacy: funding.js:1280-1294),
+  // applied uniformly to insert and update, both actors. For an app actor this is a
+  // no-op (their own company, already resolved via resolveOwnCompanyId, is always
+  // active); for an admin actor this now rejects a nonexistent/disabled company or a
+  // bogus category id instead of silently saving one.
+  const companyM = require('../../models/app/company/companyM')
+  const check_company = await companyM.findOne({ _id: params.funds_raised_company_row_id, active_status: 1 }, { _id: 1 })
+  if (!check_company) {
+    return { status: false, message: { alert_message: 'Sorry, Invalid Funds Raised Company Row ID or Its Disabled' } }
+  }
+  const check_category = await funding_roundsM.findOne({ _id: params.category_row_id }, { _id: 1 })
+  if (!check_category) {
+    return { status: false, message: { category_row_id: 'The category row id field is invalid.' } }
+  }
+
   const sharedFields = {
     category_row_id: params.category_row_id,
     announcement_date: params.announcement_date,
@@ -137,6 +155,23 @@ export async function createOrUpdateRound(params: {
   const funds_raised_registered_type = 1
 
   if (!params.funding_row_id) {
+    // CONFIRMED BUG FIX: the subadmin company-scoping check was only ever applied
+    // on the update branch below — an admin actor could create a brand-new round for
+    // any company, bypassing their assigned scope entirely. App actors need no check
+    // here: funds_raised_company_row_id is already their own resolved company, never
+    // client-supplied.
+    if (params.actor.user_type === 2) {
+      const check_access = await checkCompanySubadminAccess({
+        admin_row_id: Number.parseInt(params.actor.token_message.admin_row_id),
+        admin_manager_type: params.actor.token_message.admin_manager_type,
+        sub_admin_type: Number.parseInt(params.actor.token_message.sub_admin_type),
+        company_row_id: params.funds_raised_company_row_id
+      })
+      if (!check_access.status) {
+        return { status: false, message: { alert_message: check_access.message } }
+      }
+    }
+
     const present_date_n_time = getPresentDateTime()
     const new_round_id = await getCollectionID('funding_round_id')
 
@@ -241,7 +276,7 @@ export async function createOrUpdateRound(params: {
 }
 
 const { checkUserSubadminAccess, checkCompanySubadminAccess } = require('../../utils/helpers/helper')
-const { deleteUserFunding, calculateUserProfileScore: calcUserScoreDelete, calculateCompanyProfileScore: calcCompanyScoreDelete } = require('../../utils/helpers/app_helper')
+const { calculateUserProfileScore: calcUserScoreDelete, calculateCompanyProfileScore: calcCompanyScoreDelete } = require('../../utils/helpers/app_helper')
 
 /**
  * Merged delete_funding_details (app + admin). SECURITY FIX: the old app route
@@ -308,9 +343,18 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
     }
   }
 
+  // CONFIRMED BUG FIX: this used to also call deleteUserFunding({funding_row_id: round_id,
+  // type:1}), which does fundingInvestmentM.deleteOne({_id: funding_row_id}) — but `_id` and
+  // `round_id` are separate, independently-incrementing counters (confirmed via the model's
+  // schema, which declares both as distinct fields), so that call searched for a document by
+  // `_id` using a `round_id` NUMBER. Every row actually belonging to this round is already
+  // removed by the deleteMany below; this second call was pure redundant risk — whenever some
+  // OTHER, unrelated funding row's `_id` happened to numerically equal this round's `round_id`,
+  // it would silently delete that unrelated row too. Removed entirely rather than "fixed" to
+  // target the right field, since the deleteMany above already does everything this round's
+  // deletion needs.
   await fundingInvestmentM.deleteMany({ round_id: params.round_id })
   await invalidateFundingCaches()
-  await deleteUserFunding({ funding_row_id: params.round_id, type: 1 })
 
   for (const row of round_rows) {
     if (row.investor_type === 1) {
@@ -461,6 +505,84 @@ export async function getInvestorList(params: { investor_type: number; investor_
  * getFundsRaisedListSelf already implements the correct shape, this just adds
  * the admin-specific company-existence check and delegates to it.
  */
+/**
+ * Ported from controllers/admin_panel/app/funding.js:2185-2906 (Part 3 §7 Phase H
+ * step 9) — a whole route with no equivalent anywhere else in this module:
+ * investors INTO a manually-retrieved company (funds_raised_registered_type: 2),
+ * a flat (non-round-grouped) list/count pair. Confirmed LIVE via admin-coinpedia's
+ * pages/api/companies/manual_retrievals/fund_raised.js.
+ *
+ * Deliberately NOT built on getFundsRaisedListSelf/getFundsRaisedListAdmin above —
+ * those are hardcoded to funds_raised_registered_type:1 and round-grouped
+ * (investors[]/is_syndicate), a genuinely different, richer shape added after this
+ * route's era. This route's real shape has always been flat, one row per investor,
+ * matching the real source exactly — not something to silently upgrade to the
+ * round-grouped shape here.
+ *
+ * Reuses resolveInvestorStages({rich:true}) for the 4-way investor identity
+ * resolution (person/manual-person/company/manual-company) rather than
+ * duplicating it — verified its 4 lookups match the real source's inline ones
+ * field-for-field, with one minor, low-risk divergence: the shared helper's
+ * company_info lookup additionally requires approval_status:1 (the real source
+ * here only checked active_status:1) — consistent with how every other route in
+ * this module already uses the shared helper, not fixed/loosened here.
+ */
+export async function getManualFundsRaisedList(params: { funds_raised_company_row_id: number; skip: number; limit: number }): Promise<{ list: any[]; count: number } | null> {
+  const company_manual_retrievalsM = require('../../models/app/company/company_manual_retrievalsM')
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+
+  const check_query = await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id })
+  if (!check_query) return null
+
+  const earlyMatchStage = { $match: { funds_raised_registered_type: 2, funds_raised_company_row_id: params.funds_raised_company_row_id } }
+  const categoryLookupStages: any[] = [
+    { $lookup: { from: 'cln_static_company_funding_rounds', localField: 'category_row_id', foreignField: '_id', as: 'category_info' } },
+    { $unwind: { path: '$category_info', preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: 'cln_static_funding_investor_types', localField: 'investor_category_row_id', foreignField: '_id', as: 'investor_category_info', pipeline: [{ $project: { category_name: 1 } }] } },
+    { $unwind: { path: '$investor_category_info', preserveNullAndEmptyArrays: true } }
+  ]
+  const investorDataSwitch = {
+    $switch: {
+      branches: [
+        { case: { $and: [{ $eq: ['$investor_type', 1] }, { $eq: ['$investor_registered_type', 1] }] }, then: '$user_info' },
+        { case: { $and: [{ $eq: ['$investor_type', 1] }, { $eq: ['$investor_registered_type', 2] }] }, then: '$user_manual_info' },
+        { case: { $and: [{ $eq: ['$investor_type', 2] }, { $eq: ['$investor_registered_type', 1] }] }, then: '$company_info' },
+        { case: { $and: [{ $eq: ['$investor_type', 2] }, { $eq: ['$investor_registered_type', 2] }] }, then: '$company_manual_info' }
+      ],
+      default: ''
+    }
+  }
+
+  const list = await fundingInvestmentM.aggregate([
+    { $sort: { _id: -1 } },
+    earlyMatchStage,
+    ...categoryLookupStages,
+    ...resolveInvestorStages({ rich: true }),
+    { $set: { investor_data: investorDataSwitch } },
+    {
+      $project: {
+        _id: 1, verified_status: 1, verified_on: 1, investor_type: 1, investor_registered_type: 1,
+        announcement_date: 1, category_row_id: 1, reject_type: 1, reject_reason: 1, amount: 1,
+        investor_position_name: { $cond: { if: '$investor_data.position_name', then: '$investor_data.position_name', else: '' } },
+        investor_company_name: { $cond: { if: '$investor_data.company_name', then: '$investor_data.company_name', else: '' } },
+        investor_image: { $cond: { if: '$investor_data.profile_image', then: '$investor_data.profile_image', else: '$investor_data.company_logo' } },
+        investor_name: { $cond: { if: '$investor_data.full_name', then: '$investor_data.full_name', else: '$investor_data.company_name' } },
+        investor_email_id: { $cond: { if: '$investor_data.email_id', then: '$investor_data.email_id', else: '$investor_data.company_email_id' } },
+        investor_category_name: '$investor_category_info.category_name',
+        category_name: '$category_info.category_name'
+      }
+    }
+  ]).skip(params.skip).limit(params.limit)
+
+  const countResult = await fundingInvestmentM.aggregate([
+    earlyMatchStage,
+    ...resolveInvestorStages({ rich: false }),
+    { $count: 'count' }
+  ])
+
+  return { list, count: countResult[0]?.count ?? 0 }
+}
+
 export async function getFundsRaisedListAdmin(params: { funds_raised_company_row_id: number; skip: number; limit: number; query: Record<string, any> }): Promise<any> {
   const companyM = require('../../models/app/company/companyM')
   const check_query = await companyM.findOne({ active_status: 1, _id: params.funds_raised_company_row_id })
@@ -648,10 +770,55 @@ export async function createInvestorUpdateAdmin(params: {
   const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
   const companyM = require('../../models/app/company/companyM')
 
+  // CONFIRMED BUG FIX: 5 DB-existence checks the real source ran before saving
+  // (funding.js:172-261) were all dropped in this port — an admin could silently
+  // save a record referencing a nonexistent/disabled investor, category, investor
+  // category, or funds-raised company, or issue a no-op update against a bogus
+  // funding_row_id. Restored below, admin-only (this whole function is admin-gated
+  // by its controller), so there is no app-flow to affect.
+  if (params.investor_type === 1) {
+    const investor_check = await professionalsM.findOne({ _id: params.investor_row_id, login_status: 1 }, { _id: 1 })
+    if (!investor_check) {
+      return { status: false, message: { investor_row_id: 'Sorry, Invalid User Row ID or Its Disabled' } }
+    }
+  } else {
+    const investor_check = await companyM.findOne({ _id: params.investor_row_id, active_status: 1 }, { _id: 1 })
+    if (!investor_check) {
+      return { status: false, message: { investor_row_id: 'Sorry, Invalid Company Row ID or Its Disabled' } }
+    }
+  }
+
+  const category_check = await funding_roundsM.findOne({ _id: params.category_row_id }, { _id: 1 })
+  if (!category_check) {
+    return { status: false, message: { category_row_id: 'The category row id field is invalid.' } }
+  }
+
+  if (params.investor_category_row_id) {
+    const investor_category_check = await funding_investor_typesM.findOne({ _id: params.investor_category_row_id }, { _id: 1 })
+    if (!investor_category_check) {
+      return { status: false, message: { investor_category_row_id: 'The investor category row id field is invalid.' } }
+    }
+  }
+
   let funds_raised_user_row_id = 0
   if (params.funds_raised_registered_type === 1) {
     const company_reg_query = await companyM.findOne({ _id: params.funds_raised_company_row_id, active_status: 1 }, { _id: 1, user_row_id: 1 })
-    if (company_reg_query?.user_row_id) funds_raised_user_row_id = company_reg_query.user_row_id
+    if (!company_reg_query) {
+      return { status: false, message: { investor_row_id: 'Sorry, Invalid registered company row id' } }
+    }
+    if (company_reg_query.user_row_id) funds_raised_user_row_id = company_reg_query.user_row_id
+  } else {
+    const company_manual_query = await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id }, { _id: 1 })
+    if (!company_manual_query) {
+      return { status: false, message: { investor_row_id: 'Sorry, Invalid manual company row id' } }
+    }
+  }
+
+  if (params.funding_row_id) {
+    const funding_check = await fundingInvestmentM.findOne({ _id: params.funding_row_id })
+    if (!funding_check) {
+      return { status: false, message: { funding_row_id: 'Invalid funding row id.' } }
+    }
   }
 
   const insertArray: any = {
@@ -846,7 +1013,13 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
     { $set: { investor_name: { $cond: { if: '$investor_data.full_name', then: '$investor_data.full_name', else: '$investor_data.company_name' } }, category_name: '$category_info.category_name' } }
   ]
 
-  const investorResolvedStage = { $match: { $expr: { $not: [{ $in: ['$investor_data', ['', null]] }] } } }
+  // CONFIRMED BUG FIX (Part 3 §7 Phase H step 12): this used to be a hard $match dropping any
+  // investor ROW whose identity failed to resolve, placed before $group — silently removing
+  // legitimate syndicate co-investors from a round's investors[] entirely (same bug class already
+  // found and fixed in getAllFundsRaisedList, see that function's own "CODE REVIEW FIX" comment).
+  // Removed; unresolved investor identity now only affects that investor's own display fields
+  // (already null-safe via $cond fallbacks in groupByRoundStage's $push below), not whether the
+  // row appears at all.
 
   const matchExprStages: any[] = []
   if (query.search) {
@@ -903,7 +1076,6 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
   const list = await fundingInvestmentM.aggregate([
     earlyMatchStage,
     ...resolveInvestorAndWorkStages,
-    investorResolvedStage,
     rowMatchStage,
     groupByRoundStage,
     { $match: { round_matches: true } },
@@ -916,7 +1088,6 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
   const [countResult] = await fundingInvestmentM.aggregate([
     earlyMatchStage,
     ...resolveInvestorAndWorkStages,
-    investorResolvedStage,
     rowMatchStage,
     groupByRoundStage,
     { $match: { round_matches: true } },
@@ -1134,6 +1305,16 @@ export async function getCompanyFundingDetails(companyRowId: number, query: Reco
     sort_order = Number.parseInt(query.sort_order) === 1 ? { amount: -1 } : Number.parseInt(query.sort_order) === 2 ? { amount: 1 } : sort_order
   }
 
+  // CONFIRMED BUG FIX: query.search was never read anywhere in this function —
+  // the company profile Funding tab's search box was a complete no-op. The
+  // display name (investor_name / company_name) only exists after each
+  // pipeline's enrichment $lookups resolve it, so the search match has to run
+  // as a late $match, after that pipeline's own $project, not folded into the
+  // early investment_search_query/raised_search_query arrays below (which only
+  // ever matched raw pre-enrichment fields).
+  const buildNameSearchStage = (field: string): any[] =>
+    query.search ? [{ $match: { [field]: { $regex: query.search, $options: 'i' } } }] : []
+
   const investment_search_query: any[] = [{}]
   const raised_search_query: any[] = [{ verified_status: 1, funds_raised_registered_type: 1, funds_raised_company_row_id: companyRowId }]
   if (query.investor_type == 1) {
@@ -1179,7 +1360,8 @@ export async function getCompanyFundingDetails(companyRowId: number, query: Reco
               investor_category_name: '$investor_category_info.category_name', category_name: '$category_info.category_name',
               round_investor_count: 1, is_syndicate: 1
             }
-          }
+          },
+          ...buildNameSearchStage('company_name')
         ]
       }
     }
@@ -1234,6 +1416,7 @@ export async function getCompanyFundingDetails(companyRowId: number, query: Reco
         investor_category_row_id: 1
       }
     },
+    ...buildNameSearchStage('investor_name'),
     {
       $group: {
         _id: '$round_id',
@@ -1457,6 +1640,23 @@ export async function createInvestorUserUpdate(params: {
     investor_row_id = ownCompany._id
   }
 
+  // CONFIRMED BUG FIX (Part 3 §7 Phase H step 12): this app-side port was missing the same 4
+  // DB-existence checks already restored for the admin twin, createInvestorUpdateAdmin, in step 9
+  // (whose own code comment there explicitly noted the app flow was NOT covered by that fix). An
+  // app user could silently save a record referencing a nonexistent category, investor category,
+  // or manual funds-raised company, or issue a no-op update against a bogus funding_row_id while
+  // still getting back a false "success" response.
+  const category_check = await funding_roundsM.findOne({ _id: params.category_row_id }, { _id: 1 })
+  if (!category_check) {
+    return { status: false, message: { category_row_id: 'The category row id field is invalid.' } }
+  }
+  if (params.investor_category_row_id) {
+    const investor_category_check = await funding_investor_typesM.findOne({ _id: params.investor_category_row_id }, { _id: 1 })
+    if (!investor_category_check) {
+      return { status: false, message: { investor_category_row_id: 'The investor category row id field is invalid.' } }
+    }
+  }
+
   let funds_raised_user_row_id = 0
   if (params.funds_raised_registered_type === 1) {
     const company_reg_query = await companyM.findOne({ _id: params.funds_raised_company_row_id, active_status: 1 }, { _id: 1, user_row_id: 1 })
@@ -1464,6 +1664,18 @@ export async function createInvestorUserUpdate(params: {
       return { status: false, message: { investor_row_id: 'Sorry, Invalid registered company row id' } }
     }
     if (company_reg_query.user_row_id) funds_raised_user_row_id = company_reg_query.user_row_id
+  } else {
+    const company_manual_query = await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id }, { _id: 1 })
+    if (!company_manual_query) {
+      return { status: false, message: { investor_row_id: 'Sorry, Invalid manual company row id' } }
+    }
+  }
+
+  if (params.funding_row_id) {
+    const funding_check = await fundingInvestmentM.findOne({ _id: params.funding_row_id })
+    if (!funding_check) {
+      return { status: false, message: { funding_row_id: 'Invalid funding row id.' } }
+    }
   }
 
   const insertArray: any = {
@@ -1540,4 +1752,143 @@ export async function getManualInvestorList(params: { investor_type: number; inv
 
   const [countResult] = await fundingInvestmentM.aggregate([...commonStages, { $count: 'count' }])
   return { list, count: countResult?.count ?? 0 }
+}
+
+/**
+ * Ports companyList's report_list_type===3 branch (Part 3 §7 Phase B step 4) —
+ * called by getCompanyListDetails (services/company/front_page.ts) for the
+ * "funds raised" company-directory listing. Returns the same `{ list, count }`
+ * shape as the legacy companyList() so the caller doesn't need to change.
+ */
+export async function getCompanyListFundsRaisedResult({
+  query,
+  skip,
+  limit,
+  user_row_id,
+  boundingBox
+}: {
+  query: any
+  skip: number
+  limit: number
+  user_row_id: any
+  boundingBox?: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null
+}) {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const aggregateOutput = await fundingInvestmentM.aggregate(
+    buildCompanyListFundsRaisedPipeline({ query, skip, limit, user_row_id, boundingBox })
+  )
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+  return { list: data, count }
+}
+
+/**
+ * Ports companyList's report_list_type===4 branch (Part 3 §7 Phase B step 4) —
+ * called by getCompanyListDetails for the "funds invested" company-directory
+ * listing. Same `{ list, count }` return shape as the legacy companyList().
+ */
+export async function getCompanyListFundsInvestedResult({
+  query,
+  skip,
+  limit,
+  user_row_id,
+  boundingBox
+}: {
+  query: any
+  skip: number
+  limit: number
+  user_row_id: any
+  boundingBox?: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null
+}) {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const aggregateOutput = await fundingInvestmentM.aggregate(
+    buildCompanyListFundsInvestedPipeline({ query, skip, limit, user_row_id, boundingBox })
+  )
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+  return { list: data, count }
+}
+
+/**
+ * Ports partnersList's report_list_type===3 branch (Part 3 §7 Phase B step 4) —
+ * called by getPartnerListDetails for the "funds raised" partner-directory
+ * listing. Returns { list, count } directly (unlike getCompanyListDetails's
+ * data.list/data.count shape, getPartnerListDetails destructures { list, count }
+ * straight from partnersList() — this matches that contract).
+ */
+export async function getPartnersListFundsRaisedResult({
+  searchArray,
+  skip,
+  limit,
+  user_row_id
+}: {
+  searchArray: any[]
+  skip: number
+  limit: number
+  user_row_id: any
+}) {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const aggregateOutput = await fundingInvestmentM.aggregate(
+    buildPartnersListFundsRaisedPipeline({ searchArray, skip, limit, user_row_id })
+  )
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+  return { list: data, count }
+}
+
+/**
+ * Ports partnersList's report_list_type===4 branch (Part 3 §7 Phase B step 4) —
+ * called by getPartnerListDetails for the "funds invested" partner-directory
+ * listing. Same { list, count } contract as getPartnersListFundsRaisedResult.
+ */
+export async function getPartnersListFundsInvestedResult({
+  searchArray,
+  skip,
+  limit,
+  user_row_id
+}: {
+  searchArray: any[]
+  skip: number
+  limit: number
+  user_row_id: any
+}) {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const aggregateOutput = await fundingInvestmentM.aggregate(
+    buildPartnersListFundsInvestedPipeline({ searchArray, skip, limit, user_row_id })
+  )
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+  return { list: data, count }
+}
+
+/**
+ * Ports the admin dashboard's total_number_investor stat — delegated here from
+ * modules/company_admin/ (Part 3 §7 Phase H step 3), since it's fundamentally a funding-domain
+ * count, not company-admin's own concern.
+ */
+export async function getVerifiedInvestorCount(): Promise<number> {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const result: any[] = await fundingInvestmentM.aggregate(buildVerifiedInvestorCountPipeline())
+  return result[0]?.count ?? 0
+}
+
+/**
+ * Ports company.js's company_individual_overview's total_funds_invested/total_funds_raised
+ * stats (Part 3 §7 Phase H step 5) — delegated here from modules/company_admin/. Preserves the
+ * real source's exact (asymmetric) presence rules: a key is included only when its aggregate
+ * produced a row AND that row's total is truthy — a genuinely 0 total is indistinguishable from
+ * "no data" here and the key is omitted either way, matching the legacy
+ * `if (rows[0]) { if (rows[0].total) { result[...] = rows[0].total } }` nesting exactly.
+ */
+export async function getVerifiedFundingTotals(companyRowId: number): Promise<{ total_funds_invested?: number; total_funds_raised?: number }> {
+  const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM')
+  const [investedRows, raisedRows]: [any[], any[]] = await Promise.all([
+    fundingInvestmentM.aggregate(buildVerifiedFundsInvestedTotalPipeline(companyRowId)),
+    fundingInvestmentM.aggregate(buildVerifiedFundsRaisedTotalPipeline(companyRowId)),
+  ])
+
+  const result: { total_funds_invested?: number; total_funds_raised?: number } = {}
+  if (investedRows[0]?.total) {
+    result.total_funds_invested = investedRows[0].total
+  }
+  if (raisedRows[0]?.total) {
+    result.total_funds_raised = raisedRows[0].total
+  }
+  return result
 }

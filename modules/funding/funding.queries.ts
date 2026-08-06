@@ -409,3 +409,1344 @@ export function groupRoundWithInvestorsStages(): PipelineStage[] {
     }
   ] as PipelineStage[]
 }
+
+/**
+ * Ports companyList's report_list_type===3 branch (services/company/front_page.ts:1645-2048)
+ * — the "funds raised" company-directory listing. One $facet stage combining
+ * list and count (Part 1 §3 finding 3, Part 3 §7 Phase B step 4) instead of two
+ * separate `.aggregate()` calls; unlike the type=1 branch, both sides already
+ * shared the identical base pipeline here (including the login_status filter),
+ * so there's no count/list correctness bug to fix in this one — purely a
+ * duplicate-query consolidation, output unchanged.
+ */
+export function buildCompanyListFundsRaisedPipeline({
+  query,
+  skip,
+  limit,
+  user_row_id,
+  boundingBox
+}: {
+  query: any
+  skip: number
+  limit: number
+  user_row_id: any
+  boundingBox?: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null
+}): PipelineStage[] {
+  const basePipeline: any[] = [
+    {
+      $match: {
+        funds_raised_registered_type: 1,
+        verified_status: 1
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        let: {
+          investor_type: "$investor_type",
+          investor_registered_type: "$investor_registered_type",
+          investor_row_id: "$investor_row_id"
+        },
+        as: "company_info",
+        pipeline: [
+          {
+            $match: {
+              $and: [
+                {
+                  $expr: {
+                    $and: [
+                      { $eq: [2, "$$investor_type"] },
+                      { $eq: [1, "$$investor_registered_type"] },
+                      { $eq: ["$_id", "$$investor_row_id"] }
+                    ]
+                  }
+                },
+                { active_status: 1 }
+              ]
+            }
+          },
+          { $project: { _id: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        investor_data: {
+          $switch: {
+            branches: [
+              {
+                case: {
+                  $and: [
+                    { $eq: ["$investor_type", 2] },
+                    { $eq: ["$investor_registered_type", 1] }
+                  ]
+                },
+                then: "$company_info._id"
+              },
+              {
+                case: {
+                  $or: [
+                    { $and: [{ $eq: ["$investor_type", 1] }, { $eq: ["$investor_registered_type", 2] }] },
+                    { $and: [{ $eq: ["$investor_type", 2] }, { $eq: ["$investor_registered_type", 2] }] },
+                    { $and: [{ $eq: ["$investor_type", 1] }, { $eq: ["$investor_registered_type", 1] }] }
+                  ]
+                },
+                then: "$investor_row_id"
+              }
+            ],
+            default: ""
+          }
+        }
+      }
+    },
+    { $match: { investor_data: { $gt: 0 } } },
+    // Collapse to one document per round_id BEFORE the company-level group,
+    // so a multi-investor round's shared amount is counted once instead of
+    // once per investor row — same rule as the funding_info lookup elsewhere
+    // in this file. category_row_id is kept via $first since it's the same
+    // across every row in a round.
+    {
+      $group: {
+        _id: "$round_id",
+        funds_raised_company_row_id: { $first: "$funds_raised_company_row_id" },
+        amount: { $first: "$amount" },
+        category_row_id: { $first: "$category_row_id" },
+        investor_identities: {
+          $push: {
+            investor_row_id: "$investor_row_id",
+            investor_type: "$investor_type",
+            investor_registered_type: "$investor_registered_type"
+          }
+        }
+      }
+    },
+    // Final group back to one document per company. round_ids counts
+    // distinct ROUNDS. category_ids is kept for the funding_rounds name
+    // lookup below. funds_raised_ids flattens the per-round investor
+    // identities collected above into one set, since
+    // total_funds_raised_companies should still reflect every distinct
+    // investor across all of this company's rounds.
+    {
+      $group: {
+        _id: "$funds_raised_company_row_id",
+        total_funds_raised_amount: { $sum: "$amount" },
+        round_ids: { $addToSet: "$_id" },
+        category_ids: { $addToSet: "$category_row_id" },
+        funds_raised_ids: { $push: "$investor_identities" }
+      }
+    },
+    // Flatten the per-round investor-identity arrays into one set of
+    // distinct investors across all rounds.
+    {
+      $addFields: {
+        funds_raised_ids: {
+          $reduce: {
+            input: "$funds_raised_ids",
+            initialValue: [],
+            in: { $setUnion: ["$$value", "$$this"] }
+          }
+        }
+      }
+    },
+    { $sort: { total_funds_raised_amount: -1, _id: 1 } },
+    {
+      $lookup: {
+        from: "cln_static_company_funding_rounds",
+        localField: "category_ids",
+        foreignField: "_id",
+        as: "funding_rounds",
+        pipeline: [{ $project: { category_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        localField: "_id",
+        foreignField: "_id",
+        as: "company_info",
+        pipeline: [
+          { $match: { approval_status: 1, active_status: 1 } },
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1, login_status: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+          {
+            $set: {
+              login_status: { $cond: { if: "$user_info", then: "$user_info.login_status", else: 1 } }
+            }
+          },
+          { $match: { login_status: 1 } },
+          {
+            $project: {
+              company_name: 1,
+              company_id: 1,
+              company_logo: 1,
+              company_location: 1,
+              company_valuation: 1,
+              business_model_id: 1,
+              describe_in_one_line: 1,
+              main_business_model_id: 1,
+              country_id: 1,
+              latitude: 1,
+              longitude: 1
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info" } },
+    {
+      $set: {
+        company_name: "$company_info.company_name",
+        company_id: "$company_info.company_id",
+        company_location: "$company_info.company_location",
+        business_model_id: "$company_info.business_model_id",
+        main_business_model_id: "$company_info.main_business_model_id",
+        country_id: "$company_info.country_id",
+        company_valuation: "$company_info.company_valuation",
+        latitude: "$company_info.latitude",
+        longitude: "$company_info.longitude"
+      }
+    },
+    {
+      $addFields: {
+        lat_num: { $convert: { input: "$latitude", to: "double", onError: null, onNull: null } },
+        lon_num: { $convert: { input: "$longitude", to: "double", onError: null, onNull: null } }
+      }
+    },
+    ...(boundingBox ? [{
+      $match: {
+        lat_num: { $gte: boundingBox.minLat, $lte: boundingBox.maxLat },
+        lon_num: { $gte: boundingBox.minLon, $lte: boundingBox.maxLon }
+      }
+    }] : []),
+    { $match: query },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "main_business_model_id",
+        foreignField: "_id",
+        as: "main_business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    { $unwind: { path: "$main_business_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "business_model_id",
+        foreignField: "_id",
+        as: "business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_static_countries",
+        localField: "country_id",
+        foreignField: "_id",
+        as: "country_info",
+        pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
+      }
+    },
+    { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        as: "followers_info",
+        pipeline: [
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "inner_user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1 } }
+              ]
+            }
+          },
+          { $unwind: "$inner_user_info" },
+          { $count: "count" }
+        ]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { user_row_id: user_row_id } }],
+        as: "info_user_following"
+      }
+    },
+    { $unwind: { path: "$info_user_following", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_watchlists",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { user_row_id: user_row_id } }],
+        as: "info_company_watchlist"
+      }
+    },
+    { $unwind: { path: "$info_company_watchlist", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        company_name: 1,
+        company_id: 1,
+        latitude: 1,
+        longitude: 1,
+        lat_num: 1,
+        lon_num: 1,
+        total_funds_raised_companies: { $size: "$funds_raised_ids" },
+        total_funds_raised_rounds: { $size: "$round_ids" },
+        funds_raised_rounds: "$funding_rounds.category_name",
+        total_funds_raised_amount: 1,
+        company_location: 1,
+        main_business_model_id: 1,
+        country_id: 1,
+        company_logo: "$company_info.company_logo",
+        describe_in_one_line: "$company_info.describe_in_one_line",
+        country_flag: "$country_info.country_flag",
+        country_name: "$country_info.country_name",
+        company_valuation: 1,
+        business_name: "$business_info.business_name",
+        main_business_model_name: "$main_business_info.business_name",
+        watchlist_status: { $cond: { if: "$info_company_watchlist", then: 1, else: 0 } },
+        following_status: { $cond: { if: "$info_user_following", then: 1, else: 0 } },
+        total_followers: { $cond: { if: { $gt: [{ $size: "$followers_info" }, 0] }, then: "$followers_info.count", else: 0 } }
+      }
+    }
+  ]
+
+  return [
+    ...basePipeline,
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: 'count' }]
+      }
+    }
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports partnersList's report_list_type===3 branch (services/company/front_page.ts:5734-6301)
+ * — the "funds raised" partner-directory listing (same shape as
+ * buildCompanyListFundsRaisedPipeline, but scoped to partner-flagged companies
+ * via the cln_company_added_to_partners inner-join). $facet consolidation only
+ * (Part 1 §3 finding 3) — list and count already shared an identical filter
+ * chain (including the partner + login_status filters) here, confirmed line by
+ * line before migrating, so there's no correctness bug to fix in this one.
+ */
+export function buildPartnersListFundsRaisedPipeline({
+  searchArray,
+  skip,
+  limit,
+  user_row_id
+}: {
+  searchArray: any[]
+  skip: number
+  limit: number
+  user_row_id: any
+}): PipelineStage[] {
+  const basePipeline: any[] = [
+    {
+      $match: {
+        funds_raised_registered_type: 1, verified_status: 1
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        let: {
+          investor_type: '$investor_type',
+          investor_registered_type: '$investor_registered_type',
+          investor_row_id: '$investor_row_id'
+        },
+        as: "company_info",
+        pipeline: [
+          {
+            $match: {
+              $and: [
+                {
+                  $expr: {
+                    $and: [
+                      { $eq: [2, '$$investor_type'] },
+                      { $eq: [1, '$$investor_registered_type'] },
+                      { $eq: ['$_id', '$$investor_row_id'] }
+                    ]
+                  }
+                },
+                { active_status: 1 }
+              ]
+            }
+          },
+          { $project: { _id: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        investor_data: {
+          $switch: {
+            branches: [
+              {
+                case: { $and: [{ $eq: ['$investor_type', 2] }, { $eq: ['$investor_registered_type', 1] }] },
+                then: "$company_info._id"
+              },
+              {
+                case: {
+                  $or: [
+                    { $and: [{ $eq: ['$investor_type', 1] }, { $eq: ['$investor_registered_type', 2] }] },
+                    { $and: [{ $eq: ['$investor_type', 2] }, { $eq: ['$investor_registered_type', 2] }] },
+                    { $and: [{ $eq: ['$investor_type', 1] }, { $eq: ['$investor_registered_type', 1] }] }
+                  ]
+                },
+                then: "$investor_row_id"
+              }
+            ],
+            default: ""
+          }
+        }
+      }
+    },
+    { $match: { investor_data: { $gt: 0 } } },
+    {
+      $group: {
+        _id: "$funds_raised_company_row_id",
+        total_funds_raised_amount: { $sum: '$amount' },
+        category_ids: { $addToSet: '$category_row_id' },
+        funds_raised_ids: {
+          $addToSet: {
+            investor_row_id: '$investor_row_id',
+            investor_type: '$investor_type',
+            investor_registered_type: '$investor_registered_type'
+          }
+        }
+      }
+    },
+    { $sort: { total_funds_raised_amount: -1, _id: 1 } },
+    {
+      $lookup: {
+        from: "cln_static_company_funding_rounds",
+        localField: "category_ids",
+        foreignField: "_id",
+        as: "funding_rounds",
+        pipeline: [{ $project: { category_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        localField: "_id",
+        foreignField: "_id",
+        as: "company_info",
+        pipeline: [
+          { $match: { approval_status: 1, active_status: 1 } },
+          {
+            $lookup: {
+              from: "cln_company_added_to_partners",
+              localField: "_id",
+              foreignField: "company_row_id",
+              as: "info_parnters",
+              pipeline: [{ $project: { _id: 1 } }]
+            }
+          },
+          { $unwind: { path: "$info_parnters" } },
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1, login_status: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+          {
+            $set: {
+              login_status: { $cond: { if: "$user_info", then: "$user_info.login_status", else: 1 } }
+            }
+          },
+          { $match: { login_status: 1 } },
+          {
+            $project: {
+              company_name: 1,
+              company_id: 1,
+              company_logo: 1,
+              latitude: 1,
+              longitude: 1,
+              company_location: 1,
+              company_valuation: 1,
+              business_model_id: 1,
+              describe_in_one_line: 1,
+              main_business_model_id: 1,
+              country_id: 1
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info" } },
+    {
+      $set: {
+        company_name: "$company_info.company_name",
+        company_id: "$company_info.company_id",
+        company_location: "$company_info.company_location",
+        business_model_id: "$company_info.business_model_id",
+        main_business_model_id: "$company_info.main_business_model_id",
+        country_id: "$company_info.country_id",
+        company_valuation: "$company_info.company_valuation"
+      }
+    },
+    { $match: { $and: searchArray } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "main_business_model_id",
+        foreignField: "_id",
+        as: "main_business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    { $unwind: { path: "$main_business_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "business_model_id",
+        foreignField: "_id",
+        as: "business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_static_countries",
+        localField: "country_id",
+        foreignField: "_id",
+        as: "country_info",
+        pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
+      }
+    },
+    { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        as: "followers_info",
+        pipeline: [
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "inner_user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$inner_user_info" } },
+          { $count: 'count' }
+        ]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_user_following"
+      }
+    },
+    { $unwind: { path: "$info_user_following", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_watchlists",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_company_watchlist"
+      }
+    },
+    { $unwind: { path: "$info_company_watchlist", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        company_row_id: "$_id",
+        company_name: 1,
+        company_id: 1,
+        total_funds_raised_companies: { $size: '$funds_raised_ids' },
+        total_funds_raised_rounds: { $size: '$category_ids' },
+        funds_raised_rounds: '$funding_rounds.category_name',
+        company_location: 1,
+        main_business_model_id: 1,
+        country_id: 1,
+        total_funds_raised_amount: 1,
+        company_logo: "$company_info.company_logo",
+        describe_in_one_line: '$company_info.describe_in_one_line',
+        country_flag: "$country_info.country_flag",
+        country_name: "$country_info.country_name",
+        company_valuation: 1,
+        latitude: "$company.latitude",
+        longitude: "$company.longitude",
+        business_name: "$business_info.business_name",
+        main_business_model_name: "$main_business_info.business_name",
+        watchlist_status: { $cond: { if: "$info_company_watchlist", then: 1, else: 0 } },
+        following_status: { $cond: { if: "$info_user_following", then: 1, else: 0 } },
+        total_followers: { $cond: { if: { $gt: [{ $size: "$followers_info" }, 0] }, then: "$followers_info.count", else: 0 } }
+      }
+    }
+  ]
+
+  return [
+    ...basePipeline,
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: 'count' }]
+      }
+    }
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports companyList's report_list_type===4 branch (services/company/front_page.ts:2050-2426)
+ * — the "funds invested" company-directory listing (companies that invested in
+ * others, as opposed to type=3's companies that raised funds). Same $facet
+ * consolidation as buildCompanyListFundsRaisedPipeline; no login_status bug
+ * here either (list/count already shared one base pipeline).
+ */
+export function buildCompanyListFundsInvestedPipeline({
+  query,
+  skip,
+  limit,
+  user_row_id,
+  boundingBox
+}: {
+  query: any
+  skip: number
+  limit: number
+  user_row_id: any
+  boundingBox?: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null
+}): PipelineStage[] {
+  const basePipeline: any[] = [
+    {
+      $match: {
+        investor_type: 2, investor_registered_type: 1, verified_status: 1
+      }
+    },
+    ...(boundingBox ? [{
+      $match: {
+        $expr: {
+          $and: [
+            { $gte: [{ $convert: { input: "$latitude", to: "double", onError: null, onNull: null } }, boundingBox.minLat] },
+            { $lte: [{ $convert: { input: "$latitude", to: "double", onError: null, onNull: null } }, boundingBox.maxLat] },
+            { $gte: [{ $convert: { input: "$longitude", to: "double", onError: null, onNull: null } }, boundingBox.minLon] },
+            { $lte: [{ $convert: { input: "$longitude", to: "double", onError: null, onNull: null } }, boundingBox.maxLon] }
+          ]
+        }
+      }
+    }] : []),
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        let: {
+          funds_raised_registered_type: '$funds_raised_registered_type',
+          funds_raised_company_row_id: '$funds_raised_company_row_id'
+        },
+        as: "company_info",
+        pipeline: [
+          {
+            $match: {
+              $and: [
+                {
+                  $expr: {
+                    $and: [
+                      { $eq: [1, '$$funds_raised_registered_type'] },
+                      { $eq: ['$_id', '$$funds_raised_company_row_id'] }
+                    ]
+                  }
+                },
+                { active_status: 1 }
+              ]
+            }
+          },
+          { $project: { _id: 1, company_id: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        investor_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 1] }] }, then: '$company_info._id' },
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 2] }] }, then: '$funds_raised_company_row_id' }
+            ],
+            default: 0
+          }
+        }
+      }
+    },
+    { $match: { investor_data: { $gt: 0 } } },
+    // Self-lookup: count how many total rows (across all investors) share
+    // this row's round_id, to detect syndicate (multi-investor) rounds.
+    {
+      $lookup: {
+        from: "cln_funding_investment_lists",
+        let: { round_id: "$round_id" },
+        as: "round_investor_rows",
+        pipeline: [
+          { $match: { $expr: { $eq: ["$round_id", "$$round_id"] } } },
+          { $project: { _id: 1 } }
+        ]
+      }
+    },
+    // Exclude syndicate rounds (more than 1 investor sharing round_id) — same
+    // rule applied to investor_overview and investment_graph: syndicate
+    // amounts are excluded entirely from this investor's totals, since their
+    // individual contribution to a shared round isn't known.
+    { $match: { $expr: { $lte: [{ $size: "$round_investor_rows" }, 1] } } },
+    {
+      $group: {
+        _id: "$investor_row_id",
+        total_invested_amount: { $sum: '$amount' },
+        round_ids: { $addToSet: '$round_id' },
+        category_ids: { $addToSet: '$category_row_id' },
+        funds_raised_ids: { $addToSet: '$funds_raised_company_row_id' }
+      }
+    },
+    // _id added as a secondary sort key (Part 3 §7 Phase B step 4, confirmed with
+    // the user before fixing): total_invested_amount alone left ties (e.g. two
+    // companies both at $0 invested) with no deterministic tiebreaker, so the
+    // exact same query could return them in a different relative order between
+    // separate executions — confirmed via the characterization harness comparing
+    // two independent runs. Pre-existing in the legacy source, not introduced by
+    // this migration; fixed here since this is where the pipeline was rewritten.
+    { $sort: { total_invested_amount: -1, _id: 1 } },
+    {
+      $lookup: {
+        from: "cln_static_company_funding_rounds",
+        localField: "category_ids",
+        foreignField: "_id",
+        as: "invested_rounds",
+        pipeline: [{ $project: { category_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        localField: "_id",
+        foreignField: "_id",
+        as: "company_info",
+        pipeline: [
+          { $match: { approval_status: 1, active_status: 1 } },
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1, login_status: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+          {
+            $set: {
+              login_status: { $cond: { if: "$user_info", then: "$user_info.login_status", else: 1 } }
+            }
+          },
+          { $match: { login_status: 1 } },
+          {
+            $project: {
+              company_name: 1,
+              company_id: 1,
+              company_logo: 1,
+              company_location: 1,
+              company_valuation: 1,
+              business_model_id: 1,
+              describe_in_one_line: 1,
+              main_business_model_id: 1,
+              country_id: 1,
+              latitude: 1,
+              longitude: 1
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info" } },
+    {
+      $set: {
+        company_name: "$company_info.company_name",
+        company_id: "$company_info.company_id",
+        company_location: "$company_info.company_location",
+        business_model_id: "$company_info.business_model_id",
+        main_business_model_id: "$company_info.main_business_model_id",
+        country_id: "$company_info.country_id",
+        company_valuation: "$company_info.company_valuation",
+        latitude: "$company_info.latitude",
+        longitude: "$company_info.longitude"
+      }
+    },
+    { $match: query },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "main_business_model_id",
+        foreignField: "_id",
+        as: "main_business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    { $unwind: { path: "$main_business_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "business_model_id",
+        foreignField: "_id",
+        as: "business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_static_countries",
+        localField: "country_id",
+        foreignField: "_id",
+        as: "country_info",
+        pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
+      }
+    },
+    { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        as: "followers_info",
+        pipeline: [
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "inner_user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$inner_user_info" } },
+          { $count: 'count' }
+        ]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_user_following"
+      }
+    },
+    { $unwind: { path: "$info_user_following", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_watchlists",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_company_watchlist"
+      }
+    },
+    { $unwind: { path: "$info_company_watchlist", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        company_name: 1,
+        company_id: 1,
+        latitude: 1,
+        longitude: 1,
+        total_invested_companies: { $size: '$funds_raised_ids' },
+        total_invested_rounds: { $size: '$round_ids' },
+        invested_rounds: '$invested_rounds.category_name',
+        company_location: 1,
+        main_business_model_id: 1,
+        country_id: 1,
+        total_invested_amount: 1,
+        business_name: "$business_info.business_name",
+        company_logo: "$company_info.company_logo",
+        describe_in_one_line: '$company_info.describe_in_one_line',
+        country_flag: "$country_info.country_flag",
+        country_name: "$country_info.country_name",
+        company_valuation: 1,
+        main_business_model_name: "$main_business_info.business_name",
+        watchlist_status: { $cond: { if: "$info_company_watchlist", then: 1, else: 0 } },
+        following_status: { $cond: { if: "$info_user_following", then: 1, else: 0 } },
+        total_followers: { $cond: { if: { $gt: [{ $size: "$followers_info" }, 0] }, then: "$followers_info.count", else: 0 } }
+      }
+    }
+  ]
+
+  return [
+    ...basePipeline,
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: 'count' }]
+      }
+    }
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports partnersList's report_list_type===4 branch (services/company/front_page.ts:6303-6801)
+ * — the "funds invested" partner-directory listing. $facet consolidation only
+ * (Part 1 §3 finding 3); list and count already shared an identical filter
+ * chain here (partner + login_status filters both applied identically before
+ * the searchArray match), confirmed line by line, no correctness bug here.
+ */
+export function buildPartnersListFundsInvestedPipeline({
+  searchArray,
+  skip,
+  limit,
+  user_row_id
+}: {
+  searchArray: any[]
+  skip: number
+  limit: number
+  user_row_id: any
+}): PipelineStage[] {
+  const basePipeline: any[] = [
+    {
+      $match: {
+        investor_type: 2, investor_registered_type: 1, verified_status: 1
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        let: {
+          funds_raised_registered_type: '$funds_raised_registered_type',
+          funds_raised_company_row_id: '$funds_raised_company_row_id'
+        },
+        as: "company_info",
+        pipeline: [
+          {
+            $match: {
+              $and: [
+                {
+                  $expr: {
+                    $and: [
+                      { $eq: [1, '$$funds_raised_registered_type'] },
+                      { $eq: ['$_id', '$$funds_raised_company_row_id'] }
+                    ]
+                  }
+                },
+                { active_status: 1 }
+              ]
+            }
+          },
+          { $project: { _id: 1, company_id: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        investor_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 1] }] }, then: '$company_info._id' },
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 2] }] }, then: '$funds_raised_company_row_id' }
+            ],
+            default: 0
+          }
+        }
+      }
+    },
+    { $match: { investor_data: { $gt: 0 } } },
+    {
+      $group: {
+        _id: "$investor_row_id",
+        total_invested_amount: { $sum: '$amount' },
+        category_ids: { $addToSet: '$category_row_id' },
+        funds_raised_ids: { $addToSet: '$funds_raised_company_row_id' }
+      }
+    },
+    // _id added as a secondary sort key (Part 3 §7 Phase B step 4, confirmed with
+    // the user before fixing): total_invested_amount alone left ties (e.g. two
+    // companies both at $0 invested) with no deterministic tiebreaker, so the
+    // exact same query could return them in a different relative order between
+    // separate executions — confirmed via the characterization harness comparing
+    // two independent runs. Pre-existing in the legacy source, not introduced by
+    // this migration; fixed here since this is where the pipeline was rewritten.
+    { $sort: { total_invested_amount: -1, _id: 1 } },
+    {
+      $lookup: {
+        from: "cln_static_company_funding_rounds",
+        localField: "category_ids",
+        foreignField: "_id",
+        as: "invested_rounds",
+        pipeline: [{ $project: { category_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_lists",
+        localField: "_id",
+        foreignField: "_id",
+        as: "company_info",
+        pipeline: [
+          { $match: { approval_status: 1, active_status: 1 } },
+          {
+            $lookup: {
+              from: "cln_company_added_to_partners",
+              localField: "_id",
+              foreignField: "company_row_id",
+              as: "info_parnters",
+              pipeline: [{ $project: { _id: 1 } }]
+            }
+          },
+          { $unwind: { path: "$info_parnters" } },
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1, login_status: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+          {
+            $set: {
+              login_status: { $cond: { if: "$user_info", then: "$user_info.login_status", else: 1 } }
+            }
+          },
+          { $match: { login_status: 1 } },
+          {
+            $project: {
+              company_name: 1,
+              company_id: 1,
+              company_logo: 1,
+              company_location: 1,
+              company_valuation: 1,
+              business_model_id: 1,
+              describe_in_one_line: 1,
+              main_business_model_id: 1,
+              latitude: 1,
+              longitude: 1,
+              country_id: 1
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: "$company_info" } },
+    {
+      $set: {
+        company_name: "$company_info.company_name",
+        company_id: "$company_info.company_id",
+        company_location: "$company_info.company_location",
+        business_model_id: "$company_info.business_model_id",
+        main_business_model_id: "$company_info.main_business_model_id",
+        country_id: "$company_info.country_id",
+        company_valuation: "$company_info.company_valuation"
+      }
+    },
+    { $match: { $and: searchArray } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "main_business_model_id",
+        foreignField: "_id",
+        as: "main_business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    { $unwind: { path: "$main_business_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_static_company_business_models",
+        localField: "business_model_id",
+        foreignField: "_id",
+        as: "business_info",
+        pipeline: [{ $project: { business_name: 1 } }]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_static_countries",
+        localField: "country_id",
+        foreignField: "_id",
+        as: "country_info",
+        pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
+      }
+    },
+    { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        as: "followers_info",
+        pipeline: [
+          {
+            $lookup: {
+              from: "cln_professionals",
+              localField: "user_row_id",
+              foreignField: "_id",
+              as: "inner_user_info",
+              pipeline: [
+                { $match: { login_status: 1 } },
+                { $project: { _id: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$inner_user_info" } },
+          { $count: 'count' }
+        ]
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_company_followers",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_user_following"
+      }
+    },
+    { $unwind: { path: "$info_user_following", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_company_watchlists",
+        localField: "_id",
+        foreignField: "company_row_id",
+        pipeline: [{ $match: { "user_row_id": user_row_id } }],
+        as: "info_company_watchlist"
+      }
+    },
+    { $unwind: { path: "$info_company_watchlist", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        company_row_id: "$_id",
+        company_name: 1,
+        company_id: 1,
+        total_invested_companies: { $size: '$funds_raised_ids' },
+        total_invested_rounds: { $size: '$category_ids' },
+        invested_rounds: '$invested_rounds.category_name',
+        company_location: 1,
+        main_business_model_id: 1,
+        country_id: 1,
+        total_invested_amount: 1,
+        company_logo: "$company_info.company_logo",
+        describe_in_one_line: '$company_info.describe_in_one_line',
+        country_flag: "$country_info.country_flag",
+        country_name: "$country_info.country_name",
+        company_valuation: 1,
+        latitude: "$company.latitude",
+        longitude: "$company.longitude",
+        business_name: "$business_info.business_name",
+        main_business_model_name: "$main_business_info.business_name",
+        watchlist_status: { $cond: { if: "$info_company_watchlist", then: 1, else: 0 } },
+        following_status: { $cond: { if: "$info_user_following", then: 1, else: 0 } },
+        total_followers: { $cond: { if: { $gt: [{ $size: "$followers_info" }, 0] }, then: "$followers_info.count", else: 0 } }
+      }
+    }
+  ]
+
+  return [
+    ...basePipeline,
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: 'count' }]
+      }
+    }
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports the admin dashboard's total_number_investor stat (company.js's company_overview/overview,
+ * Part 3 §7 Phase H step 3) — counts distinct, verified investors whose invested-in company (or
+ * manual-company row) is itself an approved, active, still-logged-in company. Delegated here from
+ * modules/company_admin/ per the confirmed domain-split principle (funding stats belong in the
+ * funding module, not reimplemented inline in the dashboard). Ported verbatim, byte-identical
+ * between the two real-source routes — confirmed via a full diff before porting.
+ */
+export function buildVerifiedInvestorCountPipeline(): PipelineStage[] {
+  return [
+    { $match: { investor_type: 2, investor_registered_type: 1, verified_status: 1 } },
+    {
+      $lookup: {
+        from: 'cln_company_lists',
+        localField: 'funds_raised_company_row_id',
+        foreignField: '_id',
+        let: { funds_raised_registered_type: '$funds_raised_registered_type' },
+        as: 'company_info',
+        pipeline: [
+          { $match: { $expr: { $eq: [1, '$$funds_raised_registered_type'] }, active_status: 1 } },
+          { $project: { _id: 1, company_id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$company_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        investor_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 1] }] }, then: '$company_info._id' },
+              { case: { $and: [{ $eq: ['$funds_raised_registered_type', 2] }] }, then: '$funds_raised_company_row_id' },
+            ],
+            default: 0,
+          },
+        },
+      },
+    },
+    { $match: { investor_data: { $gt: 0 } } },
+    { $group: { _id: '$investor_row_id' } },
+    {
+      $lookup: {
+        from: 'cln_company_lists',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'company_info',
+        pipeline: [
+          { $match: { approval_status: 1, active_status: 1 } },
+          {
+            $lookup: {
+              from: 'cln_professionals',
+              localField: 'user_row_id',
+              foreignField: '_id',
+              as: 'user_info',
+              pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1, login_status: 1 } }],
+            },
+          },
+          { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+          { $set: { login_status: { $cond: { if: '$user_info', then: '$user_info.login_status', else: 1 } } } },
+          { $match: { login_status: 1 } },
+          { $project: { _id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$company_info' } },
+    { $count: 'count' },
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports the admin dashboard's total_funds_invested stat (company.js's
+ * company_individual_overview, Part 3 §7 Phase H step 5) — sum of amounts this company invested
+ * as a verified investor. Delegated here from modules/company_admin/ per the confirmed
+ * domain-split principle. Reuses resolveFundsRaisedCompanyStages (confirmed byte-identical to
+ * the legacy route's own company_info/manual_info cross-check) but keeps its own top-level match
+ * — company_admin's getInvestorOverview lacks the legacy route's verified_status:1 filter, so it
+ * isn't a safe drop-in replacement here without changing behavior.
+ */
+export function buildVerifiedFundsInvestedTotalPipeline(companyRowId: number): PipelineStage[] {
+  return [
+    { $match: { verified_status: 1, investor_registered_type: 1, investor_type: 2, investor_row_id: companyRowId } },
+    ...resolveFundsRaisedCompanyStages({ rich: false }),
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ] as PipelineStage[]
+}
+
+/**
+ * Ports the admin dashboard's total_funds_raised stat (company.js's
+ * company_individual_overview, Part 3 §7 Phase H step 5) — sum of amounts this company raised
+ * from verified investors. Ported verbatim rather than reusing resolveInvestorStages: that
+ * helper's company_info branch additionally requires approval_status:1, which the legacy route's
+ * own company_info lookup here does not — reusing it would silently exclude some funds-raised
+ * rows the real route currently counts.
+ */
+export function buildVerifiedFundsRaisedTotalPipeline(companyRowId: number): PipelineStage[] {
+  return [
+    { $match: { verified_status: 1, funds_raised_registered_type: 1, funds_raised_company_row_id: companyRowId } },
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { investor_type: '$investor_type', investor_registered_type: '$investor_registered_type', investor_row_id: '$investor_row_id' },
+        as: 'user_info',
+        pipeline: [
+          { $match: { $and: [{ $expr: { $and: [{ $eq: [1, '$$investor_type'] }, { $eq: [1, '$$investor_registered_type'] }, { $eq: ['$_id', '$$investor_row_id'] }] } }, { login_status: 1 }] } },
+          { $project: { _id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { investor_type: '$investor_type', investor_registered_type: '$investor_registered_type', investor_row_id: '$investor_row_id' },
+        as: 'user_manual_info',
+        pipeline: [{ $match: { $expr: { $and: [{ $eq: [1, '$$investor_type'] }, { $eq: [2, '$$investor_registered_type'] }, { $eq: ['$_id', '$$investor_row_id'] }] } } }, { $project: { _id: 1 } }],
+      },
+    },
+    { $unwind: { path: '$user_manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_company_lists',
+        let: { investor_type: '$investor_type', investor_registered_type: '$investor_registered_type', investor_row_id: '$investor_row_id' },
+        as: 'company_info',
+        pipeline: [
+          { $match: { $and: [{ $expr: { $and: [{ $eq: [2, '$$investor_type'] }, { $eq: [1, '$$investor_registered_type'] }, { $eq: ['$_id', '$$investor_row_id'] }] } }, { active_status: 1 }] } },
+          { $project: { _id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$company_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_company_manual_retrievals',
+        let: { investor_type: '$investor_type', investor_registered_type: '$investor_registered_type', investor_row_id: '$investor_row_id' },
+        as: 'company_manual_info',
+        pipeline: [{ $match: { $expr: { $and: [{ $eq: [2, '$$investor_type'] }, { $eq: [2, '$$investor_registered_type'] }, { $eq: ['$_id', '$$investor_row_id'] }] } } }],
+      },
+    },
+    { $unwind: { path: '$company_manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $match: {
+        $or: [{ 'user_info._id': { $ne: null } }, { 'user_manual_info._id': { $ne: null } }, { 'company_info._id': { $ne: null } }, { 'company_manual_info._id': { $ne: null } }],
+      },
+    },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ] as PipelineStage[]
+}

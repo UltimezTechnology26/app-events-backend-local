@@ -9,6 +9,7 @@ const { getPresentDateTime, checkUserSubadminAccess } = require('../../utils/hel
 const { updateNotification } = require('../../utils/helpers/notification_helper')
 const { deleteKeysByPattern } = require('../../config/cache_helper')
 import { invalidateWorkExperienceCaches } from './work-experience.cache'
+import { buildEmployeeRequestCountPipeline } from './work-experience.queries'
 
 export interface ResolvedPosition {
   position_type: number
@@ -226,6 +227,15 @@ export async function createOrUpdateWorkExperience({
     await deleteKeysByPattern('app_user_detail_*')
     await deleteKeysByPattern('app_user_other_details_*')
     await invalidateWorkExperienceCaches()
+    if (company_type === 1 && company_row_id) {
+      // This save writes to the same professionals_work_experienceM rows the company's Team
+      // Details tab (employee_list_*) and public profile (app_company_individual_other_details_*)
+      // read from — every other write path into this collection (team-members.service.ts) busts
+      // both keys; this one didn't, so a newly-submitted pending request stayed invisible on the
+      // company side until the 30-minute TTL expired (confirmed via manual testing).
+      await deleteKeysByPattern('employee_list_*')
+      await deleteKeysByPattern('app_company_individual_other_details_*')
+    }
 
     await professionalsM.updateOne({ _id: user_row_id }, { $set: { updated_date_n_time: getPresentDateTime() } })
 
@@ -262,6 +272,10 @@ export async function createOrUpdateWorkExperience({
     await deleteKeysByPattern('app_user_detail_*')
     await deleteKeysByPattern('app_user_other_details_*')
     await invalidateWorkExperienceCaches()
+    if (company_type === 1 && company_row_id) {
+      await deleteKeysByPattern('employee_list_*')
+      await deleteKeysByPattern('app_company_individual_other_details_*')
+    }
 
     if (check_work_query.till_date_status === 1 && check_work_query.verified_status === false) {
       if (company_type == 1 && company_user_row_id && till_date_status === 2) {
@@ -456,6 +470,13 @@ export async function adminCreateOrUpdateWorkExperience({
 
     await professionalsM.updateOne({ _id: target_user_row_id }, { $set: { updated_date_n_time: getPresentDateTime() } })
     await calculateUserProfileScore(target_user_row_id, ['professional_detail'])
+    if (company_type === 1 && company_row_id) {
+      // Same gap as createOrUpdateWorkExperience's app-side path: this write lands in
+      // professionals_work_experienceM, which the company's Team Details tab (employee_list_*)
+      // and public profile (app_company_individual_other_details_*) both read.
+      await deleteKeysByPattern('employee_list_*')
+      await deleteKeysByPattern('app_company_individual_other_details_*')
+    }
 
     return { status: true, message: { alert_message: 'Your professional details have been successfully submitted. ' } }
   } else {
@@ -477,6 +498,10 @@ export async function adminCreateOrUpdateWorkExperience({
     await deleteKeysByPattern('speakers_list_*')
     await deleteKeysByPattern('professional_detail_lists*')
     await deleteKeysByPattern('app_user_detail_*')
+    if (company_type === 1 && company_row_id) {
+      await deleteKeysByPattern('employee_list_*')
+      await deleteKeysByPattern('app_company_individual_other_details_*')
+    }
 
     return {
       status: true,
@@ -485,5 +510,22 @@ export async function adminCreateOrUpdateWorkExperience({
         cache_response: 'cache expire from speaker list '
       }
     }
+  }
+}
+
+/**
+ * Ports the admin dashboard's user_as_employee_request_pending/approved stats — delegated here
+ * from modules/company_admin/ (Part 3 §7 Phase H step 3), since these are fundamentally
+ * work-experience-domain counts, not company-admin's own concern.
+ */
+export async function getEmployeeRequestCounts() {
+  const [pendingResult, approvedResult] = await Promise.all([
+    professionals_work_experienceM.aggregate(buildEmployeeRequestCountPipeline({ verified: false })),
+    professionals_work_experienceM.aggregate(buildEmployeeRequestCountPipeline({ verified: true })),
+  ])
+
+  return {
+    pending: pendingResult[0]?.count ?? 0,
+    approved: approvedResult[0]?.count ?? 0,
   }
 }

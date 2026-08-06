@@ -35,7 +35,11 @@ const saveSchema = mongoose.Schema({
     }
 })
 
-saveSchema.index({ company_row_id: 1, token_type: 1, token_row_id: 1 });
+// Removed: saveSchema.index({ company_row_id: 1, token_type: 1, token_row_id: 1 })
+// referenced `token_type`/`token_row_id`, fields that don't exist anywhere in
+// this schema (only `product_type`/`product_row_id` do) — a stale index left
+// over from a schema rename, confirmed dead via live index-usage monitoring
+// (Part 1 §3, Part 2 §2.4).
 
 saveSchema.index({ company_type: 1, company_row_id: 1 });
 saveSchema.index({ company_row_id: 1, register_type: 1, product_type: 1 });

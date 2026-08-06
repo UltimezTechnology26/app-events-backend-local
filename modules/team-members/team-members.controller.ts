@@ -1,12 +1,13 @@
 // modules/team-members/team-members.controller.ts
 import express, { Router, Request, Response } from 'express'
-const { check, validationResult } = require('express-validator')
+const { check, param, validationResult } = require('express-validator')
 const { checkUserLoginToken, checkAllLoginToken, checkAdminLoginToken } = require('../../middleware/authorization')
 const { arrangeValidation } = require('../../utils/helpers/helper')
 const companyM = require('../../models/app/company/companyM')
-import { createOrUpdateEmployeeDetails, adminCreateOrUpdateEmployeeDetails } from './team-members.service'
-import { getEmployeeList, getEmployeeIndividualDetails, getAdminEmployeeList } from './team-members.queries'
+import { createOrUpdateEmployeeDetails, adminCreateOrUpdateEmployeeDetails, removeEmployee, approveEmployeeRequest, adminRemoveEmployee, adminApproveEmployeeRequest } from './team-members.service'
+import { getEmployeeList, getEmployeeIndividualDetails, getAdminEmployeeList, getAdminCompanyEmployeeList, getManualCompanyEmployeeList, getEmployeeSuggestions } from './team-members.queries'
 import { getCache, setCache } from './team-members.cache'
+import { writeEndpointRateLimiter } from '../../middleware/rateLimiter'
 
 /**
  * Two separate routers (not one shared router branching on user type), matching the pattern
@@ -248,6 +249,213 @@ appTeamMembersRouter.get('/individual_details/:request_row_id', async (req, res)
     }
   } catch (err: any) {
     console.log('Individual employee details.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+/**
+ * Ports controllers/app/company/employee.js's GET /remove_employee/:request_row_id
+ * (lines 17-60) — company resolution + approval check stay inside
+ * removeEmployee() itself (Part 3 §7 Phase B step 5), matching the write-path
+ * convention already used by createOrUpdateEmployeeDetails above, not the
+ * controller-resolves-company convention used by the read-only list/
+ * individual_details routes (those need company_row_id for other purposes
+ * before calling the query layer; this route doesn't).
+ *
+ * Phase B step 7 (confirmed scope — public read endpoints in modules/company/
+ * stay untouched, this is specifically a write/action endpoint): auth upgraded
+ * from checkUserLoginToken to checkAllLoginToken(headers, [7]), matching
+ * update_employee_details' already-established pattern in this exact file
+ * (was the older employee.js-era auth, now standardized); rate-limited via
+ * writeEndpointRateLimiter; request_row_id validated via express-validator
+ * instead of relying on Number.parseInt's implicit NaN-is-harmless behavior.
+ */
+appTeamMembersRouter.get('/remove_employee/:request_row_id', writeEndpointRateLimiter, [
+  param('request_row_id')
+    .isInt({ min: 1 }).withMessage('The request row id field must be a positive integer.')
+], async (req: Request, res: Response) => {
+  try {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      return res.json({ status: false, message: arrangeValidation(errors) })
+    }
+
+    const checkUserToken = await checkAllLoginToken(req.headers, [7])
+    if (checkUserToken.status) {
+      const company_owner_user_row_id = checkUserToken.message?.user_row_id
+      const request_row_id = Number.parseInt(req.params.request_row_id as string)
+
+      const result = await removeEmployee({ company_owner_user_row_id, request_row_id })
+      res.json(result)
+    } else {
+      res.json({ status: false, message: checkUserToken?.message })
+    }
+  } catch (err: any) {
+    console.log('Remove employee.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.'})
+  }
+})
+
+/**
+ * Ports controllers/app/company/employee.js's GET /approve_request/:request_row_id
+ * (lines 62-118) — same rationale and same Phase B step 7 changes as
+ * remove_employee above.
+ */
+appTeamMembersRouter.get('/approve_request/:request_row_id', writeEndpointRateLimiter, [
+  param('request_row_id')
+    .isInt({ min: 1 }).withMessage('The request row id field must be a positive integer.')
+], async (req: Request, res: Response) => {
+  try {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      return res.json({ status: false, message: arrangeValidation(errors) })
+    }
+
+    const checkUserToken = await checkAllLoginToken(req.headers, [7])
+    if (checkUserToken.status) {
+      const company_owner_user_row_id = checkUserToken.message?.user_row_id
+      const request_row_id = Number.parseInt(req.params.request_row_id as string)
+
+      const result = await approveEmployeeRequest({ company_owner_user_row_id, request_row_id })
+      res.json(result)
+    } else {
+      res.json({ status: false, message: checkUserToken?.message })
+    }
+  } catch (err: any) {
+    console.log('Approve employee request.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET
+ * /company_list/:company_row_id/:skip/:limit (Part 3 §7 Phase H step 8) — confirmed LIVE via
+ * admin-coinpedia's pages/api/companies/manage_companies/team_members/list.js, itself called from
+ * components/company/manage_company/team_details.js (the "Team" tab on a company's admin detail
+ * page). Param parsing matches the real source exactly (no NaN guard) — Number.parseInt on a
+ * non-numeric segment yields NaN, which Mongo simply matches nothing against, same real behavior
+ * as before this port.
+ */
+adminTeamMembersRouter.get('/company_list/:company_row_id/:skip/:limit', async (req, res) => {
+  try {
+    const checkToken = checkAdminLoginToken(req.headers, [7])
+    if (checkToken.status) {
+      const company_row_id = Number.parseInt(req.params.company_row_id)
+      const limit = Number.parseInt(req.params.limit)
+      const skip = Number.parseInt(req.params.skip)
+
+      const { get_query, counts } = await getAdminCompanyEmployeeList({
+        company_row_id,
+        skip,
+        limit,
+        search: req.query.search as string | undefined
+      })
+
+      res.json({ status: true, message: get_query, counts })
+    } else {
+      res.json(checkToken)
+    }
+  } catch (err: any) {
+    console.log('Companies list.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET
+ * /remove_employee/:request_row_id (Part 3 §7 Phase H step 8) — confirmed LIVE via 3 callers
+ * (admin-coinpedia's manage_employees/approved.js, team_members/remove.js, remove_user.js). The
+ * real source's request_row_id NaN guard is a controller-layer concern (predates
+ * removeEmployee/approveEmployeeRequest's own express-validator convention above) — preserved
+ * inline exactly as it always was, rather than retrofitted onto express-validator.
+ */
+adminTeamMembersRouter.get('/remove_employee/:request_row_id', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (checkToken.status) {
+    try {
+      const request_row_id = Number.parseInt(req.params.request_row_id)
+      if (!Number.isNaN(request_row_id)) {
+        const result = await adminRemoveEmployee({ admin_context: checkToken, request_row_id })
+        res.json(result)
+      } else {
+        res.json({ status: false, message: { alert_message: 'Sorry, Invalid Request row id' } })
+      }
+    } catch (err: any) {
+      console.log('Remove Employee.', err.message)
+      res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+    }
+  } else {
+    res.json(checkToken)
+  }
+})
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET
+ * /approve_request/:request_row_id (Part 3 §7 Phase H step 8) — confirmed LIVE via 3 callers
+ * (admin-coinpedia's manage_employees/pending.js, team_members/approve.js, employee_verify.js).
+ */
+adminTeamMembersRouter.get('/approve_request/:request_row_id', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (checkToken.status) {
+    try {
+      const request_row_id = Number.parseInt(req.params.request_row_id)
+      if (!Number.isNaN(request_row_id)) {
+        const result = await adminApproveEmployeeRequest({ admin_context: checkToken, request_row_id })
+        res.json(result)
+      } else {
+        res.json({ status: false, message: { alert_message: 'Sorry, Invalid Request row id' } })
+      }
+    } catch (err: any) {
+      console.log('Approve Employees request.', err.message)
+      res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+    }
+  } else {
+    res.json(checkToken)
+  }
+})
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET /suggestions/:user_name and GET
+ * /manual_company_list/:company_row_id/:skip/:limit (Part 3 §7 Phase H step 8) — both confirmed
+ * UNREACHABLE (no caller anywhere across admin-coinpedia, frontend-appcp-typescript, or
+ * frontend-events-typescript — the real source's own comment even marks this section "old not
+ * used code"). Ported verbatim per the standing "port dead code, flag it, don't drop it"
+ * convention; fate deferred to the FINAL PHASE like every other flagged-dead route this
+ * engagement.
+ */
+adminTeamMembersRouter.get('/suggestions/:user_name', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (checkToken.status) {
+    try {
+      const list = await getEmployeeSuggestions(req.params.user_name)
+      res.json({ status: true, message: list })
+    } catch (err: any) {
+      // Preserves the real source's exact (unusual) catch behavior: it leaks the raw Error
+      // object as `message` rather than `err.message` — harmless here since this route is
+      // confirmed unreachable, but kept byte-faithful rather than "cleaned up".
+      res.json({ status: false, message: err })
+    }
+  } else {
+    res.json(checkToken)
+  }
+})
+
+adminTeamMembersRouter.get('/manual_company_list/:company_row_id/:skip/:limit', async (req, res) => {
+  try {
+    const checkToken = checkAdminLoginToken(req.headers, [7])
+    if (checkToken.status) {
+      const company_row_id = Number.parseInt(req.params.company_row_id)
+      const limit = Number.parseInt(req.params.limit)
+      const skip = Number.parseInt(req.params.skip)
+
+      const { get_query, counts } = await getManualCompanyEmployeeList({ company_row_id, skip, limit })
+
+      res.json({ status: true, message: get_query, counts })
+    } else {
+      res.json(checkToken)
+    }
+  } catch (err: any) {
+    console.log('Manual Companies employee list.', err.message)
     res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
   }
 })

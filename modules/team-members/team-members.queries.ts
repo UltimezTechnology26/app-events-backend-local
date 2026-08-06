@@ -1,5 +1,6 @@
 // modules/team-members/team-members.queries.ts
 import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
+import { buildTeamMemberFilterStages } from '../common/common.enrichment'
 
 export interface GetEmployeeListParams {
   /** The caller's own resolved company _id (already validated/approved by the controller). */
@@ -91,16 +92,7 @@ export async function getEmployeeList(params: GetEmployeeListParams): Promise<Ge
         let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
         as: 'user_info',
         pipeline: [
-          {
-            $match: {
-              $and: [
-                { $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } },
-                { login_status: 1 }
-              ]
-            }
-          },
-          { $lookup: { from: 'cln_professionals_profile_images', localField: '_id', foreignField: 'user_row_id', as: 'img_info' } },
-          { $unwind: { path: '$img_info', preserveNullAndEmptyArrays: true } },
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
           {
             $project: {
               _id: 1, user_name: 1, full_name: 1, pro_batch: 1, email_id: 1, approval_status: 1,
@@ -201,16 +193,7 @@ export async function getEmployeeList(params: GetEmployeeListParams): Promise<Ge
         let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
         as: 'user_info',
         pipeline: [
-          {
-            $match: {
-              $and: [
-                { $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } },
-                { login_status: 1 }
-              ]
-            }
-          },
-          { $lookup: { from: 'cln_professionals_profile_images', localField: '_id', foreignField: 'user_row_id', as: 'img_info' } },
-          { $unwind: { path: '$img_info', preserveNullAndEmptyArrays: true } },
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
           { $project: { _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, profile_image: '$img_info.profile_image' } }
         ]
       }
@@ -322,16 +305,7 @@ export async function getEmployeeIndividualDetails(params: GetEmployeeIndividual
         let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
         as: 'user_info',
         pipeline: [
-          {
-            $match: {
-              $and: [
-                { $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } },
-                { login_status: 1 }
-              ]
-            }
-          },
-          { $lookup: { from: 'cln_professionals_profile_images', localField: '_id', foreignField: 'user_row_id', as: 'img_info' } },
-          { $unwind: { path: '$img_info', preserveNullAndEmptyArrays: true } },
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
           { $project: { _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, profile_image: '$img_info.profile_image' } }
         ]
       }
@@ -679,4 +653,793 @@ export async function getAdminEmployeeList(params: GetAdminEmployeeListParams): 
   }
 
   return { get_query, counts, query }
+}
+
+/**
+ * Ports companyOtherDetails' `peoples_in_company_query` (services/company/front_page.ts:8716-9035),
+ * moved here from modules/company/company.queries.ts's buildPeoplesInCompanyPipeline
+ * (Part 3 §7 Phase B step 5, confirmed with the user before implementing). This is
+ * the PUBLIC company-profile page's team list — verified members only, with
+ * social links and "does the viewing visitor follow this person" — genuinely
+ * different from getEmployeeList() above (the owner's private "manage my team"
+ * view: all members including pending, no social links/follow-status). Confirmed
+ * these are two distinct views, not the same query duplicated, before building
+ * this as its own function rather than reusing getEmployeeList() directly.
+ *
+ * Reuses getPositionResolutionStages().slice(0, 2) (same two resolved_static_positions/
+ * resolved_manual_positions lookups this file's other functions already share) and
+ * buildTeamMemberFilterStages() (the user_info match+img_info lookup, same shape
+ * just deduplicated above in getEmployeeList/getEmployeeIndividualDetails) instead
+ * of re-declaring either — output is otherwise byte-identical to the original
+ * inline aggregate, verified via the characterization harness before this move.
+ */
+export async function getPublicTeamMembersList({
+  company_row_id,
+  viewer_user_row_id
+}: {
+  company_row_id: number
+  viewer_user_row_id: number
+}) {
+  const professionals_work_experienceM = require('../../models/app/professionals_work_experienceM')
+
+  return professionals_work_experienceM.aggregate([
+    {
+      $match: {
+        verified_status: true,
+        company_row_id: company_row_id,
+        company_type: 1,
+        till_date_status: 2
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_static_professionals_work_positions",
+        localField: "position_row_id",
+        foreignField: "_id",
+        as: "info_position",
+        pipeline: [{ $project: { _id: 1, position_name: 1 } }]
+      }
+    },
+    { $unwind: { path: "$info_position", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_manual_user_positions",
+        let: { position_type: '$position_type', sub_position_row_id: '$sub_position_row_id' },
+        as: "manual_position_info",
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, "$$position_type"] }, { $eq: ["$_id", "$$sub_position_row_id"] }] } } },
+          { $project: { _id: 1, position_name: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$manual_position_info", preserveNullAndEmptyArrays: true } },
+    ...getPositionResolutionStages().slice(0, 2),
+    {
+      $lookup: {
+        from: "cln_professionals",
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: "user_info",
+        pipeline: [
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
+          {
+            $lookup: {
+              from: "cln_professionals_social_links",
+              localField: "_id",
+              foreignField: "user_row_id",
+              as: "social_info",
+              pipeline: [
+                { $project: { _id: 0, website: 1, facebook: 1, twitter: 1, linkedin: 1, instagram: 1, telegram: 1, medium: 1, reddit: 1, feed_url: 1 } }
+              ]
+            }
+          },
+          { $unwind: { path: "$social_info", preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              _id: 1, user_name: 1, full_name: 1, email_id: 1,
+              profile_image: "$img_info.profile_image",
+              pro_batch: 1, approval_status: 1, social_links: "$social_info"
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "cln_professionals_manual_retrievals",
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: "manual_info",
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, "$$user_account_type"] }, { $eq: ["$_id", "$$user_row_id"] }] } } },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: "$manual_info", preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: "$user_info" },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: "$manual_info" }
+            ],
+            default: ""
+          }
+        }
+      }
+    },
+    {
+      $set: {
+        user_name: "$user_data.user_name",
+        full_name: "$user_data.full_name",
+        position_name: { $cond: { if: { $eq: ["$position_type", 2] }, then: "$manual_position_info.position_name", else: "$info_position.position_name" } },
+        positions: {
+          $cond: {
+            if: { $gt: [{ $size: { $ifNull: ["$positions", []] } }, 0] },
+            then: {
+              $map: {
+                input: { $ifNull: ["$positions", []] },
+                as: "p",
+                in: {
+                  position_type: "$$p.position_type",
+                  position_row_id: "$$p.position_row_id",
+                  sub_position_row_id: "$$p.sub_position_row_id",
+                  position_name: {
+                    $cond: {
+                      if: { $eq: ["$$p.position_type", 2] },
+                      then: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_manual_positions", cond: { $eq: ["$$this._id", "$$p.sub_position_row_id"] } } }, in: "$$this.position_name" } }, 0] },
+                      else: { $arrayElemAt: [{ $map: { input: { $filter: { input: "$resolved_static_positions", cond: { $eq: ["$$this._id", "$$p.position_row_id"] } } }, in: "$$this.position_name" } }, 0] }
+                    }
+                  }
+                }
+              }
+            },
+            else: [{
+              position_type: "$position_type",
+              position_row_id: "$position_row_id",
+              sub_position_row_id: "$sub_position_row_id",
+              position_name: {
+                $cond: {
+                  if: { $eq: ["$position_type", 2] },
+                  then: "$manual_position_info.position_name",
+                  else: "$info_position.position_name"
+                }
+              }
+            }]
+          }
+        },
+      }
+    },
+    {
+      $lookup: {
+        from: "cln_professionals_followers",
+        localField: "user_row_id",
+        foreignField: "following_user_row_id",
+        pipeline: [{ $match: { "follower_user_row_id": viewer_user_row_id } }],
+        as: "user_followed"
+      }
+    },
+    { $unwind: { path: "$user_followed", preserveNullAndEmptyArrays: true } },
+    {
+      $match: {
+        user_data: { $exists: true, $ne: "" }
+      }
+    },
+    {
+      $project: {
+        _id: 1,
+        user_account_type: 1,
+        user_row_id: 1,
+        user_name: 1,
+        full_name: 1,
+        email_id: "$user_data.email_id",
+        profile_image: "$user_data.profile_image",
+        pro_batch: "$user_data.pro_batch",
+        user_approval_status: "$user_data.approval_status",
+        verified_status: 1,
+        designation_type: 1,
+        employment_type: 1,
+        position_name: 1,
+        location_type: 1,
+        start_date: 1,
+        responsibilities: 1,
+        positions: 1,
+        social_links: {
+          $cond: {
+            if: { $eq: ["$user_account_type", 1] },
+            then: "$user_data.social_links",
+            else: null
+          }
+        },
+        user_followed_status: { $cond: { if: "$user_followed.confirm_request_status", then: "$user_followed.confirm_request_status", else: 0 } },
+      }
+    }
+  ])
+}
+
+export interface GetAdminCompanyEmployeeListParams {
+  company_row_id: number
+  skip: number
+  limit: number
+  search?: string
+}
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET
+ * /company_list/:company_row_id/:skip/:limit (Part 3 §7 Phase H step 8) — the admin's
+ * single-company team-member list (the "Team" tab on a company's admin detail page), scoped to
+ * one company_row_id via a body/param-supplied id rather than getEmployeeList's own-company
+ * resolution. The real source ALREADY has the full two-lookup positions[] resolution pattern
+ * (resolved_static_positions/resolved_manual_positions) — this is a pure move, not a bug fix,
+ * same as getEmployeeList's own note above.
+ *
+ * Response shape (PRESERVED, not simplified to match getEmployeeList's $project): the real
+ * source's $project includes `user_name` — getEmployeeList's own $project does NOT. Confirmed via
+ * admin-coinpedia's real consumer (components/company/manage_company/team_details.js's mobile
+ * view, `e.user_name`) that this field is actually read, not dead — reusing getEmployeeList's
+ * $project verbatim here would have been a real, unflagged response-shape regression. Built as its
+ * own function for this reason, even though the two pipelines are otherwise near-identical.
+ *
+ * CONFIRMED BUG FIX: the real source's admin-coinpedia caller (pages/api/companies/
+ * manage_companies/team_members/list.js) has always forwarded a `search` query param to this
+ * route, but the real backend route never read `req.query.search` anywhere — the admin's team
+ * search box has therefore always been a no-op. Fixed by wiring an optional `$or` search clause
+ * (same 4 fields as getEmployeeList's own search: user_name/full_name/position_name/company_name)
+ * into both the list and count pipelines, mirroring getEmployeeList's existing pattern exactly.
+ */
+export async function getAdminCompanyEmployeeList(params: GetAdminCompanyEmployeeListParams): Promise<GetEmployeeListResult> {
+  const { company_row_id, skip, limit, search } = params
+  const professionals_work_experienceM = require('../../models/app/professionals_work_experienceM')
+
+  const query: any[] = [{ user_data: { $exists: true, $ne: '' }, company_type: 1, company_row_id, till_date_status: 2 }]
+  if (search) {
+    query.push({
+      $or: [
+        { user_name: { $regex: search, $options: 'i' } },
+        { full_name: { $regex: search, $options: 'i' } },
+        { position_name: { $regex: search, $options: 'i' } },
+        { company_name: { $regex: search, $options: 'i' } }
+      ]
+    })
+  }
+
+  const get_query = await professionals_work_experienceM.aggregate([
+    {
+      $lookup: {
+        from: 'cln_static_professionals_work_positions',
+        localField: 'position_row_id',
+        foreignField: '_id',
+        as: 'info_position',
+        pipeline: [{ $project: { _id: 1, position_name: 1 } }]
+      }
+    },
+    { $unwind: { path: '$info_position', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_manual_user_positions',
+        let: { position_type: '$position_type', sub_position_row_id: '$sub_position_row_id' },
+        as: 'manual_position_info',
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, '$$position_type'] }, { $eq: ['$_id', '$$sub_position_row_id'] }] } } },
+          { $project: { _id: 1, position_name: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_position_info', preserveNullAndEmptyArrays: true } },
+    ...getPositionResolutionStages().slice(0, 2),
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
+          {
+            $project: {
+              _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, pro_batch: 1,
+              profile_image: '$img_info.profile_image'
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } } },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' }
+            ],
+            default: ''
+          }
+        }
+      }
+    },
+    {
+      $set: {
+        user_name: '$user_data.user_name',
+        full_name: '$user_data.full_name',
+        pro_batch: '$user_data.pro_batch'
+      }
+    },
+    { $match: { $and: query } },
+    {
+      $project: {
+        _id: 1, user_account_type: 1, user_row_id: 1, position_type: 1, position_row_id: 1, sub_position_row_id: 1,
+        pro_batch: 1, user_name: 1, full_name: 1, email_id: '$user_data.email_id', profile_image: '$user_data.profile_image',
+        user_approval_status: '$user_data.approval_status', verified_status: 1, verified_on: 1, employment_type: 1,
+        designation_type: 1, location_type: 1, start_date: 1, responsibilities: 1,
+        position_name: { $cond: { if: { $eq: ['$position_type', 2] }, then: '$manual_position_info.position_name', else: '$info_position.position_name' } },
+        positions: {
+          $cond: {
+            if: { $gt: [{ $size: { $ifNull: ['$positions', []] } }, 0] },
+            then: {
+              $map: {
+                input: { $ifNull: ['$positions', []] },
+                as: 'p',
+                in: {
+                  position_type: '$$p.position_type',
+                  position_row_id: '$$p.position_row_id',
+                  sub_position_row_id: '$$p.sub_position_row_id',
+                  position_name: {
+                    $cond: {
+                      if: { $eq: ['$$p.position_type', 2] },
+                      then: { $arrayElemAt: [{ $map: { input: { $filter: { input: '$resolved_manual_positions', cond: { $eq: ['$$this._id', '$$p.sub_position_row_id'] } } }, in: '$$this.position_name' } }, 0] },
+                      else: { $arrayElemAt: [{ $map: { input: { $filter: { input: '$resolved_static_positions', cond: { $eq: ['$$this._id', '$$p.position_row_id'] } } }, in: '$$this.position_name' } }, 0] }
+                    }
+                  }
+                }
+              }
+            },
+            else: [{
+              position_type: '$position_type',
+              position_row_id: '$position_row_id',
+              sub_position_row_id: '$sub_position_row_id',
+              position_name: { $cond: { if: { $eq: ['$position_type', 2] }, then: '$manual_position_info.position_name', else: '$info_position.position_name' } }
+            }]
+          }
+        }
+      }
+    }
+  ]).skip(skip).limit(limit)
+
+  const count_query = await professionals_work_experienceM.aggregate([
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
+          { $project: { _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, profile_image: '$img_info.profile_image' } }
+        ]
+      }
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } } },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' }
+            ],
+            default: ''
+          }
+        }
+      }
+    },
+    {
+      $set: {
+        user_name: '$user_data.user_name',
+        full_name: '$user_data.full_name',
+        position_name: { $cond: { if: { $eq: ['$position_type', 2] }, then: '$manual_position_info.position_name', else: '$info_position.position_name' } }
+      }
+    },
+    { $match: { $and: query } },
+    { $count: 'count' }
+  ])
+
+  let counts = 0
+  if (count_query[0]) {
+    counts = count_query[0].count
+  }
+
+  return { get_query, counts }
+}
+
+export interface GetManualCompanyEmployeeListParams {
+  company_row_id: number
+  skip: number
+  limit: number
+}
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET
+ * /manual_company_list/:company_row_id/:skip/:limit (Part 3 §7 Phase H step 8) — confirmed
+ * UNREACHABLE (no caller found anywhere across admin-coinpedia, frontend-appcp-typescript, or
+ * frontend-events-typescript; the file's own source comments it as "old not used code"). Ported
+ * faithfully per the standing "port dead code, flag it, don't drop it" convention — fate deferred
+ * to the FINAL PHASE, same as every other flagged-dead route this engagement.
+ *
+ * Deliberately simpler than getAdminCompanyEmployeeList above (real, confirmed difference, not a
+ * missing feature to "complete"): no manual_position_info lookup, no resolved_static_positions/
+ * resolved_manual_positions lookups, no `positions[]` array, no search. `position_name` resolves
+ * only via the single legacy `info_position` lookup. Since nothing calls this route, none of these
+ * gaps were fixed — faithful port only.
+ *
+ * Real asymmetry preserved exactly: the LIST match's `user_data` clause is
+ * `{ $exists: true, $ne: '' }`; the COUNT match's is `{ $ne: '' }` only (no `$exists`) — a genuine
+ * difference in the real source between this route's two pipelines, not a typo to "fix".
+ */
+export async function getManualCompanyEmployeeList(params: GetManualCompanyEmployeeListParams): Promise<GetEmployeeListResult> {
+  const { company_row_id, skip, limit } = params
+  const professionals_work_experienceM = require('../../models/app/professionals_work_experienceM')
+
+  const get_query = await professionals_work_experienceM.aggregate([
+    {
+      $lookup: {
+        from: 'cln_static_professionals_work_positions',
+        localField: 'position_row_id',
+        foreignField: '_id',
+        as: 'info_position',
+        pipeline: [{ $project: { _id: 1, position_name: 1 } }]
+      }
+    },
+    { $unwind: { path: '$info_position', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
+          { $project: { _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, profile_image: '$img_info.profile_image' } }
+        ]
+      }
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } } },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' }
+            ],
+            default: ''
+          }
+        }
+      }
+    },
+    {
+      $match: {
+        user_data: { $exists: true, $ne: '' },
+        company_type: 1,
+        company_row_id,
+        till_date_status: 2
+      }
+    },
+    {
+      $project: {
+        _id: 1, user_account_type: 1, user_row_id: 1, position_row_id: 1,
+        position_name: '$info_position.position_name',
+        user_name: '$user_data.user_name', full_name: '$user_data.full_name', email_id: '$user_data.email_id',
+        profile_image: '$user_data.profile_image', user_approval_status: '$user_data.approval_status',
+        verified_status: 1, verified_on: 1, employment_type: 1, location_type: 1, start_date: 1, responsibilities: 1
+      }
+    }
+  ]).skip(skip).limit(limit)
+
+  const count_query = await professionals_work_experienceM.aggregate([
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          ...(buildTeamMemberFilterStages()[0] as any).$lookup.pipeline,
+          { $project: { _id: 1, user_name: 1, full_name: 1, email_id: 1, approval_status: 1, profile_image: '$img_info.profile_image' } }
+        ]
+      }
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } } },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' }
+            ],
+            default: ''
+          }
+        }
+      }
+    },
+    {
+      $match: {
+        user_data: { $ne: '' },
+        company_type: 1,
+        company_row_id,
+        till_date_status: 2
+      }
+    },
+    { $count: 'count' }
+  ])
+
+  let counts = 0
+  if (count_query[0]) {
+    counts = count_query[0].count
+  }
+
+  return { get_query, counts }
+}
+
+/**
+ * Ports controllers/admin_panel/app/company_employees.js's GET /suggestions/:user_name (Part 3 §7
+ * Phase H step 8) — confirmed UNREACHABLE (no caller anywhere; the file's own source marks it
+ * "old not used code"). Ported faithfully, fate deferred to the FINAL PHASE.
+ *
+ * user_name search suggestions for professionalsM, excluding anyone who already has a pending
+ * company_employees_requests entry (the join's `$match` on `empReq.user_row_id: { $exists: false }`
+ * — an empty lookup array means the field genuinely doesn't exist on the unwound-less array
+ * element check, MongoDB's normal dot-path-into-array semantics).
+ */
+export async function getEmployeeSuggestions(user_name: string) {
+  const professionalsM = require('../../models/app/professionalsM')
+
+  return professionalsM.aggregate([
+    { $match: { user_name: { $regex: user_name, $options: 'i' }, login_status: 1 } },
+    {
+      $lookup: {
+        from: 'cln_company_employees_requests',
+        localField: '_id',
+        foreignField: 'user_row_id',
+        as: 'empReq'
+      }
+    },
+    { $match: { 'empReq.user_row_id': { $exists: false } } },
+    { $project: { user_name: 1 } }
+  ]).limit(10)
+}
+
+/**
+ * Ports the admin dashboard's team_members/pending_team_members stats (company.js's
+ * company_individual_overview, Part 3 §7 Phase H step 5) — delegated here from
+ * modules/company_admin/. Parameterized by an optional verified_status filter: omitted matches
+ * the real team_members stat (which never filters on it), `false` matches the real
+ * pending_team_members stat. Only resolves `_id` in the user-existence lookups (unlike
+ * getEmployeeList's full display fields above) since this is count-only — the `user_data`
+ * match only needs to know whether a linked user record resolved, not its contents.
+ */
+export function buildCompanyTeamMemberCountPipeline({ companyRowId, verifiedStatus }: { companyRowId: number; verifiedStatus?: boolean }) {
+  return [
+    ...(verifiedStatus === undefined ? [] : [{ $match: { verified_status: verifiedStatus } }]),
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          { $match: { $and: [{ $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } }, { login_status: 1 }] } },
+          { $project: { _id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [{ $match: { $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } } }, { $project: { _id: 1 } }],
+      },
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' },
+            ],
+            default: '',
+          },
+        },
+      },
+    },
+    { $match: { user_data: { $exists: true, $ne: '' }, company_type: 1, company_row_id: companyRowId, till_date_status: 2 } },
+    { $count: 'count' },
+  ]
+}
+
+/**
+ * Ports controllers/app/company/front_page.js's GET /team_members (Part 3 §7
+ * Phase H step 14) — a bulk team-members lookup across one or more companies
+ * at once (distinct from getPublicTeamMembersList, which is single-company).
+ *
+ * CONFIRMED BUG FIX: the real source read `company_row_id` as a JSON-encoded
+ * array from the query string (`?company_row_id=[123]`). Its only confirmed
+ * live caller — admin-coinpedia's token-detail page, via
+ * `pages/api/markets/tokens/team_members_list.js` — instead calls it with a
+ * single id as a URL PATH segment (`/team_members/4763`), which the
+ * param-less route registration (`/team_members`) can never match — the call
+ * 404s before reaching this logic at all, meaning this feature has been
+ * silently non-functional in production. Fixed by accepting an optional path
+ * param (`companyRowIdFromPath`) alongside the existing query-string array
+ * form, so the actually-used calling convention now reaches real logic while
+ * the original array form still works for any caller relying on it.
+ */
+export async function getTeamMembersForCompanyIds({
+  companyRowIds,
+  viewerUserRowId
+}: {
+  companyRowIds: number[]
+  viewerUserRowId: number
+}): Promise<any[]> {
+  const professionals_work_experienceM = require('../../models/app/professionals_work_experienceM')
+
+  return professionals_work_experienceM.aggregate([
+    ...getPositionResolutionStages(),
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'user_info',
+        pipeline: [
+          {
+            $match: {
+              $and: [
+                { $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } },
+                { login_status: 1 }
+              ]
+            }
+          },
+          {
+            $lookup: {
+              from: 'cln_professionals_profile_images',
+              localField: '_id',
+              foreignField: 'user_row_id',
+              as: 'img_info'
+            }
+          },
+          { $unwind: { path: '$img_info', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              _id: 1,
+              user_name: 1,
+              full_name: 1,
+              email_id: 1,
+              approval_status: 1,
+              profile_image: '$img_info.profile_image',
+              pro_batch: 1
+            }
+          }
+        ]
+      }
+    },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_professionals_manual_retrievals',
+        let: { user_row_id: '$user_row_id', user_account_type: '$user_account_type' },
+        as: 'manual_info',
+        pipeline: [
+          {
+            $match: {
+              $expr: { $and: [{ $eq: [2, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] }
+            }
+          },
+          { $project: { _id: 1, full_name: 1, email_id: 1, profile_image: 1 } }
+        ]
+      }
+    },
+    { $unwind: { path: '$manual_info', preserveNullAndEmptyArrays: true } },
+    {
+      $set: {
+        user_data: {
+          $switch: {
+            branches: [
+              { case: { $and: [{ $eq: ['$user_account_type', 1] }] }, then: '$user_info' },
+              { case: { $and: [{ $eq: ['$user_account_type', 2] }] }, then: '$manual_info' }
+            ],
+            default: ''
+          }
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: 'cln_professionals_followers',
+        localField: 'user_row_id',
+        foreignField: 'following_user_row_id',
+        pipeline: [{ $match: { follower_user_row_id: viewerUserRowId } }],
+        as: 'user_followed'
+      }
+    },
+    { $unwind: { path: '$user_followed', preserveNullAndEmptyArrays: true } },
+    {
+      $match: {
+        user_data: { $exists: true, $ne: '' },
+        company_type: 1,
+        company_row_id: { $in: companyRowIds },
+        till_date_status: 2
+      }
+    },
+    {
+      $project: {
+        _id: 1,
+        user_account_type: 1,
+        user_row_id: 1,
+        user_name: '$user_data.user_name',
+        full_name: '$user_data.full_name',
+        pro_batch: '$user_data.pro_batch',
+        email_id: '$user_data.email_id',
+        profile_image: '$user_data.profile_image',
+        user_approval_status: '$user_data.approval_status',
+        verified_status: 1,
+        verified_on: 1,
+        employment_type: 1,
+        positions: 1,
+        location_type: 1,
+        designation_type: 1,
+        start_date: 1,
+        responsibilities: 1,
+        user_followed_status: { $cond: { if: '$user_followed.confirm_request_status', then: '$user_followed.confirm_request_status', else: 0 } }
+      }
+    }
+  ])
 }
