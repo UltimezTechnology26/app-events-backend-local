@@ -43,11 +43,18 @@ yarn-error.log*
 # internal planning/process docs — not part of the shipped codebase
 /CLAUDE.md
 /docs/
+/frontend-map.md
+/events-frontend-map.md
+/frontend-map-issues.md
 
 # test cases
 *.test.ts
 *.test.js
 
+# characterization test harness — local-only testing tooling (scripts, fixtures,
+# discovered test-company IDs), same convention as *.test.ts/*.test.js above:
+# never committed, never pushed, never deployed to staging or production
+/scripts/characterization/
 
 # subagent-driven-development scratch ledger
 /.superpowers/

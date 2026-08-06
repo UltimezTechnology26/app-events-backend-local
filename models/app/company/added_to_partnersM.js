@@ -16,7 +16,9 @@ const saveSchema = mongoose.Schema({
     }
 })
 
-saveSchema.index({ company_row_id: 1 })
+// company_row_id already has field-level `index: true` above — the standalone
+// `saveSchema.index({company_row_id:1})` that used to be here was an exact duplicate
+// (Part 2 §2.7).
 saveSchema.index({ company_row_id: 1, _id: 1 });
 saveSchema.index({ company_row_id: 1, date_n_time: -1 });
 

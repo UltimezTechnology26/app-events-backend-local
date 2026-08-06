@@ -148,12 +148,16 @@ fundingRouter.post('/investor_user_update_details', [
   check('funds_raised_company_row_id').trim().not().isEmpty().withMessage('The Investor Registered Type field is required.')
 ], async (req: Request, res: Response) => {
   try {
+    // CONFIRMED BUG FIX: the original gated everything behind login first (body
+    // validation only ever ran, and its errors only ever surfaced, inside the
+    // authenticated branch) — auth must be checked before validation, not after,
+    // so an unauthenticated request with a malformed body sees the auth failure.
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+
     const errors = validationResult(req)
     const errObj = arrangeValidation(errors)
     if (Object.keys(errObj).length) return res.json({ status: false, message: errObj })
-
-    const auth = await checkAllLoginToken(req.headers, [1, 7])
-    if (!auth.status) return res.json(auth)
 
     const result = await service.createInvestorUserUpdate({
       actor: { ...auth.message, token_message: auth.token_message },
@@ -229,15 +233,31 @@ fundingRouter.get('/investor_overview/:investor_type', async (req, res) => {
   }
 })
 
-// App-side "Total Investment" overview card (Investments tab) — the original
-// route had no auth check at all (fully public given explicit ids), and is a
-// distinct, richer computation from the 1-param self overview above. Was
-// incorrectly gated admin-only and wired to the wrong (simple) function before
-// this fix.
+// App-side "Total Investment" overview card (Investments tab) — a distinct,
+// richer computation from the 1-param self overview above.
+//
+// CONFIRMED BUG FIX: this route had NO auth check at all — reachable by anyone
+// holding just the static api_key (itself a NEXT_PUBLIC_ value, shipped to
+// every browser bundle), letting them read any investor's or company's total
+// investment by guessing/enumerating investor_row_id. Every real caller
+// (admin-coinpedia's user/company investment views, the app's own "my
+// investments" page) already sends a token, so restoring the same
+// checkAllLoginToken([1,7]) gate every sibling route in this file uses costs
+// nothing functionally. Deliberately NOT self-scoped to the caller's own
+// investor_row_id — admin legitimately needs to query any target, matching
+// this route's original admin-only design — so this closes the "no token at
+// all" hole without changing who a valid token-holder can look up.
 fundingRouter.get('/investor_overview/:investor_type/:investor_row_id', async (req, res) => {
   try {
-    const investor_type = Number.parseInt(req.params.investor_type) || 1
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+    const investor_type = Number.parseInt(req.params.investor_type)
     const investor_row_id = Number.parseInt(req.params.investor_row_id)
+    // CONFIRMED BUG FIX: the original route validated both params before running
+    // any query (else branch: 'Invalid company row id'); the module port dropped
+    // this check, so a non-numeric investor_row_id silently ran the aggregate with
+    // NaN and returned a zeroed "no investments" result instead of an explicit error.
+    if (Number.isNaN(investor_type) || Number.isNaN(investor_row_id)) return res.json({ status: false, message: { alert_message: 'Invalid company row id' } })
     const result = await service.getInvestorOverviewDetailed(investor_type, investor_row_id)
     return res.json({ status: true, message: result })
   } catch (err: any) {
@@ -253,12 +273,15 @@ fundingRouter.post('/funds_raised_update_details', [
   check('investors').isArray({ min: 1 }).withMessage('The Investors field must contain at least one investor.')
 ], async (req: Request, res: Response) => {
   try {
+    // CONFIRMED BUG FIX: same ordering issue as investor_user_update_details above
+    // — auth must be checked before validation, matching the original's
+    // auth-gates-everything behavior.
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+
     const errors = validationResult(req)
     const errObj = arrangeValidation(errors)
     if (Object.keys(errObj).length) return res.json({ status: false, message: errObj })
-
-    const auth = await checkAllLoginToken(req.headers, [1, 7])
-    if (!auth.status) return res.json(auth)
 
     // funds_raised_company_row_id: app derives it from the caller's own company
     // (never a client-supplied target, and never the raw user_row_id — companies
@@ -301,7 +324,7 @@ fundingRouter.get('/funds_raised_individual_details/:funding_row_id', async (req
       if (!ownCompany.status) return res.json(ownCompany)
       companyScopeId = ownCompany.message as number
     }
-    const key = buildIndividualDetailsKey(round_id)
+    const key = buildIndividualDetailsKey(round_id, companyScopeId)
     const cached = await getCache({ key })
     if (cached.status) return res.json({ status: true, message: cached.message.list, cache_response_status: true })
     const result = await service.getIndividualDetails(round_id, companyScopeId)
@@ -317,9 +340,18 @@ fundingRouter.get('/funds_raised_individual_details/:funding_row_id', async (req
   }
 })
 
-// --- Shared, public in both original files: funds_raised_overview ---
+// --- Shared: funds_raised_overview ---
+//
+// CONFIRMED BUG FIX: same class of bug as investor_overview above — this route
+// had NO auth check at all, letting anyone with just the static api_key read
+// any company's total funds raised by guessing/enumerating company_row_id.
+// Every real caller (admin-coinpedia's fund_raised_overview proxy) already
+// sends a token, so adding the same checkAllLoginToken([1,7]) gate every
+// sibling route in this file uses costs nothing functionally.
 fundingRouter.get('/funds_raised_overview/:company_row_id', async (req, res) => {
   try {
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
     const company_row_id = Number.parseInt(req.params.company_row_id as string)
     if (Number.isNaN(company_row_id)) return res.json({ status: false, message: { alert_message: 'Sorry, Invalid company row id.' } })
     const key = buildFundsRaisedOverviewKey(company_row_id)
@@ -361,12 +393,15 @@ fundingRouter.post('/reject_funds_raised_details', [
   check('reject_type').trim().not().isEmpty().withMessage('The Reject type field required.').isInt({ min: 1, max: 10 }).withMessage('The Reject type field must be contains only integers.')
 ], async (req: Request, res: Response) => {
   try {
+    // CONFIRMED BUG FIX: same ordering issue as investor_user_update_details above
+    // — auth must be checked before validation, matching the original's
+    // auth-gates-everything behavior.
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+
     const errors = validationResult(req)
     const errObj = arrangeValidation(errors)
     if (Object.keys(errObj).length) return res.json({ status: false, message: errObj })
-
-    const auth = await checkAllLoginToken(req.headers, [1, 7])
-    if (!auth.status) return res.json(auth)
 
     const round_id = Number.parseInt(sanitize(req.body.funding_row_id))
     if (Number.isNaN(round_id)) return res.json({ status: false, message: { alert_message: 'Sorry, Invalid funding row id' } })
@@ -422,6 +457,25 @@ fundingRouter.get('/funds_raised_list/:funds_raised_company_row_id/:skip/:limit'
     return res.json({ status: true, message: result })
   } catch (err: any) {
     console.log('Funds raised list.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+// --- Admin-only: manual_funds_raised_list (Part 3 §7 Phase H step 9 — confirmed
+// live, ported from controllers/admin_panel/app/funding.js:2185-2906) ---
+fundingRouter.get('/manual_funds_raised_list/:funds_raised_company_row_id/:skip/:limit', async (req, res) => {
+  try {
+    const auth = await checkAllLoginToken(req.headers, [1, 7])
+    if (!auth.status) return res.json(auth)
+    if (auth.message.user_type !== 2) return res.json(unauthorizedAdminOnly())
+    const funds_raised_company_row_id = Number.parseInt(req.params.funds_raised_company_row_id)
+    const skip = !Number.isNaN(Number.parseInt(req.params.skip)) ? Number.parseInt(req.params.skip) : 0
+    const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
+    const result = await service.getManualFundsRaisedList({ funds_raised_company_row_id, skip, limit })
+    if (!result) return res.json({ status: false, message: { alert_message: 'Sorry, Invalid investor id.' } })
+    return res.json({ status: true, message: result })
+  } catch (err: any) {
+    console.log('Manual funds raised list.', err.message)
     res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
   }
 })

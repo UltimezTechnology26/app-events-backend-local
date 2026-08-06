@@ -610,3 +610,41 @@ export async function getAdminProfessionalDetailList(params: { user_row_id: numb
 
   return { status: true, message: get_query }
 }
+
+/**
+ * Ports the admin dashboard's user_as_employee_request_pending/approved stats (company.js's
+ * company_overview/overview, Part 3 §7 Phase H step 3) — delegated here from
+ * modules/company_admin/ per the confirmed domain-split principle. Ported verbatim, byte-identical
+ * between the two real-source routes and between the pending/approved variants except for the
+ * verified_status match — confirmed via a full diff before porting.
+ */
+export function buildEmployeeRequestCountPipeline({ verified }: { verified: boolean }): object[] {
+  return [
+    { $match: { company_type: 1, verified_status: verified ? true : { $ne: true } } },
+    {
+      $lookup: {
+        from: 'cln_company_lists',
+        localField: 'company_row_id',
+        foreignField: '_id',
+        as: 'company_info',
+        pipeline: [{ $match: { active_status: 1 } }, { $project: { _id: 1 } }],
+      },
+    },
+    { $unwind: { path: '$company_info' } },
+    {
+      $lookup: {
+        from: 'cln_professionals',
+        let: { user_account_type: '$user_account_type', user_row_id: '$user_row_id' },
+        localField: 'user_row_id',
+        foreignField: '_id',
+        as: 'user_info',
+        pipeline: [
+          { $match: { $and: [{ login_status: 1 }, { $expr: { $and: [{ $eq: [1, '$$user_account_type'] }, { $eq: ['$_id', '$$user_row_id'] }] } }] } },
+          { $project: { _id: 1 } },
+        ],
+      },
+    },
+    { $unwind: { path: '$user_info' } },
+    { $count: 'count' },
+  ]
+}

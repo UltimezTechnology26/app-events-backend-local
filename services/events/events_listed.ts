@@ -733,6 +733,19 @@ export const getRegisteredUsers = async ({ req, user_row_id }: { req: any, user_
                 },
                 { $unwind: { path: "$utc_dates", preserveNullAndEmptyArrays: true } },
                 {
+                    // CONFIRMED BUG FIX: this list supports filtering by event_tag but never
+                    // returned the resolved tag names, unlike every other list-style event
+                    // query in this codebase (e.g. controllers/admin_panel/events/event.js,
+                    // front_page_events.js), which all $lookup cln_events_tags and project it
+                    // as event_tags_array.
+                    $lookup: {
+                        from: "cln_events_tags",
+                        localField: "event_tags",
+                        foreignField: "_id",
+                        as: "eventTags"
+                    }
+                },
+                {
                     $set: {
                         watchlist_status: { $cond: { if: "$user_watchlist.user_row_id", then: 1, else: 0 } },
                         utc_time: "$utc_dates.utc_time",
@@ -758,7 +771,8 @@ export const getRegisteredUsers = async ({ req, user_row_id }: { req: any, user_
                         list_event_type: 1,
                         registered_type: 1,
                         watchlist_status: 1,
-                        utc_time: 1
+                        utc_time: 1,
+                        event_tags_array: "$eventTags"
                     }
                 },
                 { $skip: skip },

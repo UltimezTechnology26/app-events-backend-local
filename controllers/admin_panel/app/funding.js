@@ -1,3 +1,15 @@
+// FLAGGED DEAD (Part 3 §7 Phase H step 9, confirmed 2026-08-04): this entire file is
+// no longer require()'d or mounted anywhere in routes/ — grep of routes/admin_panel.js
+// confirms it. modules/funding/funding.controller.ts's fundingRouter (mounted at both
+// /app/funding and /admin_panel/funding) has fully superseded it. Route-by-route audit
+// found the module already covers everything here except 5 real gaps, all now fixed/
+// ported into the module directly (2 missing auth checks, 1 authorization-scoping
+// bypass, 2 sets of dropped DB-existence validations, 1 whole missing route
+// [manual_funds_raised_list]) — see requirements.md Phase H.9 for the full write-up.
+// Left in place, unmounted, per the standing "don't delete flagged-dead code
+// mid-engagement" convention — the keep-or-delete decision is deferred to the FINAL
+// PHASE at the end of the whole engagement, same as every other flagged-dead file.
+
 require('dotenv').config()
 const express = require('express')
 const sanitize = require('mongo-sanitize')

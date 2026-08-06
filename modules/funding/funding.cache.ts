@@ -44,8 +44,16 @@ export function buildFundsRaisedListSelfKey(companyRowId: number, skip: number, 
   return `funds_raised_list_${companyRowId}_${skip}_${limit}_${JSON.stringify(query || {})}`
 }
 
-export function buildIndividualDetailsKey(roundId: number): string {
-  return `funds_raised_individual_details${roundId}`
+// CONFIRMED BUG FIX (Part 3 §7 Phase H step 12): must be scoped by the
+// caller's companyScopeId. This route is shared by admin (unscoped) and
+// app-user (scoped to their own company) callers, and the caching wraps
+// getIndividualDetails's own ownership check — an unscoped key meant that
+// once ANY caller (including admin, viewing any company's round) populated
+// the cache for a given roundId, any other company's app user requesting
+// the same roundId would get served that cached response directly, bypassing
+// the ownership check entirely (cross-tenant data leak).
+export function buildIndividualDetailsKey(roundId: number, companyScopeId?: number): string {
+  return `funds_raised_individual_details_${roundId}_${companyScopeId ?? 'admin'}`
 }
 
 export function buildCompanyFundingDetailsKey(companyRowId: number, query: Record<string, unknown>): string {

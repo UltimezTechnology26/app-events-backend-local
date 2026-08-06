@@ -15,8 +15,23 @@ router.get('/list/:skip/:limit', async (req, res) => {
 
         const user_row_id = checkUserToken.message;
 
+        // Optional date-range filter (YYYY-MM-DD), applied against created_at.
+        // Built directly rather than via helper.js's createDateOnly/createEndDateOnly,
+        // which have a confirmed server-local-timezone day-shift bug (see the
+        // Company Module engagement's Phase H.4 write-up).
+        const matchQuery = { user_row_id: user_row_id };
+        if (req.query.start_date || req.query.end_date) {
+            matchQuery.created_at = {};
+            if (req.query.start_date) {
+                matchQuery.created_at.$gte = new Date(`${req.query.start_date}T00:00:00.000Z`);
+            }
+            if (req.query.end_date) {
+                matchQuery.created_at.$lte = new Date(`${req.query.end_date}T23:59:59.999Z`);
+            }
+        }
+
         const data = await professionals_pointsM.aggregate([
-            { $match: { user_row_id: user_row_id } },
+            { $match: matchQuery },
             {
                 $addFields: {
                     numeric_points: { $toDouble: "$points" }
@@ -34,7 +49,7 @@ router.get('/list/:skip/:limit', async (req, res) => {
                                 point_type: 1,
                                 point_status: 1,
                                 points: 1,
-                                createdAt: 1
+                                created_at: 1
                             }
                         }
                     ],
@@ -67,6 +82,14 @@ router.get('/list/:skip/:limit', async (req, res) => {
                                 total_balance: { $subtract: ["$total_credited", "$total_debited"] }
                             }
                         }
+                    ],
+                    // CONFIRMED BUG FIX: total_entries used to be all_points.length, but
+                    // all_points is the $skip/$limit'd page — that caps the reported total at
+                    // the page size instead of the real match count. This branch counts the
+                    // unpaginated match set, matching the pattern referrals.js and
+                    // modules/common/common.pagination.ts already use elsewhere.
+                    total_count: [
+                        { $count: "count" }
                     ]
                 }
             }
@@ -81,7 +104,7 @@ router.get('/list/:skip/:limit', async (req, res) => {
 
         res.json({
             status: true,
-            total_entries: result?.all_points?.length || 0,
+            total_entries: result?.total_count?.[0]?.count || 0,
             ...totals,
             points: result.all_points
         });

@@ -27,14 +27,13 @@ const admin_event = require('../controllers/admin_panel/events/event')
 
 const email_newsletter = require('../controllers/admin_panel/app/newsletter/email_newsletter')
 const subscribe_category = require('../controllers/admin_panel/app/newsletter/subscribe_category')
-const admin_company = require('../controllers/admin_panel/app/company')
+const { companyRevenueAdminRouter } = require('../modules/company_revenue/company_revenue.controller')
+const { companyAdminRouter } = require('../modules/company_admin/company_admin.controller')
+const { companyAdminApprovalsRouter } = require('../modules/company_admin/company_admin.approvals.controller')
 const admin_user = require('../controllers/admin_panel/app/user')
 const admin_user_approvals = require('../controllers/admin_panel/app/user_approvals')
 
-const requests_to_partners = require('../controllers/admin_panel/app/company/requests_to_partners')
-const company_approvals = require('../controllers/admin_panel/app/company_approvals')
 const admin_feedback = require('../controllers/admin_panel/app/feedback')
-const company_employees = require('../controllers/admin_panel/app/company_employees')
 const { fundingRouter } = require('../modules/funding/funding.controller')
 const { companyAcquisitionsRouter } = require('../modules/company_acquisitions/company_acquisitions.controller')
 const { adminWorkExperienceRouter } = require('../modules/work-experience/work-experience.controller')
@@ -75,8 +74,9 @@ const meetings = require('../controllers/admin_panel/app/meetings/meetings')
 
 
 
-const claim_requests = require('../controllers/admin_panel/app/company/claim_requests')
-const manual_retrievals = require('../controllers/admin_panel/app/company/manual_retrievals')
+const { companyManualAdminRouter } = require('../modules/company_manual/company_manual.controller')
+const { partnersRequestsAdminRouter, partnersAdminRouter } = require('../modules/partners/partners.controller')
+const { companyClaimRequestsAdminRouter } = require('../modules/company_claim_requests/company_claim_requests.controller')
 
 const manual_users = require('../controllers/admin_panel/app/user/manual_users')
 const work_experiences = require('../controllers/admin_panel/app/user/work_experiences')
@@ -108,19 +108,37 @@ router.use('/funding_rounds', category_funding_rounds)
 
 
 
-router.use('/company', admin_company)
-router.use('/company_manual_retrievals', manual_retrievals)
-router.use('/company_claim_requests', claim_requests)
-router.use('/company_employees', company_employees)
+// controllers/admin_panel/app/company.js fully migrated and deleted (completeness follow-up) —
+// every route it defined (including /list, /disabled_list) now lives directly in
+// modules/company_admin/company_admin.controller.ts's companyAdminRouter, mounted below.
+router.use('/company', companyRevenueAdminRouter)
+router.use('/company', companyAdminRouter)
+router.use('/company', partnersAdminRouter)
+// controllers/admin_panel/app/company/manual_retrievals.js fully migrated and deleted — every
+// route it defined now lives directly in modules/company_manual/company_manual.controller.ts's
+// companyManualAdminRouter.
+router.use('/company_manual_retrievals', companyManualAdminRouter)
+// controllers/admin_panel/app/company/requests_to_partners.js fully migrated and deleted — every
+// route it defined now lives directly in modules/partners/partners.controller.ts's
+// partnersRequestsAdminRouter.
+router.use('/company/requests_to_partners', partnersRequestsAdminRouter)
+// controllers/admin_panel/app/company/claim_requests.js fully migrated and deleted — every route
+// it defined now lives directly in modules/company_claim_requests/company_claim_requests.controller.ts's
+// companyClaimRequestsAdminRouter.
+router.use('/company_claim_requests', companyClaimRequestsAdminRouter)
+// controllers/admin_panel/app/company_employees.js fully migrated and deleted — every route it
+// defined now lives directly in modules/team-members/team-members.controller.ts's adminTeamMembersRouter.
 router.use('/company_employees', adminTeamMembersRouter)
-router.use('/company/requests_to_partners', requests_to_partners)
 router.use('/users', admin_user)
 router.use('/users', adminWorkExperienceRouter)
 router.use('/users_approvals', admin_user_approvals)
 
 router.use('/sub_admin', sub_admin)
 router.use('/sub_admin_auth', sub_admin_auth)
-router.use('/company_approvals', company_approvals)
+// controllers/admin_panel/app/company_approvals.js fully migrated and deleted — every route it
+// defined now lives directly in modules/company_admin/company_admin.approvals.controller.ts's
+// companyAdminApprovalsRouter.
+router.use('/company_approvals', companyAdminApprovalsRouter)
 router.use('/feedback', admin_feedback)
 router.use('/funding', fundingRouter)
 router.use('/company_acquisitions', companyAcquisitionsRouter)

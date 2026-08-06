@@ -12,8 +12,24 @@ router.get('/list/:skip/:limit', async (req, res) => {
             const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
             const user_row_id = checkUserToken.message
 
+            // Optional date-range filter (YYYY-MM-DD), applied against created_date_n_time
+            // on BOTH the list and count queries so they can't drift apart (the same
+            // list/count-filter-mismatch bug class already fixed elsewhere in this
+            // codebase). Built directly rather than via helper.js's createDateOnly/
+            // createEndDateOnly, which have a confirmed server-local-timezone day-shift bug.
+            const matchQuery = { referral_row_id: user_row_id, login_status: 1 }
+            if (req.query.start_date || req.query.end_date) {
+                matchQuery.created_date_n_time = {}
+                if (req.query.start_date) {
+                    matchQuery.created_date_n_time.$gte = new Date(`${req.query.start_date}T00:00:00.000Z`)
+                }
+                if (req.query.end_date) {
+                    matchQuery.created_date_n_time.$lte = new Date(`${req.query.end_date}T23:59:59.999Z`)
+                }
+            }
+
             const queryRun = await professionalsM.aggregate([
-                { $match: { referral_row_id: user_row_id, login_status: 1 } },
+                { $match: matchQuery },
                 { $sort: { _id: -1 } },
                 {
                     $lookup:
@@ -222,7 +238,10 @@ router.get('/list/:skip/:limit', async (req, res) => {
                         pro_batch: 1,
                         email_verify_status: "$verify_email.email_verify_status",
                         user_name: 1,
-                        created_date_n_time: 1,
+                        // CONFIRMED BUG FIX: older professionals predate created_date_n_time being
+                        // populated, so fall back to updated_date_n_time (backend-only fix, same
+                        // response field name, no frontend change needed).
+                        created_date_n_time: { $ifNull: ['$created_date_n_time', '$updated_date_n_time'] },
                         login_status: 1,
                         approval_status: 1,
                         position_name: "$info_work.position_name",
@@ -237,7 +256,7 @@ router.get('/list/:skip/:limit', async (req, res) => {
 
 
 
-            const countQuery = await professionalsM.countDocuments({ referral_row_id: user_row_id, login_status: 1 })
+            const countQuery = await professionalsM.countDocuments(matchQuery)
 
             res.json({ status: true, message: queryRun, count: countQuery })
         }

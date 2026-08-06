@@ -130,7 +130,7 @@ adminWorkExperienceRouter.post('/update_professional_details', [
     return res.json(serviceResult)
   } catch (err: any) {
     console.log('Update professional details.', err.message)
-    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.', err: err.message })
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.'})
   }
 })
 

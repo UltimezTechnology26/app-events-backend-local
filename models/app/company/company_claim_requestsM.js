@@ -6,12 +6,10 @@ const saveSchema = mongoose.Schema({
         type: Number
     },
     user_row_id: {
-        type: Number,
-        index: true
+        type: Number
     },
     company_row_id: {
-        type: Number,
-        index: true
+        type: Number
     },
     claim_type: {
         type: Number
@@ -30,6 +28,12 @@ const saveSchema = mongoose.Schema({
         type: Date
     }
 })
+
+// Confirmed via evidence: add_new_claim_request's duplicate-check ({user_row_id, company_row_id,
+// claim_status:1}) runs on every claim submission (a hot, race-prone path — same class as the
+// watchlist duplicate-check fixed earlier this engagement). Replaces the two standalone
+// single-field indexes above, which covered no query shape actually run against this collection.
+saveSchema.index({ user_row_id: 1, company_row_id: 1, claim_status: 1 })
 
 saveSchema.pre('save', async function (next) {
     if (!this._id) {
