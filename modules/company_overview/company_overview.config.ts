@@ -1583,3 +1583,77 @@ export function buildType2SponsorPartnerPipeline({ isPartner, searchQuery, spons
                     }
                 ]
 }
+
+/**
+ * report_list_type=8 (companies hiring) — CONFIRMED BUG FIX: this report type never had a
+ * valuation branch in modules/company_overview/company_overview.service.ts at all (unlike types
+ * 1-7, each with their own `if (report_list_type === N)` case there), so `total_company_valuation`
+ * always fell through to its `0` default for this filter regardless of real company_valuation
+ * data — same root cause class as the type-2 per-event/per-company bug fixed earlier. Base filter
+ * matches modules/company/company.list.ts's own report_list_type=8 list branch exactly (active,
+ * non-deleted job postings grouped by company_row_id, requiring at least one job role) so the
+ * list and its valuation total stay consistent with each other; structured like
+ * buildType6ValuationPipeline (group -> PARTNER_FILTER_STAGE -> company_info lookup -> sum).
+ */
+export function buildType8ValuationPipeline({ isPartner, searchQuery }: { isPartner: boolean, searchQuery: any }) {
+  return [
+                    { $match: { active_status: "active", is_deleted: false } },
+                    {
+                        $group: {
+                            _id: "$company_row_id",
+                            job_roles: { $push: "$job_title" }
+                        }
+                    },
+                    { $match: { $expr: { $gt: [{ $size: "$job_roles" }, 0] } } },
+                    ...(isPartner ? PARTNER_FILTER_STAGE() : []),
+                    {
+                        $lookup:
+                        {
+                            from: "cln_company_lists",
+                            localField: "_id",
+                            foreignField: "_id",
+                            as: "company_info",
+                            pipeline: [
+                                {
+                                    $match: { approval_status: 1, active_status: 1 }
+                                },
+                                ...(isPartner ? PARTNER_FILTER_STAGE() : []),
+                                ...buildProfessionalEnrichmentStages(),
+                                {
+                                    $project: {
+                                        company_name: 1,
+                                        company_id: 1,
+                                        company_logo: 1,
+                                        company_location: 1,
+                                        company_valuation: 1,
+                                        business_model_id: 1,
+                                        describe_in_one_line: 1,
+                                        main_business_model_id: 1,
+                                        country_id: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    { $unwind: { path: "$company_info" } },
+                    {
+                        $set:
+                        {
+                            company_name: "$company_info.company_name",
+                            company_id: "$company_info.company_id",
+                            company_location: "$company_info.company_location",
+                            business_model_id: "$company_info.business_model_id",
+                            main_business_model_id: "$company_info.main_business_model_id",
+                            country_id: "$company_info.country_id",
+                            company_valuation: "$company_info.company_valuation"
+                        }
+                    },
+                    { $match: searchQuery },
+                    {
+                        $group: {
+                            _id: null,
+                            [isPartner ? 'total_partner_valuation' : 'total_company_valuation']: { $sum: "$company_valuation" }
+                        }
+                    }
+                ]
+}

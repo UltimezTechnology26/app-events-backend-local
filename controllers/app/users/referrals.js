@@ -239,9 +239,12 @@ router.get('/list/:skip/:limit', async (req, res) => {
                         email_verify_status: "$verify_email.email_verify_status",
                         user_name: 1,
                         // CONFIRMED BUG FIX: older professionals predate created_date_n_time being
-                        // populated, so fall back to updated_date_n_time (backend-only fix, same
-                        // response field name, no frontend change needed).
-                        created_date_n_time: { $ifNull: ['$created_date_n_time', '$updated_date_n_time'] },
+                        // populated, so fall back to updated_date_n_time. Some professionals predate
+                        // BOTH of those (e.g. _id 19783) and only ever had the original legacy
+                        // `date_n_time` field (not declared on the current schema, but still present
+                        // on old raw documents) — fall back to that as the last resort. Backend-only
+                        // fix, same response field name, no frontend change needed.
+                        created_date_n_time: { $ifNull: ['$created_date_n_time', '$updated_date_n_time', '$date_n_time'] },
                         login_status: 1,
                         approval_status: 1,
                         position_name: "$info_work.position_name",

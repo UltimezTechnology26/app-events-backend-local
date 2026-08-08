@@ -27,7 +27,8 @@ import {
   buildType6ValuationPipeline,
   buildType6ProductCountPipeline,
   buildType7ValuationPipeline,
-  buildType7HoldingPipeline
+  buildType7HoldingPipeline,
+  buildType8ValuationPipeline
 } from './company_overview.config'
 import { getWatchlistValuation } from './company_overview.watchlist'
 import redisCache, { CacheDuration } from '../../config/redis'
@@ -39,6 +40,7 @@ const fundingInvestmentM = require('../../models/app/funding/fundingInvestmentM'
 const company_revenue_growthM = require('../../models/app/company/company_revenue_growthM')
 const company_productsM = require('../../models/markets/products_n_holding/company_productsM')
 const company_holdingM = require('../../models/markets/products_n_holding/company_holdingM')
+const jobsM = require('../../models/app/jobs/jobsM')
 const { getIntValues, getMinusDates } = require('../../utils/helpers/helper')
 
 export function getOverviewAggregatePromise(reportType: number, ctx: OverviewPipelineContext): Promise<any> | null {
@@ -202,6 +204,9 @@ export async function overview(req: any) {
                 get_company_valuation_query = company_holdingM.aggregate(buildType7ValuationPipeline({ isPartner: false, searchQuery: search_query }))
                 crypto_holding_query = company_holdingM.aggregate(buildType7HoldingPipeline({ isPartner: false, searchQuery: search_query }))
             }
+            else if (report_list_type === 8) {
+                get_company_valuation_query = jobsM.aggregate(buildType8ValuationPipeline({ isPartner: false, searchQuery: search_query }))
+            }
 
             const queries = [
                 get_company_valuation_query,
@@ -295,6 +300,9 @@ export async function overview(req: any) {
             else if (report_list_type === 7) {
                 get_partner_valuation_query = company_holdingM.aggregate(buildType7ValuationPipeline({ isPartner: true, searchQuery: search_query }))
                 crypto_holding_query = company_holdingM.aggregate(buildType7HoldingPipeline({ isPartner: true, searchQuery: search_query }))
+            }
+            else if (report_list_type === 8) {
+                get_partner_valuation_query = jobsM.aggregate(buildType8ValuationPipeline({ isPartner: true, searchQuery: search_query }))
             }
 
 

@@ -449,3 +449,65 @@ export function buildManualCompanyEmployeeListPipeline({ companyRowId, skip, lim
     ...buildPaginatedFacetStages({ skip, limit }),
   ]
 }
+
+const EVENT_LOOKUP_FOR_SPONSOR_PARTNER = {
+  $lookup: {
+    from: 'cln_events',
+    localField: 'event_row_id',
+    foreignField: '_id',
+    as: 'event_info',
+    pipeline: [{ $project: { _id: 1, event_title: 1, event_image: 1, event_url: 1, start_date: 1, end_date: 1 } }],
+  },
+}
+
+/**
+ * Shared by buildManualCompanySponsorListPipeline/buildManualCompanyPartnerListPipeline —
+ * a manual company's appearances in cln_event_sponsor_partner_details, distinguished only by
+ * sponsor_partner_type (1: Sponsor, 2: Partner). No prior list version of this existed for
+ * manual companies (only a registered-company COUNT aggregation existed, in modules/partners) —
+ * built fresh here following this module's own manual_company_employee_list pattern
+ * ($facet-paginated, admin-auth-gated) rather than the funding module's separate one, since
+ * these are the same kind of "this manual company's cross-references" concern as Team Members.
+ */
+function buildManualCompanySponsorOrPartnerListPipeline({
+  companyRowId,
+  sponsorPartnerType,
+  skip,
+  limit,
+}: {
+  companyRowId: number
+  sponsorPartnerType: 1 | 2
+  skip: number
+  limit: number
+}) {
+  return [
+    { $match: { user_company_row_id: companyRowId, account_type: 2, registered_type: 2, sponsor_partner_type: sponsorPartnerType } },
+    { $sort: { _id: -1 } },
+    EVENT_LOOKUP_FOR_SPONSOR_PARTNER,
+    { $unwind: { path: '$event_info', preserveNullAndEmptyArrays: true } },
+    { $match: { event_info: { $exists: true } } },
+    {
+      $project: {
+        _id: 1,
+        event_row_id: 1,
+        event_title: '$event_info.event_title',
+        event_image: '$event_info.event_image',
+        event_url: '$event_info.event_url',
+        start_date: '$event_info.start_date',
+        end_date: '$event_info.end_date',
+        sponsorship_type_title: 1,
+        requested_status: 1,
+        created_date_n_time: 1,
+      },
+    },
+    ...buildPaginatedFacetStages({ skip, limit }),
+  ]
+}
+
+export function buildManualCompanySponsorListPipeline({ companyRowId, skip, limit }: { companyRowId: number; skip: number; limit: number }) {
+  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 1, skip, limit })
+}
+
+export function buildManualCompanyPartnerListPipeline({ companyRowId, skip, limit }: { companyRowId: number; skip: number; limit: number }) {
+  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 2, skip, limit })
+}

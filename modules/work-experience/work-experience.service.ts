@@ -223,6 +223,12 @@ export async function createOrUpdateWorkExperience({
 
     const insert_query = await professionals_work_experienceM(insert_array).save()
 
+    // CONFIRMED BUG FIX: a manual company selected as a work-experience employer never
+    // incremented its used_counts — see the identical fix/rationale in funding.service.ts.
+    if (company_type === 2) {
+      await company_manual_retrievalsM.updateOne({ _id: company_row_id }, { $inc: { used_counts: 1 } })
+    }
+
     await deleteKeysByPattern('professional_detail_list_*')
     await deleteKeysByPattern('app_user_detail_*')
     await deleteKeysByPattern('app_user_other_details_*')
@@ -467,6 +473,12 @@ export async function adminCreateOrUpdateWorkExperience({
     insert_array['company_row_id'] = company_row_id
 
     await professionals_work_experienceM(insert_array).save()
+
+    // CONFIRMED BUG FIX: a manual company selected as a work-experience employer never
+    // incremented its used_counts — see the identical fix/rationale in funding.service.ts.
+    if (company_type === 2) {
+      await company_manual_retrievalsM.updateOne({ _id: company_row_id }, { $inc: { used_counts: 1 } })
+    }
 
     await professionalsM.updateOne({ _id: target_user_row_id }, { $set: { updated_date_n_time: getPresentDateTime() } })
     await calculateUserProfileScore(target_user_row_id, ['professional_detail'])

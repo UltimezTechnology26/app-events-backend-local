@@ -484,6 +484,14 @@ router.post('/update_sponsors_partners', [
                     insert_array['created_date_n_time'] = getPresentDateTime()
 
                     const insert_query = await event_sponsors_partner_detailsM(insert_array).save()
+
+                    // CONFIRMED BUG FIX: a manual company selected as an event sponsor/partner
+                    // never incremented its used_counts — see the identical fix/rationale in
+                    // modules/funding/funding.service.ts and modules/work-experience/work-experience.service.ts.
+                    if (account_type == 2 && registered_type == 2) {
+                        await company_manual_retrievalsM.updateOne({ _id: user_company_row_id }, { $inc: { used_counts: 1 } })
+                    }
+
                     await deleteKeysByPattern('event_sponsor_list_*')
                     await deleteKeysByPattern('individual_event_*')
                     await deleteKeysByPattern('all_events_*')

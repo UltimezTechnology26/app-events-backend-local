@@ -206,6 +206,13 @@ export async function createOrUpdateRound(params: {
       } else {
         await calculateCompanyProfileScore(inv.investor_row_id, ['investment', 'funding'])
       }
+      // CONFIRMED BUG FIX: a manual company selected as an investor never incremented its
+      // used_counts (the admin manual-retrievals list's "Used Counts" column) anywhere in the
+      // codebase — only on new-round creation, not edits, to avoid double-counting the same
+      // relationship on every edit-as-a-whole re-save.
+      if (inv.investor_type === 2 && inv.investor_registered_type === 2) {
+        await company_manual_retrievalsM.updateOne({ _id: inv.investor_row_id }, { $inc: { used_counts: 1 } })
+      }
     }
     await calculateCompanyProfileScore(params.funds_raised_company_row_id, ['funding', 'investment'])
 
@@ -842,6 +849,12 @@ export async function createInvestorUpdateAdmin(params: {
 
     const save_query = await new fundingInvestmentM(insertArray).save()
     await invalidateFundingCaches()
+
+    // CONFIRMED BUG FIX: recording an investment into a manual company never incremented its
+    // used_counts — see the identical fix/rationale in createOrUpdateRound above.
+    if (params.funds_raised_registered_type === 2) {
+      await company_manual_retrievalsM.updateOne({ _id: params.funds_raised_company_row_id }, { $inc: { used_counts: 1 } })
+    }
 
     if (params.funds_raised_registered_type === 1 && funds_raised_user_row_id) {
       await updateNotification({ user_row_id: funds_raised_user_row_id, notify_type: params.investor_type, notify_type_row_id: params.investor_row_id, message_row_id: 20, action_row_id: save_query._id })
@@ -1702,6 +1715,12 @@ export async function createInvestorUserUpdate(params: {
 
     const save_query = await new fundingInvestmentM(insertArray).save()
     await invalidateFundingCaches()
+
+    // CONFIRMED BUG FIX: recording an investment into a manual company never incremented its
+    // used_counts — see the identical fix/rationale in createOrUpdateRound above.
+    if (params.funds_raised_registered_type === 2) {
+      await company_manual_retrievalsM.updateOne({ _id: params.funds_raised_company_row_id }, { $inc: { used_counts: 1 } })
+    }
 
     if (params.funds_raised_registered_type === 1 && funds_raised_user_row_id) {
       await updateNotification({ user_row_id: funds_raised_user_row_id, notify_type: params.investor_type, notify_type_row_id: investor_row_id, message_row_id: 20, action_row_id: save_query._id })
