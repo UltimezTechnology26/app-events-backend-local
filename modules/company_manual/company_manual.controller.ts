@@ -13,6 +13,8 @@ import {
   rejectManualCompany,
   revokeManualCompany,
   getManualCompanyEmployeeList,
+  getManualCompanySponsorList,
+  getManualCompanyPartnerList,
   deleteManualCompany,
 } from './company_manual.service'
 import { updateManualDetailValidation, editManualDetailValidation, rejectManualCompanyValidation } from './company_manual.validation'
@@ -152,6 +154,38 @@ companyManualAdminRouter.get('/manual_company_employee_list/:company_row_id/:ski
     res.json(result)
   } catch (err: any) {
     console.log('Manual company employee list.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+companyManualAdminRouter.get('/manual_company_sponsor_list/:company_row_id/:skip/:limit', async (req: Request, res: Response) => {
+  const actor = checkAdminLoginToken(req.headers, [7])
+  try {
+    const result = await getManualCompanySponsorList({
+      actor,
+      companyRowIdRaw: req.params.company_row_id as string,
+      skipRaw: req.params.skip as string,
+      limitRaw: req.params.limit as string,
+    })
+    res.json(result)
+  } catch (err: any) {
+    console.log('Manual company sponsor list.', err.message)
+    res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+  }
+})
+
+companyManualAdminRouter.get('/manual_company_partner_list/:company_row_id/:skip/:limit', async (req: Request, res: Response) => {
+  const actor = checkAdminLoginToken(req.headers, [7])
+  try {
+    const result = await getManualCompanyPartnerList({
+      actor,
+      companyRowIdRaw: req.params.company_row_id as string,
+      skipRaw: req.params.skip as string,
+      limitRaw: req.params.limit as string,
+    })
+    res.json(result)
+  } catch (err: any) {
+    console.log('Manual company partner list.', err.message)
     res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
   }
 })

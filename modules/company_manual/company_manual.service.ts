@@ -15,6 +15,8 @@ import {
   buildApprovedListPipeline,
   buildIndividualDetailPipeline,
   buildManualCompanyEmployeeListPipeline,
+  buildManualCompanySponsorListPipeline,
+  buildManualCompanyPartnerListPipeline,
 } from './company_manual.queries'
 import { extractPaginatedResult } from '../common/common.pagination'
 import { invalidateManualCompanyListCache } from './company_manual.cache'
@@ -35,11 +37,11 @@ export interface AddManualCompanyDetailsParams {
  * Ports manual_company.js's POST /update_manual_detail (lines 12-119) — no authentication check
  * in the real source (matches as-is, not a gap introduced here).
  *
- * FLAGGED, NOT FIXED (requirements.md Phase G step 3, resolved with the user): `used_counts` is
- * computed via `findOne({used_counts:1})` — an arbitrary existing manual-company record, not a
- * real counter tied to the record being created. No call site anywhere increments this field for
- * an existing record either, so its intended meaning can't be recovered from the code. Ported
- * faithfully rather than guessed at; the identical bug pattern also exists in
+ * CONFIRMED BUG FIX (resolved with the user): the real source computed `used_counts` via
+ * `findOne({used_counts:1})` — an arbitrary existing manual-company record, not a real counter
+ * tied to the record being created. A new record now starts at 0; it's incremented at the real
+ * "usage" sites instead — see the funding/sponsor/partner/team-member add flows that select an
+ * EXISTING manual company. The identical bug pattern still exists untouched in
  * controllers/app/users/manual_users.js (professionals module, out of scope here).
  */
 export async function addManualCompanyDetails({ body, preValidationErrors }: AddManualCompanyDetailsParams) {
@@ -101,12 +103,6 @@ export async function addManualCompanyDetails({ body, preValidationErrors }: Add
     return { status: false, message: errObj }
   }
 
-  let used_counts = 0
-  const get_counts_query = await company_manual_retrievalsM.findOne({ used_counts: 1 })
-  if (get_counts_query) {
-    used_counts = Number.parseInt(get_counts_query.used_counts) + 1
-  }
-
   const date_n_time = getPresentDateTime()
   const insert_query = await new company_manual_retrievalsM({
     company_name,
@@ -114,7 +110,7 @@ export async function addManualCompanyDetails({ body, preValidationErrors }: Add
     company_logo,
     created_from_type: Number.isFinite(Number.parseInt(body.created_from_type)) ? Number.parseInt(body.created_from_type) : 1,
     website_link,
-    used_counts,
+    used_counts: 0,
     created_on: date_n_time,
     updated_on: date_n_time,
   }).save()
@@ -409,6 +405,73 @@ export async function getManualCompanyEmployeeList({ actor, companyRowIdRaw, ski
   const limit = Number.parseInt(limitRaw)
 
   const aggregateOutput = await professionals_work_experienceM.aggregate(buildManualCompanyEmployeeListPipeline({ companyRowId: company_row_id, skip, limit }))
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+
+  return { status: true, message: data, counts: count }
+}
+
+export interface GetManualCompanySponsorOrPartnerListParams {
+  actor: AdminActor
+  companyRowIdRaw: string
+  skipRaw: string
+  limitRaw: string
+}
+
+function validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw }: Omit<GetManualCompanySponsorOrPartnerListParams, 'actor'>) {
+  const errObj: Record<string, any> = {}
+  if (Number.isNaN(Number.parseInt(companyRowIdRaw))) {
+    errObj['company_row_id'] = 'The company row id field must be contain valid number.'
+  }
+  if (Number.isNaN(Number.parseInt(skipRaw))) {
+    errObj['skip'] = 'The parameter skip field must be contain valid number'
+  }
+  if (Number.isNaN(Number.parseInt(limitRaw))) {
+    errObj['limit'] = 'The parameter limit field must be contain valid number.'
+  }
+  return errObj
+}
+
+/**
+ * New — no prior list endpoint existed for a manual company's sponsor appearances (only a
+ * registered-company COUNT existed, in modules/partners). Mirrors getManualCompanyEmployeeList's
+ * shape/auth/pagination exactly for consistency with this module's other cross-reference tabs.
+ */
+export async function getManualCompanySponsorList({ actor, companyRowIdRaw, skipRaw, limitRaw }: GetManualCompanySponsorOrPartnerListParams) {
+  if (!actor.status) {
+    return actor
+  }
+
+  const errObj = validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw })
+  if (Object.keys(errObj).length > 0) {
+    return { status: false, message: errObj }
+  }
+
+  const company_row_id = Number.parseInt(companyRowIdRaw)
+  const skip = Number.parseInt(skipRaw)
+  const limit = Number.parseInt(limitRaw)
+
+  const aggregateOutput = await event_sponsors_partner_detailsM.aggregate(buildManualCompanySponsorListPipeline({ companyRowId: company_row_id, skip, limit }))
+  const { data, count } = extractPaginatedResult(aggregateOutput)
+
+  return { status: true, message: data, counts: count }
+}
+
+/** New — Partner counterpart of getManualCompanySponsorList above; same rationale. */
+export async function getManualCompanyPartnerList({ actor, companyRowIdRaw, skipRaw, limitRaw }: GetManualCompanySponsorOrPartnerListParams) {
+  if (!actor.status) {
+    return actor
+  }
+
+  const errObj = validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw })
+  if (Object.keys(errObj).length > 0) {
+    return { status: false, message: errObj }
+  }
+
+  const company_row_id = Number.parseInt(companyRowIdRaw)
+  const skip = Number.parseInt(skipRaw)
+  const limit = Number.parseInt(limitRaw)
+
+  const aggregateOutput = await event_sponsors_partner_detailsM.aggregate(buildManualCompanyPartnerListPipeline({ companyRowId: company_row_id, skip, limit }))
   const { data, count } = extractPaginatedResult(aggregateOutput)
 
   return { status: true, message: data, counts: count }
