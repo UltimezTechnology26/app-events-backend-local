@@ -340,40 +340,53 @@ export async function getCompanyHoldingsReportList(params: CompanyHoldingsReport
       }
     },
     { $match: query },
-    { $lookup: { from: 'cln_company_followers', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_user_following' } },
-    { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_watchlists', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_company_watchlist' } },
-    { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },
-    { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_static_company_business_models', localField: 'business_model_id', foreignField: '_id', as: 'business_info', pipeline: [{ $project: { business_name: 1 } }] } },
-    { $lookup: { from: 'cln_static_countries', localField: 'country_id', foreignField: '_id', as: 'country_info', pipeline: [{ $project: { country_name: 1, country_flag: 1 } }] } },
-    { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+    // CONFIRMED PERF FIX (live testing, 2026-08-11): same bug shape as company_admin.list.queries.ts's
+    // buildCompanyListPipeline — the 6 display-only lookups below used to run on every matching
+    // company before $skip/$limit. Moved inside the $facet's `data` branch; company_info above stays
+    // ahead of pagination since it feeds the boundingBox filter and the $set fields `query` depends on.
+    // Ordering already fixed by the $sort at line 305, above — untouched by $set/$match.
     {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        as: 'followers_info',
-        pipeline: [
-          { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'inner_user_info', pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }] } },
-          { $unwind: '$inner_user_info' },
-          { $count: 'count' }
-        ]
+      $facet: {
+        data: [
+          { $skip: skip },
+          { $limit: limit },
+          { $lookup: { from: 'cln_company_followers', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_user_following' } },
+          { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_company_watchlists', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_company_watchlist' } },
+          { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },
+          { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_static_company_business_models', localField: 'business_model_id', foreignField: '_id', as: 'business_info', pipeline: [{ $project: { business_name: 1 } }] } },
+          { $lookup: { from: 'cln_static_countries', localField: 'country_id', foreignField: '_id', as: 'country_info', pipeline: [{ $project: { country_name: 1, country_flag: 1 } }] } },
+          { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              as: 'followers_info',
+              pipeline: [
+                { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'inner_user_info', pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }] } },
+                { $unwind: '$inner_user_info' },
+                { $count: 'count' }
+              ]
+            }
+          },
+          {
+            $project: {
+              _id: 1, company_name: 1, company_id: 1, latitude: 1, longitude: 1, lat_num: 1, lon_num: 1, company_location: 1, main_business_model_id: 1, country_id: 1, total_holdings: 1, token_row_ids: 1,
+              company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line', company_valuation: '$company_info.company_valuation',
+              country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
+              business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
+              watchlist_status: { $cond: [{ $ifNull: ['$info_company_watchlist', false] }, 1, 0] },
+              following_status: { $cond: [{ $ifNull: ['$info_user_following', false] }, 1, 0] },
+              total_followers: { $cond: [{ $gt: [{ $size: '$followers_info' }, 0] }, '$followers_info.count', 0] }
+            }
+          }
+        ],
+        totalCount: [{ $count: 'count' }]
       }
-    },
-    {
-      $project: {
-        _id: 1, company_name: 1, company_id: 1, latitude: 1, longitude: 1, lat_num: 1, lon_num: 1, company_location: 1, main_business_model_id: 1, country_id: 1, total_holdings: 1, token_row_ids: 1,
-        company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line', company_valuation: '$company_info.company_valuation',
-        country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
-        business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
-        watchlist_status: { $cond: [{ $ifNull: ['$info_company_watchlist', false] }, 1, 0] },
-        following_status: { $cond: [{ $ifNull: ['$info_user_following', false] }, 1, 0] },
-        total_followers: { $cond: [{ $gt: [{ $size: '$followers_info' }, 0] }, '$followers_info.count', 0] }
-      }
-    },
-    ...buildPaginatedFacetStages({ skip, limit })
+    }
   ])
 
   const { data, count } = extractPaginatedResult(facetResult)
@@ -469,41 +482,54 @@ export async function getPartnerHoldingsReportList(params: PartnerHoldingsReport
       }
     },
     { $match: { $and: searchArray } },
-    { $lookup: { from: 'cln_company_followers', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_user_following' } },
-    { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_watchlists', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_company_watchlist' } },
-    { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },
-    { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_static_company_business_models', localField: 'business_model_id', foreignField: '_id', as: 'business_info', pipeline: [{ $project: { business_name: 1 } }] } },
-    { $lookup: { from: 'cln_static_countries', localField: 'country_id', foreignField: '_id', as: 'country_info', pipeline: [{ $project: { country_name: 1, country_flag: 1 } }] } },
-    { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+    // CONFIRMED PERF FIX (live testing, 2026-08-11): same bug shape as getCompanyHoldingsReportList
+    // above — the 6 display-only lookups used to run on every matching company before $skip/$limit.
+    // Moved inside the $facet's `data` branch; company_info stays ahead of pagination since it feeds
+    // the $set fields the searchArray $match above depends on. Ordering already fixed by the $sort
+    // at line 446, above — untouched by $set/$match.
     {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        as: 'followers_info',
-        pipeline: [
-          { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'inner_user_info', pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }] } },
-          { $unwind: { path: '$inner_user_info' } },
-          { $count: 'count' }
-        ]
+      $facet: {
+        data: [
+          { $skip: skip },
+          { $limit: limit },
+          { $lookup: { from: 'cln_company_followers', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_user_following' } },
+          { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_company_watchlists', localField: '_id', foreignField: 'company_row_id', pipeline: [{ $match: { user_row_id } }], as: 'info_company_watchlist' } },
+          { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },
+          { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_static_company_business_models', localField: 'business_model_id', foreignField: '_id', as: 'business_info', pipeline: [{ $project: { business_name: 1 } }] } },
+          { $lookup: { from: 'cln_static_countries', localField: 'country_id', foreignField: '_id', as: 'country_info', pipeline: [{ $project: { country_name: 1, country_flag: 1 } }] } },
+          { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              as: 'followers_info',
+              pipeline: [
+                { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'inner_user_info', pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }] } },
+                { $unwind: { path: '$inner_user_info' } },
+                { $count: 'count' }
+              ]
+            }
+          },
+          {
+            $project: {
+              _id: 1, company_row_id: '$_id', company_name: 1, company_id: 1, company_location: 1, main_business_model_id: 1,
+              company_valuation: '$company_info.company_valuation', country_id: 1, total_holdings: 1, token_row_ids: 1,
+              company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
+              country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
+              business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
+              watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
+              following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
+              total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
+            }
+          }
+        ],
+        totalCount: [{ $count: 'count' }]
       }
-    },
-    {
-      $project: {
-        _id: 1, company_row_id: '$_id', company_name: 1, company_id: 1, company_location: 1, main_business_model_id: 1,
-        company_valuation: '$company_info.company_valuation', country_id: 1, total_holdings: 1, token_row_ids: 1,
-        company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
-        country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
-        business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
-        watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
-        following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
-        total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
-      }
-    },
-    ...buildPaginatedFacetStages({ skip, limit })
+    }
   ])
 
   const { data, count } = extractPaginatedResult(facetResult)
