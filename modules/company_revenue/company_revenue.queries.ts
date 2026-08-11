@@ -318,25 +318,12 @@ export async function getCompanyRevenueReportList(params: CompanyRevenueReportLi
       }
     },
     { $match: query },
-    {
-      $lookup: {
-        from: 'cln_static_company_business_models',
-        localField: 'main_business_model_id',
-        foreignField: '_id',
-        as: 'main_business_info',
-        pipeline: [{ $project: { business_name: 1 } }]
-      }
-    },
-    { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'cln_static_company_business_models',
-        localField: 'business_model_id',
-        foreignField: '_id',
-        as: 'business_info',
-        pipeline: [{ $project: { business_name: 1 } }]
-      }
-    },
+    // PRESERVED, CONFIRMED PRE-EXISTING BEHAVIOR: unlike every other unwind in this pipeline, this
+    // $unwind has no preserveNullAndEmptyArrays — it silently drops any company with no matching
+    // cln_static_countries row (2 of 217 in live testing, 2026-08-11), acting as an implicit filter
+    // rather than pure display enrichment. It must stay ahead of pagination so totalCount keeps
+    // reflecting this existing behavior; moving it into the facet's `data` branch (as first attempted)
+    // inflated the live count from 215 to 217 — a functional change this fix must not introduce.
     {
       $lookup: {
         from: 'cln_static_countries',
@@ -347,61 +334,95 @@ export async function getCompanyRevenueReportList(params: CompanyRevenueReportLi
       }
     },
     { $unwind: '$country_info' },
+    // CONFIRMED PERF FIX (live testing, 2026-08-11): same bug shape as company_admin.list.queries.ts's
+    // buildCompanyListPipeline — the remaining 5 lookups below (main_business_info/business_info/
+    // followers/following/watchlist) are pure display enrichment, only read in the final $project, so
+    // they used to run against every matching company before $skip/$limit. Moved inside the $facet's
+    // `data` branch so they only run on the current page; company_info above stays ahead of pagination
+    // since it feeds the boundingBox filter and the $set fields the `query` $match above depends on.
+    // (Ordering is already established by the $sort at line 284, above — untouched by $set/$match.)
     {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        as: 'followers_info',
-        pipeline: [
+      $facet: {
+        data: [
+          { $skip: skip },
+          { $limit: limit },
           {
             $lookup: {
-              from: 'cln_professionals',
-              localField: 'user_row_id',
+              from: 'cln_static_company_business_models',
+              localField: 'main_business_model_id',
               foreignField: '_id',
-              as: 'inner_user_info',
-              pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }]
+              as: 'main_business_info',
+              pipeline: [{ $project: { business_name: 1 } }]
             }
           },
-          { $unwind: '$inner_user_info' },
-          { $count: 'count' }
-        ]
+          { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_static_company_business_models',
+              localField: 'business_model_id',
+              foreignField: '_id',
+              as: 'business_info',
+              pipeline: [{ $project: { business_name: 1 } }]
+            }
+          },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              as: 'followers_info',
+              pipeline: [
+                {
+                  $lookup: {
+                    from: 'cln_professionals',
+                    localField: 'user_row_id',
+                    foreignField: '_id',
+                    as: 'inner_user_info',
+                    pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }]
+                  }
+                },
+                { $unwind: '$inner_user_info' },
+                { $count: 'count' }
+              ]
+            }
+          },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              pipeline: [{ $match: { user_row_id: user_row_id } }],
+              as: 'info_user_following'
+            }
+          },
+          { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_company_watchlists',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              pipeline: [{ $match: { user_row_id: user_row_id } }],
+              as: 'info_company_watchlist'
+            }
+          },
+          { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              _id: 1, company_name: 1, company_id: 1, total_revenue: 1, company_location: 1, main_business_model_id: 1,
+              country_id: 1, revenue_growth: 1, latitude: 1, longitude: 1, lat_num: 1, lon_num: 1, pushed_data: 1,
+              company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
+              country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
+              business_name: '$business_info.business_name', company_valuation: 1,
+              main_business_model_name: '$main_business_info.business_name',
+              watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
+              following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
+              total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
+            }
+          }
+        ],
+        totalCount: [{ $count: 'count' }]
       }
-    },
-    {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        pipeline: [{ $match: { user_row_id: user_row_id } }],
-        as: 'info_user_following'
-      }
-    },
-    { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'cln_company_watchlists',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        pipeline: [{ $match: { user_row_id: user_row_id } }],
-        as: 'info_company_watchlist'
-      }
-    },
-    { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
-    {
-      $project: {
-        _id: 1, company_name: 1, company_id: 1, total_revenue: 1, company_location: 1, main_business_model_id: 1,
-        country_id: 1, revenue_growth: 1, latitude: 1, longitude: 1, lat_num: 1, lon_num: 1, pushed_data: 1,
-        company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
-        country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
-        business_name: '$business_info.business_name', company_valuation: 1,
-        main_business_model_name: '$main_business_info.business_name',
-        watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
-        following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
-        total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
-      }
-    },
-    ...buildPaginatedFacetStages({ skip, limit })
+    }
   ])
 
   const { data, count } = extractPaginatedResult(facetResult)
@@ -505,90 +526,103 @@ export async function getPartnerRevenueReportList(params: PartnerRevenueReportLi
       }
     },
     { $match: { $and: searchArray } },
+    // CONFIRMED PERF FIX (live testing, 2026-08-11): same bug shape as getCompanyRevenueReportList
+    // above — the 6 display-only lookups used to run on every matching company before $skip/$limit.
+    // Moved inside the $facet's `data` branch; company_info stays ahead of pagination since it feeds
+    // the $set fields the searchArray $match above depends on. Ordering already fixed by the $sort
+    // at line 499, above — untouched by $set/$match.
     {
-      $lookup: {
-        from: 'cln_static_company_business_models',
-        localField: 'main_business_model_id',
-        foreignField: '_id',
-        as: 'main_business_info',
-        pipeline: [{ $project: { business_name: 1 } }]
-      }
-    },
-    { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'cln_static_company_business_models',
-        localField: 'business_model_id',
-        foreignField: '_id',
-        as: 'business_info',
-        pipeline: [{ $project: { business_name: 1 } }]
-      }
-    },
-    {
-      $lookup: {
-        from: 'cln_static_countries',
-        localField: 'country_id',
-        foreignField: '_id',
-        as: 'country_info',
-        pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
-      }
-    },
-    { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        as: 'followers_info',
-        pipeline: [
+      $facet: {
+        data: [
+          { $skip: skip },
+          { $limit: limit },
           {
             $lookup: {
-              from: 'cln_professionals',
-              localField: 'user_row_id',
+              from: 'cln_static_company_business_models',
+              localField: 'main_business_model_id',
               foreignField: '_id',
-              as: 'inner_user_info',
-              pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }]
+              as: 'main_business_info',
+              pipeline: [{ $project: { business_name: 1 } }]
             }
           },
-          { $unwind: { path: '$inner_user_info' } },
-          { $count: 'count' }
-        ]
+          { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_static_company_business_models',
+              localField: 'business_model_id',
+              foreignField: '_id',
+              as: 'business_info',
+              pipeline: [{ $project: { business_name: 1 } }]
+            }
+          },
+          {
+            $lookup: {
+              from: 'cln_static_countries',
+              localField: 'country_id',
+              foreignField: '_id',
+              as: 'country_info',
+              pipeline: [{ $project: { country_name: 1, country_flag: 1 } }]
+            }
+          },
+          { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              as: 'followers_info',
+              pipeline: [
+                {
+                  $lookup: {
+                    from: 'cln_professionals',
+                    localField: 'user_row_id',
+                    foreignField: '_id',
+                    as: 'inner_user_info',
+                    pipeline: [{ $match: { login_status: 1 } }, { $project: { _id: 1 } }]
+                  }
+                },
+                { $unwind: { path: '$inner_user_info' } },
+                { $count: 'count' }
+              ]
+            }
+          },
+          {
+            $lookup: {
+              from: 'cln_company_followers',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              pipeline: [{ $match: { user_row_id: user_row_id } }],
+              as: 'info_user_following'
+            }
+          },
+          { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: 'cln_company_watchlists',
+              localField: '_id',
+              foreignField: 'company_row_id',
+              pipeline: [{ $match: { user_row_id: user_row_id } }],
+              as: 'info_company_watchlist'
+            }
+          },
+          { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              _id: 1, company_row_id: '$_id', company_name: 1, company_id: 1, total_revenue: 1, company_location: 1,
+              main_business_model_id: 1, country_id: 1, pushed_data: 1, revenue_growth: 1,
+              company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
+              country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
+              company_valuation: 1, latitude: '$company.latitude', longitude: '$company.longitude',
+              business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
+              watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
+              following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
+              total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
+            }
+          }
+        ],
+        totalCount: [{ $count: 'count' }]
       }
-    },
-    {
-      $lookup: {
-        from: 'cln_company_followers',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        pipeline: [{ $match: { user_row_id: user_row_id } }],
-        as: 'info_user_following'
-      }
-    },
-    { $unwind: { path: '$info_user_following', preserveNullAndEmptyArrays: true } },
-    {
-      $lookup: {
-        from: 'cln_company_watchlists',
-        localField: '_id',
-        foreignField: 'company_row_id',
-        pipeline: [{ $match: { user_row_id: user_row_id } }],
-        as: 'info_company_watchlist'
-      }
-    },
-    { $unwind: { path: '$info_company_watchlist', preserveNullAndEmptyArrays: true } },
-    {
-      $project: {
-        _id: 1, company_row_id: '$_id', company_name: 1, company_id: 1, total_revenue: 1, company_location: 1,
-        main_business_model_id: 1, country_id: 1, pushed_data: 1, revenue_growth: 1,
-        company_logo: '$company_info.company_logo', describe_in_one_line: '$company_info.describe_in_one_line',
-        country_flag: '$country_info.country_flag', country_name: '$country_info.country_name',
-        company_valuation: 1, latitude: '$company.latitude', longitude: '$company.longitude',
-        business_name: '$business_info.business_name', main_business_model_name: '$main_business_info.business_name',
-        watchlist_status: { $cond: { if: '$info_company_watchlist', then: 1, else: 0 } },
-        following_status: { $cond: { if: '$info_user_following', then: 1, else: 0 } },
-        total_followers: { $cond: { if: { $gt: [{ $size: '$followers_info' }, 0] }, then: '$followers_info.count', else: 0 } }
-      }
-    },
-    ...buildPaginatedFacetStages({ skip, limit })
+    }
   ])
 
   const { data, count } = extractPaginatedResult(facetResult)

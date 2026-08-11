@@ -236,21 +236,17 @@ fundingRouter.get('/investor_overview/:investor_type', async (req, res) => {
 // App-side "Total Investment" overview card (Investments tab) — a distinct,
 // richer computation from the 1-param self overview above.
 //
-// CONFIRMED BUG FIX: this route had NO auth check at all — reachable by anyone
-// holding just the static api_key (itself a NEXT_PUBLIC_ value, shipped to
-// every browser bundle), letting them read any investor's or company's total
-// investment by guessing/enumerating investor_row_id. Every real caller
-// (admin-coinpedia's user/company investment views, the app's own "my
-// investments" page) already sends a token, so restoring the same
-// checkAllLoginToken([1,7]) gate every sibling route in this file uses costs
-// nothing functionally. Deliberately NOT self-scoped to the caller's own
-// investor_row_id — admin legitimately needs to query any target, matching
-// this route's original admin-only design — so this closes the "no token at
-// all" hole without changing who a valid token-holder can look up.
+// CORRECTED (previous "CONFIRMED BUG FIX" here added a required-login gate,
+// which broke real production traffic): this route's data is also rendered by
+// InvestmentOverview.tsx on the PUBLIC, anonymous-visitable company and user
+// profile pages (companyDetails.tsx, userDetails.tsx) — those callers have no
+// login token to send, so gating this route behind checkAllLoginToken made it
+// fail with "The Token field is required in headers." for every logged-out
+// visitor. Login is not required here; the global checkApiKey middleware
+// still applies, and the data is already publicly displayed one
+// investor_row_id at a time on the very pages that call this route.
 fundingRouter.get('/investor_overview/:investor_type/:investor_row_id', async (req, res) => {
   try {
-    const auth = await checkAllLoginToken(req.headers, [1, 7])
-    if (!auth.status) return res.json(auth)
     const investor_type = Number.parseInt(req.params.investor_type)
     const investor_row_id = Number.parseInt(req.params.investor_row_id)
     // CONFIRMED BUG FIX: the original route validated both params before running
@@ -342,16 +338,16 @@ fundingRouter.get('/funds_raised_individual_details/:funding_row_id', async (req
 
 // --- Shared: funds_raised_overview ---
 //
-// CONFIRMED BUG FIX: same class of bug as investor_overview above — this route
-// had NO auth check at all, letting anyone with just the static api_key read
-// any company's total funds raised by guessing/enumerating company_row_id.
-// Every real caller (admin-coinpedia's fund_raised_overview proxy) already
-// sends a token, so adding the same checkAllLoginToken([1,7]) gate every
-// sibling route in this file uses costs nothing functionally.
+// CORRECTED (previous "CONFIRMED BUG FIX" here added a required-login gate,
+// which broke real production traffic): same class of issue as
+// investor_overview above — InvestmentOverview.tsx renders this route's data
+// on the PUBLIC company and user profile pages (companyDetails.tsx,
+// userDetails.tsx), which have no login token for a logged-out visitor to
+// send. Login is not required here; the global checkApiKey middleware still
+// applies, and the data is already publicly displayed one company_row_id at a
+// time on the very pages that call this route.
 fundingRouter.get('/funds_raised_overview/:company_row_id', async (req, res) => {
   try {
-    const auth = await checkAllLoginToken(req.headers, [1, 7])
-    if (!auth.status) return res.json(auth)
     const company_row_id = Number.parseInt(req.params.company_row_id as string)
     if (Number.isNaN(company_row_id)) return res.json({ status: false, message: { alert_message: 'Sorry, Invalid company row id.' } })
     const key = buildFundsRaisedOverviewKey(company_row_id)
