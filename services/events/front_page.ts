@@ -394,41 +394,10 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 }
             },
             {
-                $lookup: {
-                    from: "cln_professionals_followers",
-                    let: { userId: "$user_info._id" },
-                    pipeline: [
-                        {
-                            $match: {
-                                $expr: {
-                                    $and: [
-                                        { $eq: ["$following_user_row_id", "$$userId"] },
-                                        { $eq: ["$follower_user_row_id", user_row_id] },
-                                        { $eq: ["$confirm_request_status", 2] }
-                                    ]
-                                }
-                            }
-                        }
-                    ],
-                    as: "current_user_follow_status"
-                }
-            },
-            {
                 $addFields: {
                     user_follower_count: { $size: "$user_followers_list" }
                 }
             },
-            {
-                $lookup:
-                {
-                    from: "cln_company_followers",
-                    localField: "company_row_id",
-                    foreignField: "company_row_id",
-                    pipeline: [{ $match: { "user_row_id": user_row_id } }],
-                    as: "company_followed"
-                }
-            },
-            { $unwind: { path: "$company_followed", preserveNullAndEmptyArrays: true } },
             {
                 $lookup:
                 {
@@ -586,8 +555,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                     country_code: "$country_info.country_code",
                     country_name: "$country_info.country_name",
                     sortname: "$country_info.sortname",
-                    company_followed_status: { $cond: { if: "$company_followed", then: 1, else: 0 } },
-                    user_followed_status: { $cond: { if: { $gt: [{ $size: "$current_user_follow_status" }, 0] }, then: { $arrayElemAt: ["$current_user_follow_status.confirm_request_status", 0] }, else: 0 } },
                     utc_row_id: 1,
                     utc_time: "$utc_dates.utc_time",
                     timezone: "$utc_dates.timezone",
@@ -675,7 +642,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             myArr['user_username'] = eventDetails.user_username
             myArr['user_tags'] = eventDetails.user_tags
             myArr['user_followed'] = eventDetails.user_followed
-            myArr['user_followed_status'] = eventDetails.user_followed_status
             myArr['user_email_id'] = eventDetails.user_email_id
             myArr['user_facebook'] = eventDetails.user_facebook
             myArr['user_twitter'] = eventDetails.user_twitter
@@ -695,7 +661,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             myArr['company_id'] = eventDetails.company_id
             myArr['company_logo'] = eventDetails.company_logo
             myArr['company_describe_in_one_line'] = eventDetails.company_describe_in_one_line
-            myArr['company_followed_status'] = eventDetails.company_followed_status
             myArr['main_business_model_name'] = eventDetails.main_business_model_name
             myArr['business_model_name'] = eventDetails.business_model_name
             myArr['company_facebook'] = eventDetails.company_facebook
