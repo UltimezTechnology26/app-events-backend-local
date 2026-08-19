@@ -21,6 +21,8 @@ import sanitize from 'mongo-sanitize';
 import event_watchlistsM from '../../models/app/watchlist/eventM';
 import { getPositionResolutionStages } from '../../modules/work-experience/work-experience.queries';
 import { joinPositionNamesExpr } from '../../modules/funding/funding.queries';
+import professionals_followersM from '../../models/app/professionals_followersM';
+import company_followersM from '../../models/app/company/followersM';
 
 interface EventParams {
     skip: number;
@@ -796,6 +798,13 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             let event_guests_query = Promise.resolve(null)
             let event_user_attendee_query = Promise.resolve(null)
             let collaboration_users_requests_query = Promise.resolve(null)
+            // PERF FIX (cache split): these two used to be $lookup stages inside the main
+            // aggregate, filtered on user_row_id — which made the whole aggregate result
+            // viewer-specific and un-cacheable across users. Extracted here as standalone
+            // queries so the main aggregate can be cached once per event_url; see the cache
+            // key change further down.
+            let user_followed_status_query: Promise<any> = Promise.resolve(null)
+            let company_followed_status_query: Promise<any> = Promise.resolve(null)
 
             if (user_row_id) {
                 event_guests_query = event_attendeesM.findOne({ event_row_id: eventDetails._id, user_type: 1, user_row_id: user_row_id, invitation_status: 1 })
@@ -803,6 +812,16 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 event_user_attendee_query = event_watchlistsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
 
                 collaboration_users_requests_query = collaboration_users_requestsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
+
+                user_followed_status_query = professionals_followersM.findOne(
+                    { following_user_row_id: eventDetails.user_row_id, follower_user_row_id: user_row_id, confirm_request_status: 2 },
+                    { _id: 1 }
+                ).lean()
+
+                company_followed_status_query = company_followersM.findOne(
+                    { company_row_id: eventDetails.company_row_id, user_row_id: user_row_id },
+                    { _id: 1 }
+                ).lean()
             }
 
             // Resolve the link-display flags now — every flag-independent query above is
@@ -2140,11 +2159,13 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             const [
                 event_faqs, collaborations_list, event_guest_detail, tickets, coupon, event_tags_array,
                 watchlist_count, user_notify, contact_details, event_guests, event_user_attendee, collaboration_users_requests,
-                speakers_result, related_events_result, related_events_past_result, attendees_result, sponsors_result, partners_result
+                speakers_result, related_events_result, related_events_past_result, attendees_result, sponsors_result, partners_result,
+                user_followed_status_doc, company_followed_status_doc
             ] = await Promise.all([
                 event_faqs_query, get_collaboration_query, event_guest_query, tickets_query, coupon_query, event_tags_query,
                 watchlist_count_query, user_notify_query, contact_details_query, event_guests_query, event_user_attendee_query, collaboration_users_requests_query,
-                speakers_query_promise, related_events_promise, related_events_past_promise, attendees_query_promise, sponsors_query_promise, partners_query_promise
+                speakers_query_promise, related_events_promise, related_events_past_promise, attendees_query_promise, sponsors_query_promise, partners_query_promise,
+                user_followed_status_query, company_followed_status_query
             ])
 
 
@@ -2171,6 +2192,8 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             myArr['guest_register_status'] = !!event_guests
             myArr['watchlist_status'] = !!event_user_attendee
             myArr['collaboration_requested_status'] = !!collaboration_users_requests
+            myArr['user_followed_status'] = user_followed_status_doc ? 2 : 0
+            myArr['company_followed_status'] = company_followed_status_doc ? 1 : 0
             myArr['contact_details'] = contact_details[0] ? contact_details : []
 
             // res.json({ status: true, message: myArr })
