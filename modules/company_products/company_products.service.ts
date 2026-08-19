@@ -58,58 +58,68 @@ export async function saveOrUpdateProduct({ actor, body, preValidationErrors }: 
 
   let edit_product_row_id = 0
   let user_row_id = 0
-  if (body.edit_product_row_id && !Number.isNaN(Number.parseInt(body.edit_product_row_id))) {
-    const check_valid_query = await company_productsM.findOne({ _id: Number.parseInt(body.edit_product_row_id), company_row_id })
-    if (check_valid_query) {
-      edit_product_row_id = Number.parseInt(body.edit_product_row_id)
-    } else {
-      errObj['alert_message'] = 'Sorry, Invalid Edit Product Row ID.'
-    }
-  }
-
-  if (submitted_from_type === 2) {
-    if (company_type === 1) {
-      const check_company_query = await companyM.findOne({ _id: company_row_id, active_status: 1 })
-      if (!check_company_query) errObj['company_row_id'] = 'Invalid company row id'
-    } else {
-      const check_company_query = await company_manual_retrievalsM.findOne({ _id: company_row_id })
-      if (!check_company_query) errObj['company_row_id'] = 'Invalid company row id'
-    }
-  } else if (actor.user_type == 1) {
-    user_row_id = actor.user_row_id
-    const check_company = await checkCompanyOwnership({ company_row_id, user_row_id })
-    if (!check_company.status) errObj['company_row_id'] = (check_company.message as any).alert_message
-  }
-
   const register_type = Number.parseInt(body.register_type)
   const product_row_id = Number.parseInt(body.product_row_id)
   const product_type = Number.parseInt(body.product_type)
 
-  if (product_type == 1) {
-    if (register_type == 1) {
-      const user_reg_query = await tokensM.findOne({ _id: product_row_id, active_status: 1 })
-      if (!user_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
-    } else if (register_type == 2) {
-      const user_manual_query = await search_contract_addressM.findOne({ _id: product_row_id }, { _id: 1 })
-      if (!user_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
-    }
-  } else if (product_type == 2) {
-    if (register_type == 1) {
-      const company_reg_query = await chainsM.findOne({ _id: product_row_id, status: 1 }, { _id: 1, user_row_id: 1 })
-      if (!company_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
-    } else {
-      const company_manual_query = await chains_manualsM.findOne({ _id: product_row_id }, { _id: 1 })
-      if (!company_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
-    }
-  } else if (product_type == 3) {
-    if (register_type == 1) {
-      const user_reg_query = await exchangeM.findOne({ _id: product_row_id, status: 1 })
-      if (!user_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
-    } else if (register_type == 2) {
-      const user_manual_query = await exchange_manualsM.findOne({ _id: product_row_id }, { _id: 1 })
-      if (!user_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
-    }
-  }
+  // PERF FIX: these 3 validation checks are independent of each other (each writes its
+  // own distinct errObj key — 'alert_message', 'company_row_id', 'product_row_id' — so
+  // concurrent writes can't collide) but previously ran as 3 sequential awaits. Batched
+  // into one Promise.all; same validations, same error messages, same final errObj.
+  await Promise.all([
+    (async () => {
+      if (body.edit_product_row_id && !Number.isNaN(Number.parseInt(body.edit_product_row_id))) {
+        const check_valid_query = await company_productsM.findOne({ _id: Number.parseInt(body.edit_product_row_id), company_row_id })
+        if (check_valid_query) {
+          edit_product_row_id = Number.parseInt(body.edit_product_row_id)
+        } else {
+          errObj['alert_message'] = 'Sorry, Invalid Edit Product Row ID.'
+        }
+      }
+    })(),
+    (async () => {
+      if (submitted_from_type === 2) {
+        if (company_type === 1) {
+          const check_company_query = await companyM.findOne({ _id: company_row_id, active_status: 1 })
+          if (!check_company_query) errObj['company_row_id'] = 'Invalid company row id'
+        } else {
+          const check_company_query = await company_manual_retrievalsM.findOne({ _id: company_row_id })
+          if (!check_company_query) errObj['company_row_id'] = 'Invalid company row id'
+        }
+      } else if (actor.user_type == 1) {
+        user_row_id = actor.user_row_id
+        const check_company = await checkCompanyOwnership({ company_row_id, user_row_id })
+        if (!check_company.status) errObj['company_row_id'] = (check_company.message as any).alert_message
+      }
+    })(),
+    (async () => {
+      if (product_type == 1) {
+        if (register_type == 1) {
+          const user_reg_query = await tokensM.findOne({ _id: product_row_id, active_status: 1 })
+          if (!user_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
+        } else if (register_type == 2) {
+          const user_manual_query = await search_contract_addressM.findOne({ _id: product_row_id }, { _id: 1 })
+          if (!user_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
+        }
+      } else if (product_type == 2) {
+        if (register_type == 1) {
+          const company_reg_query = await chainsM.findOne({ _id: product_row_id, status: 1 }, { _id: 1, user_row_id: 1 })
+          if (!company_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
+        } else {
+          const company_manual_query = await chains_manualsM.findOne({ _id: product_row_id }, { _id: 1 })
+          if (!company_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
+        }
+      } else if (product_type == 3) {
+        if (register_type == 1) {
+          const user_reg_query = await exchangeM.findOne({ _id: product_row_id, status: 1 })
+          if (!user_reg_query) errObj['product_row_id'] = 'Sorry, Invalid product row id'
+        } else if (register_type == 2) {
+          const user_manual_query = await exchange_manualsM.findOne({ _id: product_row_id }, { _id: 1 })
+          if (!user_manual_query) errObj['product_row_id'] = 'Sorry, Invalid manual product row id'
+        }
+      }
+    })()
+  ])
 
   if (register_type && product_row_id && product_type) {
     const check_product_query = await company_productsM.findOne({

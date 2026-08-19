@@ -1086,25 +1086,37 @@ export async function getFundsRaisedListSelf(companyRowId: number, skip: number,
     }
   }
 
-  const list = await fundingInvestmentM.aggregate([
-    earlyMatchStage,
-    ...resolveInvestorAndWorkStages,
-    rowMatchStage,
-    groupByRoundStage,
-    { $match: { round_matches: true } },
-    { $sort: { amount: -1 } },
-    { $skip: skip },
-    { $limit: limit },
-    { $project: { _id: 0, round_id: 1, announcement_date: 1, amount: 1, category_row_id: 1, category_name: 1, investors: 1 } }
-  ])
-
-  const [countResult] = await fundingInvestmentM.aggregate([
-    earlyMatchStage,
-    ...resolveInvestorAndWorkStages,
-    rowMatchStage,
-    groupByRoundStage,
-    { $match: { round_matches: true } },
-    { $count: 'count' }
+  // PERF FIX: list and count used to run as two entirely separate, sequential
+  // 6-lookup aggregations. They're independent of each other, so run them concurrently —
+  // this halves the wall-clock cost without changing either result.
+  //
+  // NOTE: unlike getAllFundsRaisedList's two-phase group-then-resolve-identity split (see
+  // that function's own PERF FIX comment), identity resolution here can't be deferred until
+  // after pagination — matchExprStages' search filter matches against `investor_name`
+  // (line ~1040), which is itself derived from the investor identity lookups in
+  // resolveInvestorAndWorkStages. Deferring identity resolution would mean filtering/grouping
+  // on data that doesn't exist yet, silently breaking search-by-investor-name. Flagged as a
+  // separate, higher-risk optimization for a follow-up rather than applied here blind.
+  const [list, [countResult]] = await Promise.all([
+    fundingInvestmentM.aggregate([
+      earlyMatchStage,
+      ...resolveInvestorAndWorkStages,
+      rowMatchStage,
+      groupByRoundStage,
+      { $match: { round_matches: true } },
+      { $sort: { amount: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: { _id: 0, round_id: 1, announcement_date: 1, amount: 1, category_row_id: 1, category_name: 1, investors: 1 } }
+    ]),
+    fundingInvestmentM.aggregate([
+      earlyMatchStage,
+      ...resolveInvestorAndWorkStages,
+      rowMatchStage,
+      groupByRoundStage,
+      { $match: { round_matches: true } },
+      { $count: 'count' }
+    ])
   ])
 
   return { list, count: countResult?.count ?? 0 }

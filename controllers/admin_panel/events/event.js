@@ -1505,55 +1505,61 @@ router.get('/overview_other_details', checkApiKey, async (req, res) => {
                 }
             }
 
-            result['upcomings_events'] = await eventM.countDocuments({ $and: [{ start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['completed_events'] = await eventM.countDocuments({ $and: [{ end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['ongoing_events'] = await eventM.countDocuments({ $and: [{ start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-
-
-            //based on created by
-            result['events_created_by_users'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, active_status: 1 }, query] })
-            result['events_created_by_users_host'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 1, active_status: 1 }, query] })
-            result['events_created_by_users_company'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 2, active_status: 1 }, query] })
-            result['events_created_by_users_host_company'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 3, active_status: 1 }, query] })
-
-            result['events_created_by_team'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, active_status: 1 }, query] })
-            result['events_created_by_team_host'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 1, active_status: 1 }, query] })
-            result['events_created_by_team_company'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 2, active_status: 1 }, query] })
-            result['events_created_by_team_host_company'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 3, active_status: 1 }, query] })
-
-
-            //based on date( event running) 
-            result['events_created_by_users_upcoming'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['events_created_by_users_ended'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['events_created_by_users_ongoing'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-
-            result['events_created_by_team_upcoming'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['events_created_by_team_ended'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-            result['events_created_by_team_ongoing'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] })
-
-            //based on list in
-            result['events_created_by_host'] = await eventM.countDocuments({ $and: [{ list_event_type: 1, active_status: 1 }, query] })
-            result['events_created_by_company'] = await eventM.countDocuments({ $and: [{ list_event_type: 2, active_status: 1 }, query] })
-            result['events_created_by_host_company'] = await eventM.countDocuments({ $and: [{ list_event_type: 3, active_status: 1 }, query] })
-
-            //based on time
-
             const today_date = startAndEndOfToday()
             const yesterday_date = yesterDayStartNEndDate()
             const lastWeek_date = lastWeekStartEndDate()
             const lastMonth_date = lastMonthStartEndDate()
 
-            //based on time users 
-            result['users_today_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gt: new Date(today_date.start_date) }, active_status: 1 }, query] })
-            result['users_yesterday_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(yesterday_date.start_date), $lte: new Date(yesterday_date.end_date) }, active_status: 1 }, query] })
-            result['users_LastWeek_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(lastWeek_date.start_date), $lte: new Date(lastWeek_date.end_date) }, active_status: 1 }, query] })
-            result['users_LastMonth_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(lastMonth_date.start_date), $lte: new Date(lastMonth_date.end_date) }, active_status: 1 }, query] })
+            // PERF FIX: these 25 counts are all independent of each other — previously each
+            // was its own sequential `await`, meaning the response time was the SUM of 25
+            // round trips instead of the time of the single slowest one. Batched into one
+            // Promise.all; each count's query/result is unchanged.
+            const countQueries = {
+                upcomings_events: eventM.countDocuments({ $and: [{ start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                completed_events: eventM.countDocuments({ $and: [{ end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                ongoing_events: eventM.countDocuments({ $and: [{ start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
 
-            //based on time admin
-            result['admin_today_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gt: new Date(today_date.start_date) }, active_status: 1 }, query] })
-            result['admin_yesterday_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(yesterday_date.start_date), $lte: new Date(yesterday_date.end_date) }, active_status: 1 }, query] })
-            result['admin_LastWeek_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(lastWeek_date.start_date), $lte: new Date(lastWeek_date.end_date) }, active_status: 1 }, query] })
-            result['admin_LastMonth_events'] = await eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(lastMonth_date.start_date), $lte: new Date(lastMonth_date.end_date) }, active_status: 1 }, query] })
+                //based on created by
+                events_created_by_users: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, active_status: 1 }, query] }),
+                events_created_by_users_host: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 1, active_status: 1 }, query] }),
+                events_created_by_users_company: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 2, active_status: 1 }, query] }),
+                events_created_by_users_host_company: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, list_event_type: 3, active_status: 1 }, query] }),
+
+                events_created_by_team: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, active_status: 1 }, query] }),
+                events_created_by_team_host: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 1, active_status: 1 }, query] }),
+                events_created_by_team_company: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 2, active_status: 1 }, query] }),
+                events_created_by_team_host_company: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, list_event_type: 3, active_status: 1 }, query] }),
+
+                //based on date( event running)
+                events_created_by_users_upcoming: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                events_created_by_users_ended: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                events_created_by_users_ongoing: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+
+                events_created_by_team_upcoming: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, start_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                events_created_by_team_ended: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, end_date: { $lt: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+                events_created_by_team_ongoing: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, start_date: { $lte: new Date(getPresentDateTime()) }, end_date: { $gte: new Date(getPresentDateTime()) }, active_status: 1 }, query] }),
+
+                //based on list in
+                events_created_by_host: eventM.countDocuments({ $and: [{ list_event_type: 1, active_status: 1 }, query] }),
+                events_created_by_company: eventM.countDocuments({ $and: [{ list_event_type: 2, active_status: 1 }, query] }),
+                events_created_by_host_company: eventM.countDocuments({ $and: [{ list_event_type: 3, active_status: 1 }, query] }),
+
+                //based on time users
+                users_today_events: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gt: new Date(today_date.start_date) }, active_status: 1 }, query] }),
+                users_yesterday_events: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(yesterday_date.start_date), $lte: new Date(yesterday_date.end_date) }, active_status: 1 }, query] }),
+                users_LastWeek_events: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(lastWeek_date.start_date), $lte: new Date(lastWeek_date.end_date) }, active_status: 1 }, query] }),
+                users_LastMonth_events: eventM.countDocuments({ $and: [{ created_by_admin_status: 0, created_date_n_time: { $gte: new Date(lastMonth_date.start_date), $lte: new Date(lastMonth_date.end_date) }, active_status: 1 }, query] }),
+
+                //based on time admin
+                admin_today_events: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gt: new Date(today_date.start_date) }, active_status: 1 }, query] }),
+                admin_yesterday_events: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(yesterday_date.start_date), $lte: new Date(yesterday_date.end_date) }, active_status: 1 }, query] }),
+                admin_LastWeek_events: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(lastWeek_date.start_date), $lte: new Date(lastWeek_date.end_date) }, active_status: 1 }, query] }),
+                admin_LastMonth_events: eventM.countDocuments({ $and: [{ created_by_admin_status: { $in: [1, 2] }, created_date_n_time: { $gte: new Date(lastMonth_date.start_date), $lte: new Date(lastMonth_date.end_date) }, active_status: 1 }, query] })
+            }
+
+            const countKeys = Object.keys(countQueries)
+            const countValues = await Promise.all(countKeys.map((k) => countQueries[k]))
+            countKeys.forEach((k, i) => { result[k] = countValues[i] })
 
             res.json({ status: true, message: result })
         }
@@ -4229,94 +4235,106 @@ router.get('/subadmin_overview', async (req, res) => {
     if (checkUserToken.status) {
         try {
             let admin_row_id = Number.parseInt(checkUserToken.message.admin_row_id)
-
-            const total_events = await eventM.countDocuments({ created_by_admin_status: 2, created_by_sub_admin_id: admin_row_id })
-            const subadmin_data = await sub_adminM.findOne({ _id: admin_row_id }, { full_name: 1, email_id: 1 })
-            const total_companies = await companyM.countDocuments({ sub_admin_row_id: admin_row_id })
-            const total_users = await professionalsM.countDocuments({ sub_admin_row_id: admin_row_id })
-            const total_speakers_query = await eventM.aggregate([
-                {
-                    $match: { created_by_sub_admin_id: admin_row_id }
-                },
-                {
-                    $lookup:
-                    {
-                        from: "cln_events_speakers",
-                        localField: "_id",
-                        foreignField: "event_row_id",
-                        as: "speakers_info",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1
-                                }
-                            }
-                        ]
-
-                    }
-                },
-                {
-                    $set: {
-                        count: { $size: "$speakers_info" }
-                    }
-                }
-            ])
-            const total_speakers = total_speakers_query.reduce((total, event) => total + event.count, 0)
-
             const date = EventsstartAndEndOfToday(getPresentDateOnly())
-            const today_events = await eventM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(date.start_date) } }, { created_date_n_time: { $lte: new Date(date.end_date) } }]
-            })
 
-            const today_organizers_query = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                $and: [
-                    { updated_date_n_time: { $gte: new Date(date.start_date) } },
-                    { updated_date_n_time: { $lte: new Date(date.end_date) } }
-                ]
-            })
-
-            const today_speakers_query = await eventM.aggregate([
-                {
-                    $lookup:
+            // PERF FIX: all 9 queries below are independent of each other (none reads
+            // another's result — the two speaker counts are reduced from their own
+            // aggregate's rows only, after all 9 resolve). Previously 9 sequential awaits;
+            // batched into one Promise.all, same 9 results.
+            const [
+                total_events,
+                subadmin_data,
+                total_companies,
+                total_users,
+                total_speakers_query,
+                today_events,
+                today_organizers_query,
+                today_speakers_query,
+                today_users_query
+            ] = await Promise.all([
+                eventM.countDocuments({ created_by_admin_status: 2, created_by_sub_admin_id: admin_row_id }),
+                sub_adminM.findOne({ _id: admin_row_id }, { full_name: 1, email_id: 1 }),
+                companyM.countDocuments({ sub_admin_row_id: admin_row_id }),
+                professionalsM.countDocuments({ sub_admin_row_id: admin_row_id }),
+                eventM.aggregate([
                     {
-                        from: "cln_events_speakers",
-                        localField: "_id",
-                        foreignField: "event_row_id",
-                        as: "speakers_info",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1
+                        $match: { created_by_sub_admin_id: admin_row_id }
+                    },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_events_speakers",
+                            localField: "_id",
+                            foreignField: "event_row_id",
+                            as: "speakers_info",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        _id: 1
+                                    }
                                 }
-                            }
-                        ]
+                            ]
 
+                        }
+                    },
+                    {
+                        $set: {
+                            count: { $size: "$speakers_info" }
+                        }
                     }
-                },
-                {
-                    $match: {
-                        created_by_sub_admin_id: admin_row_id,
-                        $and: [{ created_date_n_time: { $gte: new Date(date.start_date) } }, { created_date_n_time: { $lte: new Date(date.end_date) } }]
+                ]),
+                eventM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(date.start_date) } }, { created_date_n_time: { $lte: new Date(date.end_date) } }]
+                }),
+                companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    $and: [
+                        { updated_date_n_time: { $gte: new Date(date.start_date) } },
+                        { updated_date_n_time: { $lte: new Date(date.end_date) } }
+                    ]
+                }),
+                eventM.aggregate([
+                    {
+                        $lookup:
+                        {
+                            from: "cln_events_speakers",
+                            localField: "_id",
+                            foreignField: "event_row_id",
+                            as: "speakers_info",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        _id: 1
+                                    }
+                                }
+                            ]
+
+                        }
+                    },
+                    {
+                        $match: {
+                            created_by_sub_admin_id: admin_row_id,
+                            $and: [{ created_date_n_time: { $gte: new Date(date.start_date) } }, { created_date_n_time: { $lte: new Date(date.end_date) } }]
+                        }
+                    },
+                    {
+                        $set: {
+                            count: { $size: "$speakers_info" }
+                        }
                     }
-                },
-                {
-                    $set: {
-                        count: { $size: "$speakers_info" }
-                    }
-                }
+                ]),
+                professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(date.start_date) } },
+                        { created_date_n_time: { $lte: new Date(date.end_date) } }
+                    ]
+                })
             ])
+
+            const total_speakers = total_speakers_query.reduce((total, event) => total + event.count, 0)
             const today_speakers = today_speakers_query.reduce((total, event) => total + event.count, 0)
-
-
-            const today_users_query = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(date.start_date) } },
-                    { created_date_n_time: { $lte: new Date(date.end_date) } }
-                ]
-            })
 
             res.json({
                 status: true, message: {
@@ -4356,473 +4374,433 @@ router.get('/subadmin_all', async (req, res) => {
             let resultArray = {}
             //   events
 
-            resultArray['days_pending_events'] = await eventM.countDocuments({
-                approval_status: 0, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
-            })
+            // PERF FIX: all entries below are independent of each other (none reads another's
+            // result — day_speakers/week_speakers/month_speakers are reduced from their own
+            // aggregate's rows only, after everything resolves). Previously ~50 sequential
+            // awaits; now built as [key, promise] pairs that all fire immediately, then
+            // resolved together in one Promise.all. Same values, computed concurrently.
+            const pairs = [
+                ['days_pending_events', eventM.countDocuments({
+                    approval_status: 0, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
+                })],
+                ['days_approved_events', eventM.countDocuments({
+                    approval_status: 1, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
+                })],
+                ['days_rejected_events', eventM.countDocuments({
+                    approval_status: 2, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
+                })],
+                ['days_disabled_events', eventM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 0
+                })],
+                ['days_deleted_events', deleted_eventsM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(day.start_date) } }, { date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['month_pending_events', eventM.countDocuments({
+                    approval_status: 0, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
+                })],
+                ['month_approved_events', eventM.countDocuments({
+                    approval_status: 1, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
+                })],
+                ['month_rejected_events', eventM.countDocuments({
+                    approval_status: 2, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
+                })],
+                ['month_disabled_events', eventM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 0
+                })],
+                ['month_deleted_events', deleted_eventsM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(start_date) } }, { date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['week_pending_events', eventM.countDocuments({
+                    approval_status: 0, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
+                })],
+                ['week_approved_events', eventM.countDocuments({
+                    approval_status: 1, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
+                })],
+                ['week_rejected_events', eventM.countDocuments({
+                    approval_status: 2, created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
+                })],
+                ['week_disabled_events', eventM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 0
+                })],
+                ['week_deleted_events', deleted_eventsM.countDocuments({
+                    created_by_sub_admin_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(week.start_date) } }, { date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
 
-            resultArray['days_approved_events'] = await eventM.countDocuments({
-                approval_status: 1, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
-            })
-
-            resultArray['days_rejected_events'] = await eventM.countDocuments({
-                approval_status: 2, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 1
-            })
-
-            resultArray['days_disabled_events'] = await eventM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }], active_status: 0
-            })
-
-            resultArray['days_deleted_events'] = await deleted_eventsM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(day.start_date) } }, { date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            resultArray['month_pending_events'] = await eventM.countDocuments({
-                approval_status: 0, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
-            })
-
-            resultArray['month_approved_events'] = await eventM.countDocuments({
-                approval_status: 1, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
-            })
-
-            resultArray['month_rejected_events'] = await eventM.countDocuments({
-                approval_status: 2, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 1
-            })
-
-            resultArray['month_disabled_events'] = await eventM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }], active_status: 0
-            })
-
-            resultArray['month_deleted_events'] = await deleted_eventsM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(start_date) } }, { date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            resultArray['week_pending_events'] = await eventM.countDocuments({
-                approval_status: 0, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
-            })
-
-            resultArray['week_approved_events'] = await eventM.countDocuments({
-                approval_status: 1, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
-            })
-
-            resultArray['week_rejected_events'] = await eventM.countDocuments({
-                approval_status: 2, created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 1
-            })
-
-            resultArray['week_disabled_events'] = await eventM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }], active_status: 0
-            })
-
-            resultArray['week_deleted_events'] = await deleted_eventsM.countDocuments({
-                created_by_sub_admin_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(week.start_date) } }, { date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            // speakers
-            const day_speakers_query = await eventM.aggregate([
-                {
-                    $match: {
-                        created_by_sub_admin_id: admin_row_id,
-                        $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }
-                        ]
-                    }
-                },
-                {
-                    $lookup:
+                // speakers (raw aggregate rows — reduced to counts after Promise.all below)
+                ['day_speakers_query', eventM.aggregate([
                     {
-                        from: "cln_events_speakers",
-                        localField: "_id",
-                        foreignField: "event_row_id",
-                        as: "speakers_info",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1
-                                }
-                            }
-                        ]
-
-                    }
-                },
-                {
-                    $set: {
-                        count: { $size: "$speakers_info" }
-                    }
-                }
-            ])
-            resultArray['day_speakers'] = day_speakers_query.reduce((total, event) => total + event.count, 0)
-
-            const week_speakers_query = await eventM.aggregate([
-                {
-                    $match: {
-                        created_by_sub_admin_id: admin_row_id,
-                        $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }
-                        ]
-                    }
-                },
-                {
-                    $lookup:
+                        $match: {
+                            created_by_sub_admin_id: admin_row_id,
+                            $and: [{ created_date_n_time: { $gte: new Date(day.start_date) } }, { created_date_n_time: { $lte: new Date(day.end_date) } }
+                            ]
+                        }
+                    },
                     {
-                        from: "cln_events_speakers",
-                        localField: "_id",
-                        foreignField: "event_row_id",
-                        as: "speakers_info",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1
+                        $lookup:
+                        {
+                            from: "cln_events_speakers",
+                            localField: "_id",
+                            foreignField: "event_row_id",
+                            as: "speakers_info",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        _id: 1
+                                    }
                                 }
-                            }
-                        ]
+                            ]
 
-                    }
-                },
-                {
-                    $set: {
-                        count: { $size: "$speakers_info" }
-                    }
-                }
-            ])
-            resultArray['week_speakers'] = week_speakers_query.reduce((total, event) => total + event.count, 0)
-
-            const month_speakers_query = await eventM.aggregate([
-                {
-                    $match: {
-                        created_by_sub_admin_id: admin_row_id,
-                        $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }]
-                    }
-                },
-                {
-                    $lookup:
+                        }
+                    },
                     {
-                        from: "cln_events_speakers",
-                        localField: "_id",
-                        foreignField: "event_row_id",
-                        as: "speakers_info",
-                        pipeline: [
-                            {
-                                $project: {
-                                    _id: 1
+                        $set: {
+                            count: { $size: "$speakers_info" }
+                        }
+                    }
+                ])],
+                ['week_speakers_query', eventM.aggregate([
+                    {
+                        $match: {
+                            created_by_sub_admin_id: admin_row_id,
+                            $and: [{ created_date_n_time: { $gte: new Date(week.start_date) } }, { created_date_n_time: { $lte: new Date(week.end_date) } }
+                            ]
+                        }
+                    },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_events_speakers",
+                            localField: "_id",
+                            foreignField: "event_row_id",
+                            as: "speakers_info",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        _id: 1
+                                    }
                                 }
-                            }
-                        ]
+                            ]
 
+                        }
+                    },
+                    {
+                        $set: {
+                            count: { $size: "$speakers_info" }
+                        }
                     }
-                },
-                {
-                    $set: {
-                        count: { $size: "$speakers_info" }
+                ])],
+                ['month_speakers_query', eventM.aggregate([
+                    {
+                        $match: {
+                            created_by_sub_admin_id: admin_row_id,
+                            $and: [{ created_date_n_time: { $gte: new Date(start_date) } }, { created_date_n_time: { $lte: new Date(end_date) } }]
+                        }
+                    },
+                    {
+                        $lookup:
+                        {
+                            from: "cln_events_speakers",
+                            localField: "_id",
+                            foreignField: "event_row_id",
+                            as: "speakers_info",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        _id: 1
+                                    }
+                                }
+                            ]
+
+                        }
+                    },
+                    {
+                        $set: {
+                            count: { $size: "$speakers_info" }
+                        }
                     }
-                }
-            ])
-            resultArray['month_speakers'] = month_speakers_query.reduce((total, event) => total + event.count, 0)
+                ])],
 
+                // organizers
+                ['day_pending_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } }, { updated_date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['day_approved_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['day_rejected_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['day_disabled_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    active_status: 0,
+                    $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['day_claimed_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    claim_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['day_deleted_organizers', company_deleted_historyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(day.start_date) } },
+                    { date_n_time: { $lte: new Date(day.end_date) } }]
+                })],
+                ['week_pending_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['week_approved_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['week_rejected_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['week_disabled_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    active_status: 0,
+                    $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['week_claimed_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    claim_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
+                    { updated_date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['week_deleted_organizers', company_deleted_historyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(week.start_date) } },
+                    { date_n_time: { $lte: new Date(week.end_date) } }]
+                })],
+                ['month_pending_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
+                    { updated_date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['month_approved_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
+                    { updated_date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['month_rejected_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
+                    { updated_date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['month_disabled_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    active_status: 0,
+                    $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
+                    { updated_date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['month_claimed_organizers', companyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    active_status: 1,
+                    claim_status: 2,
+                    $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
+                    { updated_date_n_time: { $lte: new Date(end_date) } }]
+                })],
+                ['month_deleted_organizers', company_deleted_historyM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    $and: [{ date_n_time: { $gte: new Date(start_date) } },
+                    { date_n_time: { $lte: new Date(end_date) } }]
+                })],
 
-            // organizers
+                // users
+                ['day_pending_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(day.start_date) } },
+                        { created_date_n_time: { $lte: new Date(day.end_date) } }
+                    ]
+                })],
+                ['day_approved_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(day.start_date) } },
+                        { created_date_n_time: { $lte: new Date(day.end_date) } }
+                    ]
+                })],
+                ['day_rejected_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(day.start_date) } },
+                        { created_date_n_time: { $lte: new Date(day.end_date) } }
+                    ]
+                })],
+                ['day_disabled_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    login_status: 0,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(day.start_date) } },
+                        { created_date_n_time: { $lte: new Date(day.end_date) } }
+                    ]
+                })],
+                ['day_claimed_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    claim_status: 2,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(day.start_date) } },
+                        { created_date_n_time: { $lte: new Date(day.end_date) } }
+                    ]
+                })],
+                ['week_pending_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(week.start_date) } },
+                        { created_date_n_time: { $lte: new Date(week.end_date) } }
+                    ]
+                })],
+                ['week_approved_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(week.start_date) } },
+                        { created_date_n_time: { $lte: new Date(week.end_date) } }
+                    ]
+                })],
+                ['week_rejected_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(week.start_date) } },
+                        { created_date_n_time: { $lte: new Date(week.end_date) } }
+                    ]
+                })],
+                ['week_disabled_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    login_status: 0,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(week.start_date) } },
+                        { created_date_n_time: { $lte: new Date(week.end_date) } }
+                    ]
+                })],
+                ['week_claimed_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    claim_status: 2,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(week.start_date) } },
+                        { created_date_n_time: { $lte: new Date(week.end_date) } }
+                    ]
+                })],
+                ['month_pending_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 0,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(start_date) } },
+                        { created_date_n_time: { $lte: new Date(end_date) } }
+                    ]
+                })],
+                ['month_approved_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(start_date) } },
+                        { created_date_n_time: { $lte: new Date(end_date) } }
+                    ]
+                })],
+                ['month_rejected_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 2,
+                    login_status: 1,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(start_date) } },
+                        { created_date_n_time: { $lte: new Date(end_date) } }
+                    ]
+                })],
+                ['month_disabled_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    login_status: 0,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(start_date) } },
+                        { created_date_n_time: { $lte: new Date(end_date) } }
+                    ]
+                })],
+                ['month_claimed_users', professionalsM.countDocuments({
+                    sub_admin_row_id: admin_row_id,
+                    approval_status: 1,
+                    login_status: 1,
+                    claim_status: 2,
+                    $and: [
+                        { created_date_n_time: { $gte: new Date(start_date) } },
+                        { created_date_n_time: { $lte: new Date(end_date) } }
+                    ]
+                })]
+            ]
 
-            resultArray['day_pending_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } }, { updated_date_n_time: { $lte: new Date(day.end_date) } }]
-            })
+            const keys = pairs.map(([k]) => k)
+            const values = await Promise.all(pairs.map(([, p]) => p))
+            keys.forEach((k, i) => { resultArray[k] = values[i] })
 
-            resultArray['day_approved_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
-                { updated_date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            resultArray['day_rejected_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
-                { updated_date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            resultArray['day_disabled_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                active_status: 0,
-                $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
-                { updated_date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            resultArray['day_claimed_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                claim_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(day.start_date) } },
-                { updated_date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            resultArray['day_deleted_organizers'] = await company_deleted_historyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(day.start_date) } },
-                { date_n_time: { $lte: new Date(day.end_date) } }]
-            })
-
-            // week
-
-            resultArray['week_pending_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
-                { updated_date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            resultArray['week_approved_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
-                { updated_date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            resultArray['week_rejected_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
-                { updated_date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            resultArray['week_disabled_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                active_status: 0,
-                $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
-                { updated_date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            resultArray['week_claimed_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                claim_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(week.start_date) } },
-                { updated_date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-            resultArray['week_deleted_organizers'] = await company_deleted_historyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(week.start_date) } },
-                { date_n_time: { $lte: new Date(week.end_date) } }]
-            })
-
-            // month
-
-            resultArray['month_pending_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
-                { updated_date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            resultArray['month_approved_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
-                { updated_date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            resultArray['month_rejected_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
-                { updated_date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            resultArray['month_disabled_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                active_status: 0,
-                $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
-                { updated_date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            resultArray['month_claimed_organizers'] = await companyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                active_status: 1,
-                claim_status: 2,
-                $and: [{ updated_date_n_time: { $gte: new Date(start_date) } },
-                { updated_date_n_time: { $lte: new Date(end_date) } }]
-            })
-            resultArray['month_deleted_organizers'] = await company_deleted_historyM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                $and: [{ date_n_time: { $gte: new Date(start_date) } },
-                { date_n_time: { $lte: new Date(end_date) } }]
-            })
-
-            // users
-
-            resultArray['day_pending_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(day.start_date) } },
-                    { created_date_n_time: { $lte: new Date(day.end_date) } }
-                ]
-            })
-
-            resultArray['day_approved_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(day.start_date) } },
-                    { created_date_n_time: { $lte: new Date(day.end_date) } }
-                ]
-            })
-
-            resultArray['day_rejected_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(day.start_date) } },
-                    { created_date_n_time: { $lte: new Date(day.end_date) } }
-                ]
-            })
-
-            resultArray['day_disabled_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                login_status: 0,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(day.start_date) } },
-                    { created_date_n_time: { $lte: new Date(day.end_date) } }
-                ]
-            })
-            resultArray['day_claimed_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                claim_status: 2,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(day.start_date) } },
-                    { created_date_n_time: { $lte: new Date(day.end_date) } }
-                ]
-            })
-
-            // week
-
-            resultArray['week_pending_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(week.start_date) } },
-                    { created_date_n_time: { $lte: new Date(week.end_date) } }
-                ]
-            })
-
-            resultArray['week_approved_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(week.start_date) } },
-                    { created_date_n_time: { $lte: new Date(week.end_date) } }
-                ]
-            })
-
-            resultArray['week_rejected_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(week.start_date) } },
-                    { created_date_n_time: { $lte: new Date(week.end_date) } }
-                ]
-            })
-
-            resultArray['week_disabled_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                login_status: 0,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(week.start_date) } },
-                    { created_date_n_time: { $lte: new Date(week.end_date) } }
-                ]
-            })
-
-            resultArray['week_claimed_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                claim_status: 2,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(week.start_date) } },
-                    { created_date_n_time: { $lte: new Date(week.end_date) } }
-                ]
-            })
-
-            // month
-
-            resultArray['month_pending_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 0,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(start_date) } },
-                    { created_date_n_time: { $lte: new Date(end_date) } }
-                ]
-            })
-
-            resultArray['month_approved_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(start_date) } },
-                    { created_date_n_time: { $lte: new Date(end_date) } }
-                ]
-            })
-
-            resultArray['month_rejected_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 2,
-                login_status: 1,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(start_date) } },
-                    { created_date_n_time: { $lte: new Date(end_date) } }
-                ]
-            })
-
-            resultArray['month_disabled_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                login_status: 0,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(start_date) } },
-                    { created_date_n_time: { $lte: new Date(end_date) } }
-                ]
-            })
-
-            resultArray['month_claimed_users'] = await professionalsM.countDocuments({
-                sub_admin_row_id: admin_row_id,
-                approval_status: 1,
-                login_status: 1,
-                claim_status: 2,
-                $and: [
-                    { created_date_n_time: { $gte: new Date(start_date) } },
-                    { created_date_n_time: { $lte: new Date(end_date) } }
-                ]
-            })
+            resultArray['day_speakers'] = resultArray.day_speakers_query.reduce((total, event) => total + event.count, 0)
+            resultArray['week_speakers'] = resultArray.week_speakers_query.reduce((total, event) => total + event.count, 0)
+            resultArray['month_speakers'] = resultArray.month_speakers_query.reduce((total, event) => total + event.count, 0)
+            delete resultArray.day_speakers_query
+            delete resultArray.week_speakers_query
+            delete resultArray.month_speakers_query
 
             res.json({ status: true, message: resultArray })
 

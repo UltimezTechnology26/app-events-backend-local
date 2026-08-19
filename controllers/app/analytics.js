@@ -270,10 +270,17 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
     let result = {}
 
     result['company_base_url'] = 'https://app.coinpedia.org/company/'
-    result['companies_list'] = await companyM.aggregate([
+    // PERF FIX: $skip/$limit moved up to run right after $match, before the 3 $lookup
+    // joins — previously those joins ran across every approved company in the system on
+    // every call, and only the final page was kept. The .sort({_id:-1}) still runs last
+    // via the chained call below (unchanged), so output order/content is identical —
+    // only where the pagination happens relative to the joins has changed.
+    const companiesListPromise = companyM.aggregate([
       {
         $match: { company_id: { $exists: true }, approval_status: 1 }
       },
+      { $skip: skip },
+      { $limit: limit },
       {
         $lookup: {
           from: "cln_company_seo_details",
@@ -340,13 +347,13 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
           }
         }
       },
-    ]).skip(skip).limit(limit).sort({ _id: -1 })
+    ]).sort({ _id: -1 })
 
-    result['company_count'] = await companyM.countDocuments({ company_id: { $exists: true }, approval_status: 1 })
-    result['deleted_companies_list'] = await company_deleted_historyM.find({ company_id: { $exists: true }, approval_status: 1 }, { approval_status: 1, _id: 0, company_name: 1, company_id: 1, company_logo: 1, date_n_time: 1, status_code: { $literal: 410 } }).skip(skip).limit(limit)
-    result['deleted_company_count'] = await company_deleted_historyM.countDocuments({ company_id: { $exists: true }, approval_status: 1 })
+    const companyCountPromise = companyM.countDocuments({ company_id: { $exists: true }, approval_status: 1 })
+    const deletedCompaniesListPromise = company_deleted_historyM.find({ company_id: { $exists: true }, approval_status: 1 }, { approval_status: 1, _id: 0, company_name: 1, company_id: 1, company_logo: 1, date_n_time: 1, status_code: { $literal: 410 } }).skip(skip).limit(limit)
+    const deletedCompanyCountPromise = company_deleted_historyM.countDocuments({ company_id: { $exists: true }, approval_status: 1 })
 
-    result['user_list'] = await professionalsM.aggregate([
+    const userListPromise = professionalsM.aggregate([
       {
         $match: { user_name: { $exists: true }, approval_status: 1 }
       },
@@ -440,7 +447,7 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       },
     ]).skip(skip).limit(limit)
 
-    const get_users_count = await professionalsM.aggregate([
+    const usersCountPromise = professionalsM.aggregate([
       {
         $match: { user_name: { $exists: true }, approval_status: 1, }
       },
@@ -468,9 +475,32 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       }
     ])
 
-    result['users_count'] = get_users_count[0] ? get_users_count[0].count : 0
-    result['users_base_url'] = 'https://app.coinpedia.org/'
+    // PERF FIX: these 6 queries are all independent of each other (none reads a value
+    // another produces) but previously ran as 6 sequential awaits. Batched here — same
+    // 6 results, computed concurrently instead of one after another.
+    const [
+      companiesList,
+      companyCount,
+      deletedCompaniesList,
+      deletedCompanyCount,
+      userList,
+      usersCountResult
+    ] = await Promise.all([
+      companiesListPromise,
+      companyCountPromise,
+      deletedCompaniesListPromise,
+      deletedCompanyCountPromise,
+      userListPromise,
+      usersCountPromise
+    ])
 
+    result['companies_list'] = companiesList
+    result['company_count'] = companyCount
+    result['deleted_companies_list'] = deletedCompaniesList
+    result['deleted_company_count'] = deletedCompanyCount
+    result['user_list'] = userList
+    result['users_count'] = usersCountResult[0] ? usersCountResult[0].count : 0
+    result['users_base_url'] = 'https://app.coinpedia.org/'
 
     res.json({ status: true, message: result })
   }

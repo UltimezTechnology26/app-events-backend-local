@@ -961,12 +961,24 @@ export async function getCompanyIndividualDetailsData({ company_row_id, includeA
     const check_partner_status_query = await added_to_partnersM.findOne({ company_row_id: get_query._id }, { _id: 1 })
     result['partner_status'] = Boolean(check_partner_status_query)
 
+    // PERF FIX: this only produces a count, so the $sort served no purpose (order is
+    // discarded by $count regardless) — dropped. The login_status:1 filter now runs inside
+    // the $lookup's own sub-pipeline, so Mongo filters during the join instead of joining
+    // every follower's full user document first and filtering afterward; $unwind is no
+    // longer needed since the lookup pipeline already narrows each follower to at most one
+    // matching user, so "array non-empty" is equivalent to "the previous $elemMatch matched".
     const queryFollowers = await followersM.aggregate([
       { $match: { company_row_id: get_query._id } },
-      { $sort: { _id: -1 } },
-      { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
-      { $match: { user_info: { $elemMatch: { login_status: 1 } } } },
-      { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'cln_professionals',
+          localField: 'user_row_id',
+          foreignField: '_id',
+          as: 'user_info',
+          pipeline: [{ $match: { login_status: 1 } }]
+        }
+      },
+      { $match: { user_info: { $ne: [] } } },
       { $count: 'count' },
     ])
     result['total_followers'] = queryFollowers.length > 0 ? queryFollowers[0].count : 0

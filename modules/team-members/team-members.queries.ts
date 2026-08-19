@@ -1,4 +1,4 @@
-// modules/team-members/team-members.queries.ts
+﻿// modules/team-members/team-members.queries.ts
 import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
 import { buildTeamMemberFilterStages } from '../common/common.enrichment'
 
@@ -62,7 +62,14 @@ export async function getEmployeeList(params: GetEmployeeListParams): Promise<Ge
     })
   }
 
-  const get_query = await professionals_work_experienceM.aggregate([
+  const get_query_promise = professionals_work_experienceM.aggregate([
+    // PERF FIX: filter to this one company FIRST (matches the
+    // { company_type, company_row_id } index) before running the 5 $lookup joins below —
+    // previously the joins ran across every work-experience row in the whole system, and
+    // the company_row_id filter (bundled into `query` below) only applied afterward. The
+    // full `query` match (user_data existence + search, which do depend on the joined
+    // fields) still runs unchanged in its original position further down.
+    { $match: { company_type: 1, company_row_id, till_date_status: 2 } },
     {
       $lookup: {
         from: 'cln_static_professionals_work_positions',
@@ -176,7 +183,10 @@ export async function getEmployeeList(params: GetEmployeeListParams): Promise<Ge
     }
   ]).skip(skip).limit(limit)
 
-  const count_query = await professionals_work_experienceM.aggregate([
+  const count_query_promise = professionals_work_experienceM.aggregate([
+    // PERF FIX: same early company filter as get_query_promise above - this count
+    // pipeline ran the same joins over the whole collection before filtering otherwise.
+    { $match: { company_type: 1, company_row_id, till_date_status: 2 } },
     {
       $lookup: {
         from: 'cln_static_professionals_work_positions',
@@ -234,6 +244,8 @@ export async function getEmployeeList(params: GetEmployeeListParams): Promise<Ge
     { $match: { $and: query } },
     { $count: 'count' }
   ])
+
+  const [get_query, count_query] = await Promise.all([get_query_promise, count_query_promise])
 
   let counts = 0
   if (count_query[0]) {
@@ -904,7 +916,14 @@ export async function getAdminCompanyEmployeeList(params: GetAdminCompanyEmploye
     })
   }
 
-  const get_query = await professionals_work_experienceM.aggregate([
+  const get_query_promise = professionals_work_experienceM.aggregate([
+    // PERF FIX: filter to this one company FIRST (matches the
+    // { company_type, company_row_id } index) before running the 5 $lookup joins below —
+    // previously the joins ran across every work-experience row in the whole system, and
+    // the company_row_id filter (bundled into `query` below) only applied afterward. The
+    // full `query` match (user_data existence + search, which do depend on the joined
+    // fields) still runs unchanged in its original position further down.
+    { $match: { company_type: 1, company_row_id, till_date_status: 2 } },
     {
       $lookup: {
         from: 'cln_static_professionals_work_positions',
@@ -1018,7 +1037,10 @@ export async function getAdminCompanyEmployeeList(params: GetAdminCompanyEmploye
     }
   ]).skip(skip).limit(limit)
 
-  const count_query = await professionals_work_experienceM.aggregate([
+  const count_query_promise = professionals_work_experienceM.aggregate([
+    // PERF FIX: same early company filter as get_query_promise above - this count
+    // pipeline ran the same joins over the whole collection before filtering otherwise.
+    { $match: { company_type: 1, company_row_id, till_date_status: 2 } },
     {
       $lookup: {
         from: 'cln_professionals',
@@ -1066,6 +1088,8 @@ export async function getAdminCompanyEmployeeList(params: GetAdminCompanyEmploye
     { $match: { $and: query } },
     { $count: 'count' }
   ])
+
+  const [get_query, count_query] = await Promise.all([get_query_promise, count_query_promise])
 
   let counts = 0
   if (count_query[0]) {
