@@ -109,6 +109,112 @@ export const getAllEvents = async (params: EventParams): Promise<EventResponse> 
     }
 };
 
+export interface PersonalizationFields {
+    invitation_id: number
+    un_registered_guest_full_name: string
+    un_registered_guest_email_id: string
+    user_notify_status?: true
+    guest_register_status: boolean
+    watchlist_status: boolean
+    collaboration_requested_status: boolean
+    user_followed_status: number
+    company_followed_status: number
+}
+
+/**
+ * Every output field of getEventIndividualDetails that depends on WHO is viewing the page,
+ * rather than on the event itself — computed from IDs that are already present on a cached
+ * public response, so this same function refreshes personalization on a cache hit for a
+ * different viewer without recomputing anything else.
+ */
+export async function resolveViewerPersonalization({
+    eventId,
+    hostUserRowId,
+    companyRowId,
+    userRowId,
+    invitationIdRaw
+}: {
+    eventId: number
+    hostUserRowId: number
+    companyRowId: number
+    userRowId: number
+    invitationIdRaw: any
+}): Promise<PersonalizationFields> {
+    let event_guests_query: Promise<any> = Promise.resolve(null)
+    let event_user_attendee_query: Promise<any> = Promise.resolve(null)
+    let collaboration_users_requests_query: Promise<any> = Promise.resolve(null)
+    let user_notify_query: Promise<any> = Promise.resolve(null)
+    let user_followed_status_query: Promise<any> = Promise.resolve(null)
+    let company_followed_status_query: Promise<any> = Promise.resolve(null)
+
+    if (userRowId) {
+        event_guests_query = event_attendeesM.findOne({ event_row_id: eventId, user_type: 1, user_row_id: userRowId, invitation_status: 1 })
+        event_user_attendee_query = event_watchlistsM.findOne({ event_row_id: eventId, user_row_id: userRowId }, { _id: 1 })
+        collaboration_users_requests_query = collaboration_users_requestsM.findOne({ event_row_id: eventId, user_row_id: userRowId }, { _id: 1 })
+        user_notify_query = notify_userM.findOne({ user_row_id: userRowId, event_row_id: eventId })
+        user_followed_status_query = professionals_followersM.findOne(
+            { following_user_row_id: hostUserRowId, follower_user_row_id: userRowId, confirm_request_status: 2 },
+            { _id: 1 }
+        ).lean()
+        company_followed_status_query = company_followersM.findOne(
+            { company_row_id: companyRowId, user_row_id: userRowId },
+            { _id: 1 }
+        ).lean()
+    }
+
+    let invitation_id = 0
+    let event_guest_query: Promise<any[]> = Promise.resolve([])
+    if (invitationIdRaw) {
+        invitation_id = Number.parseInt(invitationIdRaw)
+        event_guest_query = event_guestsM.aggregate([
+            { $match: { _id: invitation_id } },
+            {
+                $lookup: {
+                    from: "cln_events_guests_emails",
+                    localField: "guest_email_row_id",
+                    foreignField: "_id",
+                    as: "guest_info"
+                }
+            },
+            { $unwind: { path: "$guest_info", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    full_name: "$guest_info.full_name",
+                    email_id: "$guest_info.email_id"
+                }
+            }
+        ]).limit(1)
+    }
+
+    const [
+        event_guests, event_user_attendee, collaboration_users_requests, user_notify,
+        user_followed_status_doc, company_followed_status_doc, event_guest_detail
+    ] = await Promise.all([
+        event_guests_query, event_user_attendee_query, collaboration_users_requests_query, user_notify_query,
+        user_followed_status_query, company_followed_status_query, event_guest_query
+    ])
+
+    const result: PersonalizationFields = {
+        invitation_id,
+        un_registered_guest_full_name: '',
+        un_registered_guest_email_id: '',
+        guest_register_status: !!event_guests,
+        watchlist_status: !!event_user_attendee,
+        collaboration_requested_status: !!collaboration_users_requests,
+        user_followed_status: user_followed_status_doc ? 2 : 0,
+        company_followed_status: company_followed_status_doc ? 1 : 0
+    }
+    if (user_notify) {
+        result.user_notify_status = true
+    }
+    if (event_guest_detail[0]) {
+        result.un_registered_guest_full_name = event_guest_detail[0].full_name
+        result.un_registered_guest_email_id = event_guest_detail[0].email_id
+    }
+    return result
+}
+
 export const getEventIndividualDetails = async (req: any, user_row_id: number) => {
     try {
         const event_url = req.params.event_url
