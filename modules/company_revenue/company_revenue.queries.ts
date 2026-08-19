@@ -691,9 +691,15 @@ export async function getCompanyProfileRevenueSummary({ company_row_id, req }: G
     matchFilter.quarter = Number.parseInt(req.query.quarter)
   }
 
-  result.recent = await company_revenue_growthM.findOne({ company_row_id }).sort({ _id: -1 }).lean()
+  // PERF FIX: these 6 queries are all independent of each other (none reads a value another
+  // produces — each only depends on company_row_id/matchFilter/req.query, computed above)
+  // but previously ran as 6 sequential awaits. This function alone accounted for the
+  // second-largest share of total API time across the whole backend (21.59%, as the
+  // revenue section of the company profile page's individual_other_details endpoint).
+  // Batched into one Promise.all below; same 6 results, computed concurrently.
+  const recentPromise = company_revenue_growthM.findOne({ company_row_id }).sort({ _id: -1 }).lean()
 
-  result.list = await company_revenue_growthM.aggregate([
+  const listPromise = company_revenue_growthM.aggregate([
     { $match: matchFilter },
     { $group: { _id: '$year', total_revenue: { $sum: '$revenue' } } },
     { $sort: { _id: -1 } },
@@ -755,7 +761,7 @@ export async function getCompanyProfileRevenueSummary({ company_row_id, req }: G
     { $project: { _id: 0, year: '$_id', total_revenue: 1, quarter_list: '$info_quarter_list' } }
   ])
 
-  result.list2 = await company_revenue_growthM.aggregate([
+  const list2Promise = company_revenue_growthM.aggregate([
     { $match: matchFilter },
     { $sort: { year: -1, quarter: 1 } },
     { $group: { _id: '$year', quarters: { $push: '$quarter' }, total_revenue: { $sum: '$revenue' } } },
@@ -763,23 +769,32 @@ export async function getCompanyProfileRevenueSummary({ company_row_id, req }: G
     { $sort: { year: -1 } }
   ])
 
-  const revenue_count_query = await company_revenue_growthM.aggregate([
+  const revenueCountPromise = company_revenue_growthM.aggregate([
     { $match: { company_row_id } },
     { $group: { _id: '$year' } },
     { $count: 'count' }
   ])
-  result.count = revenue_count_query[0] ? revenue_count_query[0].count : 0
 
-  result.list_by_year = await company_revenue_growthM.aggregate([
+  const listByYearPromise = company_revenue_growthM.aggregate([
     { $match: { company_row_id } },
     { $group: { _id: '$year', total_revenue: { $sum: '$revenue' } } },
     { $sort: { _id: 1 } }
   ])
 
-  const total_revenue_query = await company_revenue_growthM.aggregate([
+  const totalRevenuePromise = company_revenue_growthM.aggregate([
     { $match: { company_row_id } },
     { $group: { _id: null, total_revenue: { $sum: '$revenue' } } }
   ])
+
+  const [recent, list, list2, revenue_count_query, list_by_year, total_revenue_query] = await Promise.all([
+    recentPromise, listPromise, list2Promise, revenueCountPromise, listByYearPromise, totalRevenuePromise
+  ])
+
+  result.recent = recent
+  result.list = list
+  result.list2 = list2
+  result.count = revenue_count_query[0] ? revenue_count_query[0].count : 0
+  result.list_by_year = list_by_year
   result.total_revenue = total_revenue_query[0] ? total_revenue_query[0].total_revenue : 0
 
   return result

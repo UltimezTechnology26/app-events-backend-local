@@ -1585,7 +1585,10 @@ export async function calculateCompanyProfileScore(company_row_id, fieldsToUpdat
   if (fullUpdate || fieldsToUpdate.includes("owned_product")) {
     const products = await company_productsM.find({ company_row_id });
 
-    updateObject.owned_product_score = products ? 10 : 0;
+    // BUG FIX: .find() always returns an array, even when empty ([]) — which is truthy in
+    // JS, so `products ? 10 : 0` always evaluated to 10 regardless of whether any products
+    // actually existed. Deleting a company's last product never dropped this score to 0.
+    updateObject.owned_product_score = products.length > 0 ? 10 : 0;
     total += updateObject.owned_product_score;
   }
 

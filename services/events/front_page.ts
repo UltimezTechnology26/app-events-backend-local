@@ -714,22 +714,11 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             let link_partner_status = true
             let link_sponsor_status = true
             let link_ticket_status = true
-            const get_event_link_display_details = await event_link_display_detailsM.findOne({ event_row_id: eventsList[0]._id })
-            if (get_event_link_display_details) {
-                link_user_register_status = get_event_link_display_details.link_user_register_status
-                link_attendee_list_status = get_event_link_display_details.link_attendee_list_status
-                link_speaker_status = get_event_link_display_details.link_speaker_status
-                link_partner_status = get_event_link_display_details.link_partner_status
-                link_sponsor_status = get_event_link_display_details.link_sponsor_status
-                link_ticket_status = get_event_link_display_details.link_ticket_status
-            }
-
-            myArr['link_user_register_status'] = link_user_register_status
-            myArr['link_attendee_list_status'] = link_attendee_list_status
-            myArr['link_speaker_status'] = link_speaker_status
-            myArr['link_partner_status'] = link_partner_status
-            myArr['link_sponsor_status'] = link_sponsor_status
-            myArr['link_ticket_status'] = link_ticket_status
+            // PERF FIX: fired here without an await so it runs concurrently with the
+            // flag-independent queries below, instead of blocking every downstream query
+            // behind one extra round trip. Resolved (and the flags extracted) just before
+            // the first flag-dependent query needs them — see further down.
+            const get_event_link_display_details_promise = event_link_display_detailsM.findOne({ event_row_id: eventsList[0]._id })
 
             const event_faqs_query = event_faqM.find({ event_row_id: eventsList[0]._id })
 
@@ -790,15 +779,11 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 ]).limit(1)
             }
 
-            let tickets_query = Promise.resolve([])
-            if (link_ticket_status) {
-                tickets_query = ticketM.find({ event_row_id: eventDetails._id }).sort({ price: 1 })
-            }
-            let coupon_query = Promise.resolve([]);
-            if (link_ticket_status) {
-                coupon_query = couponM.find({ event_row_id: eventDetails._id })
-            }
-
+            // The remaining flag-independent queries below all fire immediately (still
+            // concurrent with get_event_link_display_details_promise above). Only once we
+            // reach the flag-dependent queries (tickets/coupon onward) do we need the
+            // resolved link_* flags, so the await is placed right there instead of at the
+            // top of this function — see the PERF FIX comment above.
             const event_tags_query = event_tagsM.find({ _id: { $in: eventDetails.event_tags }, active_status: true }, { _id: 1, event_tag: 1 })
 
             const watchlist_count_query = event_watchlistsM.countDocuments({ event_row_id: eventDetails._id })
@@ -853,6 +838,35 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 event_user_attendee_query = event_watchlistsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
 
                 collaboration_users_requests_query = collaboration_users_requestsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
+            }
+
+            // Resolve the link-display flags now — every flag-independent query above is
+            // already in flight, so this await no longer blocks them. Only the queries
+            // below (tickets, coupons, speakers, attendees, sponsors, partners) need it.
+            const get_event_link_display_details = await get_event_link_display_details_promise
+            if (get_event_link_display_details) {
+                link_user_register_status = get_event_link_display_details.link_user_register_status
+                link_attendee_list_status = get_event_link_display_details.link_attendee_list_status
+                link_speaker_status = get_event_link_display_details.link_speaker_status
+                link_partner_status = get_event_link_display_details.link_partner_status
+                link_sponsor_status = get_event_link_display_details.link_sponsor_status
+                link_ticket_status = get_event_link_display_details.link_ticket_status
+            }
+
+            myArr['link_user_register_status'] = link_user_register_status
+            myArr['link_attendee_list_status'] = link_attendee_list_status
+            myArr['link_speaker_status'] = link_speaker_status
+            myArr['link_partner_status'] = link_partner_status
+            myArr['link_sponsor_status'] = link_sponsor_status
+            myArr['link_ticket_status'] = link_ticket_status
+
+            let tickets_query = Promise.resolve([])
+            if (link_ticket_status) {
+                tickets_query = ticketM.find({ event_row_id: eventDetails._id }).sort({ price: 1 })
+            }
+            let coupon_query = Promise.resolve([]);
+            if (link_ticket_status) {
+                coupon_query = couponM.find({ event_row_id: eventDetails._id })
             }
 
             const speakers_query_promise = link_speaker_status

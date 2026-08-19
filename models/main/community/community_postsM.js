@@ -86,6 +86,10 @@ communityPostSchema.index({ post_status: 1, group_id: 1, date: -1 });
 
 communityPostSchema.index({ post_status: 1, repost_id: 1 });
 communityPostSchema.index({ post_status: 1, repost_user_row_id: 1 });
+// Serves getSinglePostDetails' repost-count $lookup (services/main/community/posts.ts),
+// which matches on repost_id alone — the compound index above can't serve that since
+// post_status isn't part of the query, forcing a collection scan on heavily-reposted posts.
+communityPostSchema.index({ repost_id: 1 });
 communityPostSchema.index({ post_status: 1, user_row_id: 1, group_id: 1, date: -1 });
 
 module.exports = mongoose.model('cln_main_community_posts', communityPostSchema);
