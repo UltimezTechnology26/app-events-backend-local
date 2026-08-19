@@ -218,13 +218,26 @@ export async function resolveViewerPersonalization({
 export const getEventIndividualDetails = async (req: any, user_row_id: number) => {
     try {
         const event_url = req.params.event_url
-        const key = `individual_event_${event_url}_${user_row_id}`
+        // PERF FIX: was keyed by user_row_id too, so every distinct logged-in viewer of the
+        // same event recomputed and cached the entire ~17-query response separately, even
+        // though only a handful of fields differ per viewer. Now cached once per event_url;
+        // on every hit, personalization is refreshed for the CURRENT viewer via
+        // resolveViewerPersonalization() rather than serving back whichever viewer
+        // originally populated this cache entry.
+        const key = `individual_event_${event_url}`
 
         const cache_response = await redisCache.getCache({ key })
         if (cache_response.status) {
+            const personalization = await resolveViewerPersonalization({
+                eventId: cache_response.message._id,
+                hostUserRowId: cache_response.message.user_row_id,
+                companyRowId: cache_response.message.company_row_id,
+                userRowId: user_row_id,
+                invitationIdRaw: req.query.invitation_id
+            })
             return {
                 status: true,
-                message: cache_response.message,
+                message: { ...cache_response.message, ...personalization },
                 cache_reponse_status: true
             }
         }
@@ -677,9 +690,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             await eventM.findOneAndUpdate({ _id: eventsList[0]._id }, { $inc: { view_counts: 1 } })
             let eventDetails = eventsList[0]
             myArr['_id'] = eventDetails._id
-            myArr['invitation_id'] = 0
-            myArr['un_registered_guest_full_name'] = ""
-            myArr['un_registered_guest_email_id'] = ""
 
             myArr['country_code'] = eventDetails.country_code ? eventDetails.country_code : ""
             myArr['country_name'] = eventDetails.country_name ? eventDetails.country_name : ""
@@ -824,34 +834,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 }
             ]).limit(1)
 
-            let event_guest_query = Promise.resolve([])
-            if (req.query.invitation_id) {
-                const invitation_id = Number.parseInt(req.query.invitation_id)
-                myArr['invitation_id'] = invitation_id
-                event_guest_query = event_guestsM.aggregate([
-                    {
-                        $match: { _id: invitation_id }
-                    },
-                    {
-                        $lookup:
-                        {
-                            from: "cln_events_guests_emails",
-                            localField: "guest_email_row_id",
-                            foreignField: "_id",
-                            as: "guest_info"
-                        }
-                    },
-                    { $unwind: { path: "$guest_info", preserveNullAndEmptyArrays: true } },
-                    {
-                        $project: {
-                            _id: 1,
-                            full_name: "$guest_info.full_name",
-                            email_id: "$guest_info.email_id"
-                        }
-                    }
-                ]).limit(1)
-            }
-
             // The remaining flag-independent queries below all fire immediately (still
             // concurrent with get_event_link_display_details_promise above). Only once we
             // reach the flag-dependent queries (tickets/coupon onward) do we need the
@@ -860,8 +842,6 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             const event_tags_query = event_tagsM.find({ _id: { $in: eventDetails.event_tags }, active_status: true }, { _id: 1, event_tag: 1 })
 
             const watchlist_count_query = event_watchlistsM.countDocuments({ event_row_id: eventDetails._id })
-
-            const user_notify_query = notify_userM.findOne({ user_row_id: user_row_id, event_row_id: eventDetails._id })
 
             const contact_details_query = event_contactsM.aggregate([
                 { $match: { event_row_id: eventDetails._id } },
@@ -901,34 +881,13 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                 }
             ])
 
-            let event_guests_query = Promise.resolve(null)
-            let event_user_attendee_query = Promise.resolve(null)
-            let collaboration_users_requests_query = Promise.resolve(null)
-            // PERF FIX (cache split): these two used to be $lookup stages inside the main
-            // aggregate, filtered on user_row_id — which made the whole aggregate result
-            // viewer-specific and un-cacheable across users. Extracted here as standalone
-            // queries so the main aggregate can be cached once per event_url; see the cache
-            // key change further down.
-            let user_followed_status_query: Promise<any> = Promise.resolve(null)
-            let company_followed_status_query: Promise<any> = Promise.resolve(null)
-
-            if (user_row_id) {
-                event_guests_query = event_attendeesM.findOne({ event_row_id: eventDetails._id, user_type: 1, user_row_id: user_row_id, invitation_status: 1 })
-
-                event_user_attendee_query = event_watchlistsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
-
-                collaboration_users_requests_query = collaboration_users_requestsM.findOne({ event_row_id: eventDetails._id, user_row_id: user_row_id }, { _id: 1 })
-
-                user_followed_status_query = professionals_followersM.findOne(
-                    { following_user_row_id: eventDetails.user_row_id, follower_user_row_id: user_row_id, confirm_request_status: 2 },
-                    { _id: 1 }
-                ).lean()
-
-                company_followed_status_query = company_followersM.findOne(
-                    { company_row_id: eventDetails.company_row_id, user_row_id: user_row_id },
-                    { _id: 1 }
-                ).lean()
-            }
+            const personalization_promise = resolveViewerPersonalization({
+                eventId: eventDetails._id,
+                hostUserRowId: eventDetails.user_row_id,
+                companyRowId: eventDetails.company_row_id,
+                userRowId: user_row_id,
+                invitationIdRaw: req.query.invitation_id
+            })
 
             // Resolve the link-display flags now — every flag-independent query above is
             // already in flight, so this await no longer blocks them. Only the queries
@@ -2263,15 +2222,15 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
 
             const [
-                event_faqs, collaborations_list, event_guest_detail, tickets, coupon, event_tags_array,
-                watchlist_count, user_notify, contact_details, event_guests, event_user_attendee, collaboration_users_requests,
+                event_faqs, collaborations_list, tickets, coupon, event_tags_array,
+                watchlist_count, contact_details,
                 speakers_result, related_events_result, related_events_past_result, attendees_result, sponsors_result, partners_result,
-                user_followed_status_doc, company_followed_status_doc
+                personalization
             ] = await Promise.all([
-                event_faqs_query, get_collaboration_query, event_guest_query, tickets_query, coupon_query, event_tags_query,
-                watchlist_count_query, user_notify_query, contact_details_query, event_guests_query, event_user_attendee_query, collaboration_users_requests_query,
+                event_faqs_query, get_collaboration_query, tickets_query, coupon_query, event_tags_query,
+                watchlist_count_query, contact_details_query,
                 speakers_query_promise, related_events_promise, related_events_past_promise, attendees_query_promise, sponsors_query_promise, partners_query_promise,
-                user_followed_status_query, company_followed_status_query
+                personalization_promise
             ])
 
 
@@ -2284,23 +2243,12 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
             myArr['event_faqs'] = event_faqs
             myArr['collaborations_ids_list'] = collaborations_list[0] ? collaborations_list[0].collaborations_ids_list : []
-            if (event_guest_detail[0]) {
-                myArr['un_registered_guest_full_name'] = event_guest_detail[0].full_name
-                myArr['un_registered_guest_email_id'] = event_guest_detail[0].email_id
-            }
             myArr['tickets'] = tickets
             myArr['coupons'] = coupon
             myArr['event_tags_array'] = event_tags_array
             myArr['watchlist_count'] = watchlist_count
-            if (user_notify) {
-                myArr['user_notify_status'] = true
-            }
-            myArr['guest_register_status'] = !!event_guests
-            myArr['watchlist_status'] = !!event_user_attendee
-            myArr['collaboration_requested_status'] = !!collaboration_users_requests
-            myArr['user_followed_status'] = user_followed_status_doc ? 2 : 0
-            myArr['company_followed_status'] = company_followed_status_doc ? 1 : 0
             myArr['contact_details'] = contact_details[0] ? contact_details : []
+            Object.assign(myArr, personalization)
 
             // res.json({ status: true, message: myArr })
             await redisCache.setCache({
