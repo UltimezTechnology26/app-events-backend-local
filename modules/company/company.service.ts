@@ -50,7 +50,16 @@ export const companyIndividualEvents = async ({ company_row_id, req }: { company
     result['hosts'] = list
 
     result['sponsors'] = []
-    const check_sponsors = await event_sponsors_partner_detailsM.find({ account_type: 2, registered_type: 1, sponsor_partner_type: 1, user_company_row_id: company_row_id }, { event_row_id: 1 }).lean()
+    result['partners'] = []
+
+    // PERF FIX: these two existence checks are independent of each other (different
+    // sponsor_partner_type) but previously ran as two sequential awaits. Batched into one
+    // Promise.all — same two results, computed concurrently instead of one after another.
+    const [check_sponsors, check_partners] = await Promise.all([
+        event_sponsors_partner_detailsM.find({ account_type: 2, registered_type: 1, sponsor_partner_type: 1, user_company_row_id: company_row_id }, { event_row_id: 1 }).lean(),
+        event_sponsors_partner_detailsM.find({ account_type: 2, registered_type: 1, sponsor_partner_type: 2, user_company_row_id: company_row_id }, { event_row_id: 1 }).lean()
+    ])
+
     if (check_sponsors) {
         const sponsor_array = await array_column(check_sponsors, 'event_row_id')
         if (sponsor_array.length) {
@@ -68,8 +77,6 @@ export const companyIndividualEvents = async ({ company_row_id, req }: { company
         }
     }
 
-    result['partners'] = []
-    const check_partners = await event_sponsors_partner_detailsM.find({ account_type: 2, registered_type: 1, sponsor_partner_type: 2, user_company_row_id: company_row_id }, { event_row_id: 1 }).lean()
     if (check_partners) {
         const partner_array = await array_column(check_partners, 'event_row_id')
         if (partner_array.length) {
