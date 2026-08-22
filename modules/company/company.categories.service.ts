@@ -110,9 +110,14 @@ export async function addOrUpdateCompanyCategory({ body, preValidationErrors }: 
 
   const update_array: Record<string, any> = {}
   update_array['business_name'] = business_name
+  // Bug fix (found via live user report, confirmed identical in the legacy
+  // controller this was ported from): business_id was only ever added to
+  // update_array inside the create branch below, so editing an existing
+  // category's ID was silently dropped on save - it validated against
+  // duplicates but never actually persisted.
+  update_array['business_id'] = business_id
 
   if (!business_row_id) {
-    update_array['business_id'] = business_id
     update_array['date_n_time'] = getPresentDateTime()
     update_array['active_status'] = true
 
