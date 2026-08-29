@@ -143,9 +143,32 @@ process.on('uncaughtException', err => {
     process.exit(1)
 })
 
+// Change-stream cursor handles, kept module-level so a restart can close
+// the previous cursor first - without this, a transient connection error
+// (DNS blip, replica-set failover) that keeps recurring stacks a brand-new
+// pair of watchers on top of the old ones every single retry, forever. That
+// leak is exactly what happened here: ~271k uncleaned restarts accumulated
+// in under an hour once the underlying cluster started timing out, pinning
+// the event loop/connection pool and hanging every other route (including
+// admin login) behind it.
+let postChangeStream = null
+let commentChangeStream = null
+
+// Minimum gap between restart attempts, per stream - a tight error/retry
+// loop (the original bug) can otherwise re-fire on every immediate
+// reconnect failure with no real backoff.
+const CHANGE_STREAM_RESTART_DELAY_MS = 5000
+
+const closeStreamSafely = (stream) => {
+    if (!stream) return
+    stream.removeAllListeners()
+    stream.close().catch((e) => console.error('❌ Error closing stale change stream:', e.message))
+}
+
 const startPostChangeStream = () => {
     try {
-        community_postsM.watch([], { fullDocument: 'updateLookup' })
+        closeStreamSafely(postChangeStream)
+        postChangeStream = community_postsM.watch([], { fullDocument: 'updateLookup' })
             .on('change', async (data) => {
                 const { operationType, fullDocument, documentKey, updateDescription } = data;
                 if (!documentKey?._id) return;
@@ -174,12 +197,22 @@ const startPostChangeStream = () => {
             })
             .on('error', (e) => {
                 console.error('❌ Change stream error:', e.message);
-                setTimeout(() => {
-                    startPostChangeStream();
-                }, 5000);
+                setTimeout(startPostChangeStream, CHANGE_STREAM_RESTART_DELAY_MS);
             });
 
-        community_commentsM.watch([], { fullDocument: 'updateLookup' })
+        console.log('✅ Change stream started on community_postsM');
+        return true;
+    } catch (e) {
+        console.error('❌ Failed to start change stream:', e.message);
+        setTimeout(startPostChangeStream, CHANGE_STREAM_RESTART_DELAY_MS);
+        return false;
+    }
+};
+
+const startCommentChangeStream = () => {
+    try {
+        closeStreamSafely(commentChangeStream)
+        commentChangeStream = community_commentsM.watch([], { fullDocument: 'updateLookup' })
             .on('change', async (data) => {
                 const { operationType, fullDocument, documentKey, updateDescription } = data;
                 if (!documentKey?._id) return;
@@ -206,18 +239,14 @@ const startPostChangeStream = () => {
             })
             .on('error', (e) => {
                 console.error('❌ Comment stream error:', e.message);
-                setTimeout(() => {
-                    startPostChangeStream();
-                }, 5000);
+                setTimeout(startCommentChangeStream, CHANGE_STREAM_RESTART_DELAY_MS);
             });
 
-        console.log('✅ Change stream started on community_postsM');
+        console.log('✅ Change stream started on community_commentsM');
         return true;
     } catch (e) {
-        console.error('❌ Failed to start change stream:', e.message);
-        setTimeout(() => {
-            startPostChangeStream();
-        }, 5000);
+        console.error('❌ Failed to start comment change stream:', e.message);
+        setTimeout(startCommentChangeStream, CHANGE_STREAM_RESTART_DELAY_MS);
         return false;
     }
 };
@@ -247,6 +276,7 @@ server.listen(PORTNUM, async () => {
     if (dbConnected) {
         console.log('✅ Database connected, starting change streams...');
         startPostChangeStream()
+        startCommentChangeStream()
     } else {
         console.log('⚠️ Database connection failed, starting server without change streams');
     }
