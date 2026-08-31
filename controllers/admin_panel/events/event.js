@@ -12,8 +12,8 @@ const { checkAdminLoginToken, checkApiKey, checkAllLoginToken } = require('../..
 const { sendEmail, sendEventsEmail } = require('../../../config/email')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 const { eventsList } = require('../../../services/admin_panel/events')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
 const event_faqM = require('../../../models/app/events/event_faqM')
 const countryM = require('../../../models/app/static/countryM')

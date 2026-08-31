@@ -17,8 +17,8 @@ const company_manual_retrievalsM = require('../../models/app/company/company_man
 const eventM = require('../../models/app/events/eventM')
 const { setCache, getCache, deleteKeysByPattern } = require('../../config/cache_helper')
 const { calculateEventScore } = require('../../utils/helpers/app_helper')
-const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../src/modules/funding/funding.queries')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the

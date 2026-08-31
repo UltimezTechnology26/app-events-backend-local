@@ -266,117 +266,126 @@ router.get("/list/:skip/:limit", async (req, res) => {
             });
         }
 
-        const job_list = await jobsM.aggregate([
-            { $match: matchStage },
-            {
-                $lookup: {
-                    from: "cln_company_lists",
-                    localField: "company_row_id",
-                    foreignField: "_id",
-                    as: "company_info"
-                }
-            },
-            { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
-            {
-                $lookup: {
-                    from: "cln_job_applied_lists",
-                    let: { jobId: "$_id" },
-                    pipeline: [
-                        { $match: { $expr: { $eq: ["$job_id", "$$jobId"] } } },
-                        {
-                            $group: {
-                                _id: null,
-                                total_applicants: { $sum: 1 },
-                                applied_users: { $push: "$user_row_id" }
+        // PERF FIX: $sort/$skip/$limit now run immediately after $match, before any of the
+        // 5 $lookups below (one with its own $group sub-pipeline) - previously every lookup
+        // ran across every matching job in the whole company before the page was trimmed
+        // down to `limit` rows, so a company with hundreds of jobs paid for hundreds of
+        // joins to render one 10-row page. Semantically identical (createdAt isn't touched
+        // by any lookup below), just far less work for the same result. The count query -
+        // previously awaited sequentially after the list query - now runs in parallel with
+        // it via Promise.all, since the two are independent of each other.
+        const [job_list, totalCountResult] = await Promise.all([
+            jobsM.aggregate([
+                { $match: matchStage },
+                { $sort: { createdAt: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                {
+                    $lookup: {
+                        from: "cln_company_lists",
+                        localField: "company_row_id",
+                        foreignField: "_id",
+                        as: "company_info"
+                    }
+                },
+                { $unwind: { path: "$company_info", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "cln_job_applied_lists",
+                        let: { jobId: "$_id" },
+                        pipeline: [
+                            { $match: { $expr: { $eq: ["$job_id", "$$jobId"] } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    total_applicants: { $sum: 1 },
+                                    applied_users: { $push: "$user_row_id" }
+                                }
+                            }
+                        ],
+                        as: "applicants_info"
+                    }
+                },
+                {
+                    $addFields: {
+                        total_applicants: {
+                            $ifNull: [{ $arrayElemAt: ["$applicants_info.total_applicants", 0] }, 0]
+                        },
+                        has_applied: {
+                            $in: [
+                                user_row_id,
+                                { $ifNull: [{ $arrayElemAt: ["$applicants_info.applied_users", 0] }, []] }
+                            ]
+                        }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "cln_job_skills",
+                        localField: "key_skills",
+                        foreignField: "_id",
+                        as: "skills_info"
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "cln_static_countries",
+                        localField: "country_id",
+                        foreignField: "_id",
+                        as: "co_info"
+                    }
+                },
+                { $unwind: { path: "$co_info", preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: "cln_job_education_types",
+                        localField: "highest_education",
+                        foreignField: "_id",
+                        as: "education_info"
+                    }
+                },
+                { $unwind: { path: "$education_info", preserveNullAndEmptyArrays: true } },
+                {
+                    $project: {
+                        _id: 1,
+                        job_title: 1,
+                        experience_level: 1,
+                        job_type: 1,
+                        country_name: "$co_info.country_name",
+                        country_flag: "$co_info.country_flag",
+                        work_location_type: 1,
+                        location: 1,
+                        salary_from: 1,
+                        salary_to: 1,
+                        has_applied: 1,
+                        no_of_openings: 1,
+                        application_deadline: 1,
+                        job_description: 1,
+                        active_status: 1,
+                        total_applicants: 1,
+                        createdAt: 1,
+                        country_id: 1,
+                        company_name: "$company_info.company_name",
+                        company_logo: "$company_info.company_logo",
+                        company_row_id: 1,
+                        highest_education: {
+                            _id: "$education_info._id",
+                            name: "$education_info.education_type"
+                        },
+                        skills: {
+                            $map: {
+                                input: "$skills_info",
+                                as: "s",
+                                in: { _id: "$$s._id", name: "$$s.skill_name" }
                             }
                         }
-                    ],
-                    as: "applicants_info"
-                }
-            },
-            {
-                $addFields: {
-                    total_applicants: {
-                        $ifNull: [{ $arrayElemAt: ["$applicants_info.total_applicants", 0] }, 0]
-                    },
-                    has_applied: {
-                        $in: [
-                            user_row_id,
-                            { $ifNull: [{ $arrayElemAt: ["$applicants_info.applied_users", 0] }, []] }
-                        ]
                     }
                 }
-            },
-            {
-                $lookup: {
-                    from: "cln_job_skills",
-                    localField: "key_skills",
-                    foreignField: "_id",
-                    as: "skills_info"
-                }
-            },
-            {
-                $lookup: {
-                    from: "cln_static_countries",
-                    localField: "country_id",
-                    foreignField: "_id",
-                    as: "co_info"
-                }
-            },
-            { $unwind: { path: "$co_info", preserveNullAndEmptyArrays: true } },
-            {
-                $lookup: {
-                    from: "cln_job_education_types",
-                    localField: "highest_education",
-                    foreignField: "_id",
-                    as: "education_info"
-                }
-            },
-            { $unwind: { path: "$education_info", preserveNullAndEmptyArrays: true } },
-            {
-                $project: {
-                    _id: 1,
-                    job_title: 1,
-                    experience_level: 1,
-                    job_type: 1,
-                    country_name: "$co_info.country_name",
-                    country_flag: "$co_info.country_flag",
-                    work_location_type: 1,
-                    location: 1,
-                    salary_from: 1,
-                    salary_to: 1,
-                    has_applied: 1,
-                    no_of_openings: 1,
-                    application_deadline: 1,
-                    job_description: 1,
-                    active_status: 1,
-                    total_applicants: 1,
-                    createdAt: 1,
-                    country_id: 1,
-                    company_name: "$company_info.company_name",
-                    company_logo: "$company_info.company_logo",
-                    company_row_id: 1,
-                    highest_education: {
-                        _id: "$education_info._id",
-                        name: "$education_info.education_type"
-                    },
-                    skills: {
-                        $map: {
-                            input: "$skills_info",
-                            as: "s",
-                            in: { _id: "$$s._id", name: "$$s.skill_name" }
-                        }
-                    }
-                }
-            },
-            { $sort: { createdAt: -1 } },
-            { $skip: skip },
-            { $limit: limit }
-        ]);
-
-        const totalCountResult = await jobsM.aggregate([
-            { $match: matchStage },
-            { $count: "count" }
+            ]),
+            jobsM.aggregate([
+                { $match: matchStage },
+                { $count: "count" }
+            ])
         ]);
         const totalCount = totalCountResult[0]?.count || 0;
 

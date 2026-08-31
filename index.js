@@ -25,8 +25,13 @@ const event_attendeesM = require('./models/app/events/event_attendeesM')
 const email_eventsM = require('./models/emails/email_eventsM')
 
 
+const path = require('node:path')
 const app = express()
-app.use(express.static(__dirname + '/'));
+// Was `express.static(__dirname + '/')` - unscoped, so it served every file in
+// this directory over plain HTTP with no auth (package.json, .env's siblings,
+// etc). Narrowed to the one real static asset (the repo-root favicon) instead
+// of carrying forward the same open directory listing.
+app.use('/favicon.png', express.static(path.join(__dirname, 'favicon.png')));
 
 //middleware setup start here 
 app.use(express.urlencoded({
@@ -132,6 +137,23 @@ app.disable("x-powered-by")
 
 app.use(checkApiKey)
 app.use(route)
+
+// Centralized error handler — a safety net, not a replacement for the
+// try/catch every route already has. Express only reaches this if a route
+// or middleware throws synchronously or calls next(err) without having
+// already sent a response, which none of the existing routes currently do
+// (they all catch their own errors and respond directly) — so this adds
+// coverage for the unhandled case without changing any route's current
+// response. Must be registered after app.use(route) — Express only routes
+// errors to handlers registered after the code that threw.
+const logger = require('./config/logger').default
+app.use((err, req, res, next) => {
+    logger.error(`Unhandled error on ${req.method} ${req.originalUrl}: ${err instanceof Error ? err.message : String(err)}`)
+    if (res.headersSent) {
+        return next(err)
+    }
+    res.status(500).json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+})
 
 process.on('unhandledRejection', (reason, p) => {
     console.error(reason, 'Unhandled Rejection at Promise')

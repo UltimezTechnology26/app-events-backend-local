@@ -8,8 +8,8 @@ const event_link_display_detailsM = require('../../../../models/app/events/event
 const event_speakersM = require('../../../../models/app/events/event_speakersM');
 const eventM = require('../../../../models/app/events/eventM');
 const { deleteKeysByPattern } = require('../../../../config/cache_helper')
-const { getPositionResolutionStages } = require('../../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the

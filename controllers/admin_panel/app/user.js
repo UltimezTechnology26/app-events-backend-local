@@ -9,8 +9,8 @@ const { checkAdminLoginToken, generateUserLoginToken, checkApiKey } = require('.
 const { sendEmail } = require('../../../config/email')
 const { shiftUserFromManualToRegister } = require('../../../utils/helpers/events_helper')
 const { deleteUserDetais, deleteProfessionalDetails, calculateUserProfileScore, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 const MARKET_API_BASE_URL = process.env.MARKET_API_BASE_URL
 const MARKET_API_KEY = process.env.MARKET_API_KEY
 

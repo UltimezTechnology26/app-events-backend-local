@@ -8,8 +8,8 @@ const { checkAdminLoginToken } = require('../../../middleware/authorization')
 const { sendEmail } = require('../../../config/email')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 const professionalsM = require('../../../models/app/professionalsM')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted `cln_professionals_work_experiences` nested pipeline (`info_work`) for

@@ -17,8 +17,8 @@ const { deleteTickets, checkSubadminAccess } = require('../../../utils/helpers/e
 const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { getCache, setCache, deleteKeysByPattern } = require('../../../config/cache_helper')
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the

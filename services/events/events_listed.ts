@@ -13,8 +13,8 @@ import event_attendeesM from "../../models/app/events/event_attendeesM";
 import event_watchlistsM from "../../models/app/watchlist/eventM";
 import { getIntIdFromArray, getPresentDateTime } from "../../utils/helpers/helper";
 import event_seo_detailsM from "../../models/app/events/event_seo_detailsM";
-import { getPositionResolutionStages } from "../../modules/work-experience/work-experience.queries";
-import { joinPositionNamesExpr } from "../../modules/funding/funding.queries";
+import { getPositionResolutionStages } from "../../src/modules/work-experience/work-experience.queries";
+import { joinPositionNamesExpr } from "../../src/modules/funding/funding.queries";
 
 export const getManageEventsList = async (req: any, skip: number, limit: number, user_row_id: number) => {
     try {
