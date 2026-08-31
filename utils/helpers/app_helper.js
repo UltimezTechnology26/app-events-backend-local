@@ -1,5 +1,5 @@
 const { marketDB } = require('../../config/database_connector');
-const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries');
+const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries');
 
 const sanitize = require('mongo-sanitize')
 const axios = require('axios')

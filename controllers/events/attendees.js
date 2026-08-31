@@ -18,9 +18,9 @@ const { DateFormatter, updateAttendeesCount, checkEventRowID, shiftUserFromManua
 
 const { getAttendeesList, saveUserAttendRequest } = require('../../services/events/attendees')
 
-const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries')
+const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries')
 
-const { joinPositionNamesExpr } = require('../../modules/funding/funding.queries')
+const { joinPositionNamesExpr } = require('../../src/modules/funding/funding.queries')
 
 
 const eventM = require('../../models/app/events/eventM')

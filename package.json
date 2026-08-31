@@ -29,6 +29,7 @@
         "@google/generative-ai": "^0.24.1",
         "@pinecone-database/pinecone": "^7.1.0",
         "@sendgrid/mail": "^8.1.4",
+        "@ultimez-interview/coinpedia-backend-library": "file:../coinpedia-backend-library",
         "agenda": "^5.0.0",
         "aws-sdk": "^2.1693.0",
         "axios": "^1.13.2",

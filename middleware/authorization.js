@@ -244,6 +244,25 @@ const checkAdminLoginToken = function (headers, access_type) {
     }
 }
 
+// Router-level guard wrapping checkAdminLoginToken, so a route can't be left
+// reachable by an unauthenticated/under-permissioned caller just because a
+// handler forgot to call checkAdminLoginToken itself. On failure, responds
+// with the exact same object checkAdminLoginToken would have returned
+// (matching every existing handler's `if (!actor.status) return res.json(actor)`
+// / `return actor` convention) before any handler or service code runs.
+// Handlers that already recompute `actor` themselves keep doing so unchanged
+// — this only adds a default-closed gate in front of them, it doesn't remove
+// the existing per-handler check.
+const requireAdminAccess = function (access_type) {
+    return function (req, res, next) {
+        const actor = checkAdminLoginToken(req.headers, access_type)
+        if (!actor.status) {
+            return res.json(actor)
+        }
+        next()
+    }
+}
+
 //Verify forgot code
 const checkForgotUniqueId = function (forgot_verify_code) {
     try {
@@ -326,4 +345,4 @@ const profileVerifyEmailToken = function (email_verify_code) {
 }
 
 
-module.exports = { checkAllLoginToken, decodeAppleToken, checkApiKey, checkUserLoginToken, checkAdminLoginToken, checkForgotUniqueId, generateMobileAppUserLoginToken, generateUserLoginToken, generateEmailTempToken, verifyEmailTempToken, profileVerifyEmailToken }
+module.exports = { checkAllLoginToken, decodeAppleToken, checkApiKey, checkUserLoginToken, checkAdminLoginToken, requireAdminAccess, checkForgotUniqueId, generateMobileAppUserLoginToken, generateUserLoginToken, generateEmailTempToken, verifyEmailTempToken, profileVerifyEmailToken }

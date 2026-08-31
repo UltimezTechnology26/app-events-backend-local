@@ -5,8 +5,8 @@ import companyM from '../models/app/company/companyM';
 import eventM from '../models/app/events/eventM';
 import sanitize from 'mongo-sanitize';
 import redisCache, { CacheDuration } from "../config/redis";
-import { getPositionResolutionStages } from '../modules/work-experience/work-experience.queries';
-import { joinPositionNamesExpr } from '../modules/funding/funding.queries';
+import { getPositionResolutionStages } from '../src/modules/work-experience/work-experience.queries';
+import { joinPositionNamesExpr } from '../src/modules/funding/funding.queries';
 
 /**
  * Builds the $lookup stage resolving a professional's latest public work

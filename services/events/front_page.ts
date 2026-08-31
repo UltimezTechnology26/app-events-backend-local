@@ -19,8 +19,8 @@ import deleted_eventsM from '../../models/app/events/deleted_eventsM';
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
 import event_watchlistsM from '../../models/app/watchlist/eventM';
-import { getPositionResolutionStages } from '../../modules/work-experience/work-experience.queries';
-import { joinPositionNamesExpr } from '../../modules/funding/funding.queries';
+import { getPositionResolutionStages } from '../../src/modules/work-experience/work-experience.queries';
+import { joinPositionNamesExpr } from '../../src/modules/funding/funding.queries';
 import professionals_followersM from '../../models/app/professionals_followersM';
 import company_followersM from '../../models/app/company/followersM';
 
