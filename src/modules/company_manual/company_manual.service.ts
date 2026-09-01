@@ -391,10 +391,12 @@ export interface GetManualCompanyEmployeeListParams {
   companyRowIdRaw: string
   skipRaw: string
   limitRaw: string
+  /** See `GetManualCompanySponsorOrPartnerListParams.isApproved` - same reasoning, different collection. */
+  isApproved: boolean
 }
 
 /** Ports manual_retrievals.js's GET /manual_company_employee_list/:company_row_id/:skip/:limit (lines 864-1193), $facet-converted per the standing list+count fix. */
-export async function getManualCompanyEmployeeList({ actor, companyRowIdRaw, skipRaw, limitRaw }: GetManualCompanyEmployeeListParams) {
+export async function getManualCompanyEmployeeList({ actor, companyRowIdRaw, skipRaw, limitRaw, isApproved }: GetManualCompanyEmployeeListParams) {
   if (!actor.status) {
     return actor
   }
@@ -418,7 +420,7 @@ export async function getManualCompanyEmployeeList({ actor, companyRowIdRaw, ski
   const skip = Number.parseInt(skipRaw)
   const limit = Number.parseInt(limitRaw)
 
-  const aggregateOutput = await aggregateManualCompanyEmployeeList({ companyRowId: company_row_id, skip, limit })
+  const aggregateOutput = await aggregateManualCompanyEmployeeList({ companyRowId: company_row_id, companyType: isApproved ? 1 : 2, skip, limit })
   const { data, count } = extractPaginatedResult(aggregateOutput)
 
   return { status: true, message: data, counts: count }
@@ -429,9 +431,16 @@ export interface GetManualCompanySponsorOrPartnerListParams {
   companyRowIdRaw: string
   skipRaw: string
   limitRaw: string
+  /**
+   * Whether `companyRowIdRaw` is the manual retrieval's own id (still pending/rejected) or the
+   * real company it was merged into on approval (`main_company_row_id`) - the caller (the View
+   * modal) already knows this unambiguously, so it's passed through rather than guessed here.
+   * Determines which `registered_type` the underlying sponsor/partner rows are matched on.
+   */
+  isApproved: boolean
 }
 
-function validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw }: Omit<GetManualCompanySponsorOrPartnerListParams, 'actor'>) {
+function validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw }: Pick<GetManualCompanySponsorOrPartnerListParams, 'companyRowIdRaw' | 'skipRaw' | 'limitRaw'>) {
   const errObj: Record<string, string> = {}
   if (Number.isNaN(Number.parseInt(companyRowIdRaw))) {
     errObj['company_row_id'] = 'The company row id field must be contain valid number.'
@@ -450,7 +459,7 @@ function validateSponsorPartnerListParams({ companyRowIdRaw, skipRaw, limitRaw }
  * registered-company COUNT existed, in modules/partners). Mirrors getManualCompanyEmployeeList's
  * shape/auth/pagination exactly for consistency with this module's other cross-reference tabs.
  */
-export async function getManualCompanySponsorList({ actor, companyRowIdRaw, skipRaw, limitRaw }: GetManualCompanySponsorOrPartnerListParams) {
+export async function getManualCompanySponsorList({ actor, companyRowIdRaw, skipRaw, limitRaw, isApproved }: GetManualCompanySponsorOrPartnerListParams) {
   if (!actor.status) {
     return actor
   }
@@ -464,14 +473,14 @@ export async function getManualCompanySponsorList({ actor, companyRowIdRaw, skip
   const skip = Number.parseInt(skipRaw)
   const limit = Number.parseInt(limitRaw)
 
-  const aggregateOutput = await aggregateManualCompanySponsorList({ companyRowId: company_row_id, skip, limit })
+  const aggregateOutput = await aggregateManualCompanySponsorList({ companyRowId: company_row_id, registeredType: isApproved ? 1 : 2, skip, limit })
   const { data, count } = extractPaginatedResult(aggregateOutput)
 
   return { status: true, message: data, counts: count }
 }
 
 /** New — Partner counterpart of getManualCompanySponsorList above; same rationale. */
-export async function getManualCompanyPartnerList({ actor, companyRowIdRaw, skipRaw, limitRaw }: GetManualCompanySponsorOrPartnerListParams) {
+export async function getManualCompanyPartnerList({ actor, companyRowIdRaw, skipRaw, limitRaw, isApproved }: GetManualCompanySponsorOrPartnerListParams) {
   if (!actor.status) {
     return actor
   }
@@ -485,7 +494,7 @@ export async function getManualCompanyPartnerList({ actor, companyRowIdRaw, skip
   const skip = Number.parseInt(skipRaw)
   const limit = Number.parseInt(limitRaw)
 
-  const aggregateOutput = await aggregateManualCompanyPartnerList({ companyRowId: company_row_id, skip, limit })
+  const aggregateOutput = await aggregateManualCompanyPartnerList({ companyRowId: company_row_id, registeredType: isApproved ? 1 : 2, skip, limit })
   const { data, count } = extractPaginatedResult(aggregateOutput)
 
   return { status: true, message: data, counts: count }

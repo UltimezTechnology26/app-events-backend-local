@@ -87,6 +87,7 @@ fundingRouter.get('/manual_investor_list/:investor_type/:investor_row_id/:skip/:
   const result = await service.getManualInvestorList({
     investor_type: Number.parseInt(req.params.investor_type as string) || 1,
     investor_row_id: Number.parseInt(req.params.investor_row_id as string),
+    isApproved: req.query.is_approved === 'true',
     skip: Number.parseInt(req.params.skip as string),
     limit: Number.parseInt(req.params.limit as string),
     query: req.query as Record<string, any>
@@ -422,7 +423,7 @@ fundingRouter.get('/manual_funds_raised_list/:funds_raised_company_row_id/:skip/
   const funds_raised_company_row_id = Number.parseInt(req.params.funds_raised_company_row_id as string)
   const skip = !Number.isNaN(Number.parseInt(req.params.skip as string)) ? Number.parseInt(req.params.skip as string) : 0
   const limit = !Number.isNaN(Number.parseInt(req.params.limit as string)) ? Number.parseInt(req.params.limit as string) : 100
-  const result = await service.getManualFundsRaisedList({ funds_raised_company_row_id, skip, limit })
+  const result = await service.getManualFundsRaisedList({ funds_raised_company_row_id, isApproved: req.query.is_approved === 'true', skip, limit })
   if (!result) return res.json({ status: false, message: { alert_message: 'Sorry, Invalid investor id.' } })
   return res.json({ status: true, message: result })
 }))

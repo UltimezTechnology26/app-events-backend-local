@@ -542,14 +542,29 @@ export async function getInvestorList(params: { investor_type: number; investor_
  * here only checked active_status:1) — consistent with how every other route in
  * this module already uses the shared helper, not fixed/loosened here.
  */
-export async function getManualFundsRaisedList(params: { funds_raised_company_row_id: number; skip: number; limit: number }): Promise<{ list: any[]; count: number } | null> {
+export async function getManualFundsRaisedList(params: { funds_raised_company_row_id: number; isApproved: boolean; skip: number; limit: number }): Promise<{ list: any[]; count: number } | null> {
   const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
+  const companyM = require('../../../models/app/company/companyM')
   const fundingInvestmentM = require('../../../models/app/funding/fundingInvestmentM')
 
-  const check_query = await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id })
+  // CONFIRMED BUG FIX (found live, 2026-09-01): this existence check always looked the id up in
+  // `company_manual_retrievalsM`, but once a manual company is approved, the View modal passes
+  // the id it was merged into (`main_company_row_id`) - a `companyM` id, not a manual-retrieval
+  // id - so this check always failed post-approval and the whole tab silently returned null. Same
+  // reasoning as the match stage below: which collection/registered_type is correct depends on
+  // whether the caller already knows this company has been approved.
+  const check_query = params.isApproved
+    ? await companyM.findOne({ _id: params.funds_raised_company_row_id })
+    : await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id })
   if (!check_query) return null
 
-  const earlyMatchStage = { $match: { funds_raised_registered_type: 2, funds_raised_company_row_id: params.funds_raised_company_row_id } }
+  // CONFIRMED BUG FIX (found live, 2026-09-01): was hardcoded to `funds_raised_registered_type:
+  // 2` (manual) - same class of bug as the sponsor/partner and team-members tabs. Approval
+  // migrates every fundingInvestmentM row referencing the manual company to
+  // `funds_raised_registered_type: 1` with `funds_raised_company_row_id` now holding the new real
+  // company's id, so this tab went permanently blank for any approved company that had raised
+  // funds while still manual.
+  const earlyMatchStage = { $match: { funds_raised_registered_type: params.isApproved ? 1 : 2, funds_raised_company_row_id: params.funds_raised_company_row_id } }
   const categoryLookupStages: any[] = [
     { $lookup: { from: 'cln_static_company_funding_rounds', localField: 'category_row_id', foreignField: '_id', as: 'category_info' } },
     { $unwind: { path: '$category_info', preserveNullAndEmptyArrays: true } },
@@ -1767,7 +1782,7 @@ export async function createInvestorUserUpdate(params: {
 }
 
 /** Admin-only, ported from controllers/admin_panel/app/funding.js:993-1243. Scopes to manually-entered investors (investor_registered_type: 2) — investors who never signed up on the platform. */
-export async function getManualInvestorList(params: { investor_type: number; investor_row_id: number; skip: number; limit: number; query: Record<string, any> }) {
+export async function getManualInvestorList(params: { investor_type: number; investor_row_id: number; isApproved: boolean; skip: number; limit: number; query: Record<string, any> }) {
   const fundingInvestmentM = require('../../../models/app/funding/fundingInvestmentM')
 
   const commonStages: any[] = [
@@ -1779,7 +1794,11 @@ export async function getManualInvestorList(params: { investor_type: number; inv
     // bug fix: the invested-in company being deleted shouldn't hide a real investment record).
     // Shared between the list and count aggregations below, so both stay in lockstep.
     ...resolveFundsRaisedCompanyStages({ rich: true, dropUnresolved: false }),
-    { $match: { investor_type: params.investor_type, investor_registered_type: 2, investor_row_id: params.investor_row_id } }
+    // CONFIRMED BUG FIX (found live, 2026-09-01): was hardcoded to `investor_registered_type: 2`
+    // (manual) - same class of bug as the sponsor/partner, team-members, and funds-raised tabs.
+    // Approval migrates every fundingInvestmentM row referencing the manual company to
+    // `investor_registered_type: 1` with `investor_row_id` now holding the new real company's id.
+    { $match: { investor_type: params.investor_type, investor_registered_type: params.isApproved ? 1 : 2, investor_row_id: params.investor_row_id } }
   ]
 
   const list = await fundingInvestmentM.aggregate([

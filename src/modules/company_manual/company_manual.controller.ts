@@ -132,6 +132,7 @@ companyManualAdminRouter.get('/manual_company_employee_list/:company_row_id/:ski
     companyRowIdRaw: req.params.company_row_id as string,
     skipRaw: req.params.skip as string,
     limitRaw: req.params.limit as string,
+    isApproved: req.query.is_approved === 'true',
   })
   res.json(result)
 }))
@@ -143,6 +144,7 @@ companyManualAdminRouter.get('/manual_company_sponsor_list/:company_row_id/:skip
     companyRowIdRaw: req.params.company_row_id as string,
     skipRaw: req.params.skip as string,
     limitRaw: req.params.limit as string,
+    isApproved: req.query.is_approved === 'true',
   })
   res.json(result)
 }))
@@ -154,6 +156,7 @@ companyManualAdminRouter.get('/manual_company_partner_list/:company_row_id/:skip
     companyRowIdRaw: req.params.company_row_id as string,
     skipRaw: req.params.skip as string,
     limitRaw: req.params.limit as string,
+    isApproved: req.query.is_approved === 'true',
   })
   res.json(result)
 }))
