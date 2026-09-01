@@ -17,3 +17,4 @@ RUN npm run build
 
 # Start the application directly with Node
 CMD ["node", "dist/index.js"]
+
