@@ -443,7 +443,17 @@ const USER_ACCOUNT_LOOKUP_AND_SWITCH = [
  * artifact — the employment record itself is still real and should show, same reasoning as the
  * sponsor/partner and funding fixes elsewhere in this module/the funding module). Removed.
  */
-export function buildManualCompanyEmployeeListPipeline({ companyRowId, skip, limit }: { companyRowId: number; skip: number; limit: number }) {
+export function buildManualCompanyEmployeeListPipeline({
+  companyRowId,
+  companyType,
+  skip,
+  limit,
+}: {
+  companyRowId: number
+  companyType: 1 | 2
+  skip: number
+  limit: number
+}) {
   return [
     {
       $lookup: {
@@ -456,7 +466,14 @@ export function buildManualCompanyEmployeeListPipeline({ companyRowId, skip, lim
     },
     { $unwind: { path: '$info_position', preserveNullAndEmptyArrays: true } },
     ...USER_ACCOUNT_LOOKUP_AND_SWITCH,
-    { $match: { company_type: 2, company_row_id: companyRowId, till_date_status: 2 } },
+    // CONFIRMED BUG FIX (found live, 2026-09-01): this was hardcoded to `company_type: 2`
+    // (manual) - same class of bug as the sponsor/partner tab. Approval (`app_helper.js`'s
+    // "shift data from manual to register user") migrates every professionals_work_experience
+    // row referencing the manual company to `company_type: 1` with `company_row_id` now holding
+    // the NEW real company's id, so this tab went permanently blank for any approved company
+    // that had team members. `companyType` is threaded in by the caller (1 once approved, 2
+    // while still pending/rejected), same reasoning as the sponsor/partner fix.
+    { $match: { company_type: companyType, company_row_id: companyRowId, till_date_status: 2 } },
     {
       $project: {
         _id: 1,
@@ -510,22 +527,52 @@ const EVENT_LOOKUP_FOR_SPONSOR_PARTNER = {
  * by matching either field, so a manual company's Sponsor/Partner tab shows its full history
  * regardless of which write-path era created the record — not just its newest appearances.
  */
+// CONFIRMED BUG FIX (found via live query, 2026-09-01): the stored `sponsorship_type_title` is
+// NOT reliably populated at write time — `sponsors_n_partners.js`'s create route stores the raw
+// client-sent title (often never sent at all; live data confirmed it blank on both sponsor AND
+// partner rows) alongside a `category_row_id`, but never denormalizes a name from it. The row's
+// `category_row_id` IS reliably present (confirmed live: 3 of 3 sample rows), and is exactly what
+// the SAME file's own single-row/list-building functions already resolve via a lookup against
+// `cln_static_event_sponsor_categories` (`sponsorship_name`) / `cln_static_event_partner_categories`
+// (`partnership_name`) - see lines ~632-688 there. Reusing that same lookup here fixes the type
+// column for every existing row retroactively, not just ones created after any write-path fix.
+const SPONSOR_PARTNER_CATEGORY_LOOKUP: Record<1 | 2, { from: string; nameField: string }> = {
+  1: { from: 'cln_static_event_sponsor_categories', nameField: 'sponsorship_name' },
+  2: { from: 'cln_static_event_partner_categories', nameField: 'partnership_name' },
+}
+
 function buildManualCompanySponsorOrPartnerListPipeline({
   companyRowId,
   sponsorPartnerType,
+  registeredType,
   skip,
   limit,
 }: {
   companyRowId: number
   sponsorPartnerType: 1 | 2
+  registeredType: 1 | 2
   skip: number
   limit: number
 }) {
+  const { from: categoryCollection, nameField: categoryNameField } = SPONSOR_PARTNER_CATEGORY_LOOKUP[sponsorPartnerType]
   return [
     {
       $match: {
         account_type: 2,
-        registered_type: 2,
+        // CONFIRMED BUG FIX (found live, 2026-09-01): this was hardcoded to `registered_type: 2`
+        // (manual), so once an admin approved a manual company that had sponsor/partner history,
+        // this tab went permanently blank for it. Approval (`app_helper.js`'s "shift data from
+        // manual to register user") migrates every cln_event_sponsor_partner_details row that
+        // referenced the manual company to `registered_type: 1` with `user_company_row_id` now
+        // holding the NEW real company's id - the View modal already resolves `companyRowId` to
+        // that new id post-approval (`main_company_row_id`), but this query kept demanding the
+        // now-stale `registered_type: 2`, which no row matching that id could ever satisfy again.
+        // `registeredType` is threaded in by the caller (1 once approved, 2 while still pending/
+        // rejected) rather than matching both values unconditionally, since `company_manual_
+        // retrievalsM._id` and `companyM._id` are independent counters that can collide - matching
+        // only the type the caller actually knows this id belongs to avoids pulling in an unrelated
+        // company's rows that happen to share the same numeric id in the other collection.
+        registered_type: registeredType,
         sponsor_partner_type: sponsorPartnerType,
         $or: [{ user_company_row_id: companyRowId }, { sponsor_partner_row_id: companyRowId }],
       },
@@ -543,6 +590,16 @@ function buildManualCompanySponsorOrPartnerListPipeline({
     // consistent when there's no match.
     { $unwind: { path: '$event_info', preserveNullAndEmptyArrays: true } },
     {
+      $lookup: {
+        from: categoryCollection,
+        localField: 'category_row_id',
+        foreignField: '_id',
+        as: 'category_info',
+        pipeline: [{ $project: { [categoryNameField]: 1 } }],
+      },
+    },
+    { $unwind: { path: '$category_info', preserveNullAndEmptyArrays: true } },
+    {
       $project: {
         _id: 1,
         event_row_id: 1,
@@ -551,7 +608,9 @@ function buildManualCompanySponsorOrPartnerListPipeline({
         event_url: '$event_info.event_url',
         start_date: '$event_info.start_date',
         end_date: '$event_info.end_date',
-        sponsorship_type_title: 1,
+        // Prefer the live category lookup (authoritative, self-healing if the raw field was ever
+        // blank) - only fall back to the raw stored field if the category itself was deleted.
+        sponsorship_type_title: { $ifNull: [`$category_info.${categoryNameField}`, '$sponsorship_type_title'] },
         requested_status: 1,
         created_date_n_time: 1,
       },
@@ -560,12 +619,32 @@ function buildManualCompanySponsorOrPartnerListPipeline({
   ]
 }
 
-export function buildManualCompanySponsorListPipeline({ companyRowId, skip, limit }: { companyRowId: number; skip: number; limit: number }) {
-  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 1, skip, limit })
+export function buildManualCompanySponsorListPipeline({
+  companyRowId,
+  registeredType,
+  skip,
+  limit,
+}: {
+  companyRowId: number
+  registeredType: 1 | 2
+  skip: number
+  limit: number
+}) {
+  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 1, registeredType, skip, limit })
 }
 
-export function buildManualCompanyPartnerListPipeline({ companyRowId, skip, limit }: { companyRowId: number; skip: number; limit: number }) {
-  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 2, skip, limit })
+export function buildManualCompanyPartnerListPipeline({
+  companyRowId,
+  registeredType,
+  skip,
+  limit,
+}: {
+  companyRowId: number
+  registeredType: 1 | 2
+  skip: number
+  limit: number
+}) {
+  return buildManualCompanySponsorOrPartnerListPipeline({ companyRowId, sponsorPartnerType: 2, registeredType, skip, limit })
 }
 
 // ─── Uniqueness lookups (addManualCompanyDetails) ────────────────────────────
@@ -708,36 +787,42 @@ export async function aggregateManualCompanyIndividualDetail(companyRowId: numbe
 
 export async function aggregateManualCompanyEmployeeList({
   companyRowId,
+  companyType,
   skip,
   limit,
 }: {
   companyRowId: number
+  companyType: 1 | 2
   skip: number
   limit: number
 }): Promise<FacetAggregateResult<ManualCompanyEmployeeListRow>[]> {
-  return professionals_work_experienceM.aggregate(buildManualCompanyEmployeeListPipeline({ companyRowId, skip, limit }))
+  return professionals_work_experienceM.aggregate(buildManualCompanyEmployeeListPipeline({ companyRowId, companyType, skip, limit }))
 }
 
 export async function aggregateManualCompanySponsorList({
   companyRowId,
+  registeredType,
   skip,
   limit,
 }: {
   companyRowId: number
+  registeredType: 1 | 2
   skip: number
   limit: number
 }): Promise<FacetAggregateResult<ManualCompanySponsorPartnerListRow>[]> {
-  return event_sponsors_partner_detailsM.aggregate(buildManualCompanySponsorListPipeline({ companyRowId, skip, limit }))
+  return event_sponsors_partner_detailsM.aggregate(buildManualCompanySponsorListPipeline({ companyRowId, registeredType, skip, limit }))
 }
 
 export async function aggregateManualCompanyPartnerList({
   companyRowId,
+  registeredType,
   skip,
   limit,
 }: {
   companyRowId: number
+  registeredType: 1 | 2
   skip: number
   limit: number
 }): Promise<FacetAggregateResult<ManualCompanySponsorPartnerListRow>[]> {
-  return event_sponsors_partner_detailsM.aggregate(buildManualCompanyPartnerListPipeline({ companyRowId, skip, limit }))
+  return event_sponsors_partner_detailsM.aggregate(buildManualCompanyPartnerListPipeline({ companyRowId, registeredType, skip, limit }))
 }
