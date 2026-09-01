@@ -106,8 +106,11 @@ companyAdminRouter.get('/list/:skip/:limit', asyncRoute('Companies list.', async
     subAdminRowIdRaw: req.query.sub_admin_row_id as string,
     profileScoreRange: req.query.profile_score as string,
     createdDateOnlyRaw: req.query.created_date_n_time as string,
+    createdStartDateRaw: req.query.created_start_date as string,
+    createdEndDateRaw: req.query.created_end_date as string,
     claimStatusRaw: req.query.claim_status as string,
-    categoryStatusRaw: req.query.category_status as string
+    categoryStatusRaw: req.query.category_status as string,
+    sortBy: req.query.sort_by as string
   })
   res.json(result)
 }))
@@ -127,8 +130,13 @@ companyAdminRouter.get('/disabled_list/:skip/:limit', asyncRoute('Companies disa
     skipRaw: req.params.skip as string,
     limitRaw: req.params.limit as string,
     search: req.query.search as string,
+    mainBusinessModelIdRaw: req.query.main_business_model_id as string,
+    subAdminRowIdRaw: req.query.sub_admin_row_id as string,
     profileScoreRange: req.query.profile_score as string,
-    categoryStatusRaw: req.query.category_status as string
+    createdStartDateRaw: req.query.created_start_date as string,
+    createdEndDateRaw: req.query.created_end_date as string,
+    categoryStatusRaw: req.query.category_status as string,
+    sortBy: req.query.sort_by as string
   })
   res.json({ status: result.status, message: result.message, count: result.count })
 }))

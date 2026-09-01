@@ -21,6 +21,25 @@ const UPDATED_BY_FULL_NAME_SWITCH = {
   },
 }
 
+/**
+ * Sort options for the live-companies list. `name`/`views` are both backed
+ * by a real index (`company_name`, `view_counts` - confirmed in
+ * `companyM.js`), same as `company.list.ts`'s existing `popular`/`name`
+ * sort precedent. `score` has no index on `profile_score` today, so it
+ * costs an in-memory sort stage over the matched set - acceptable at this
+ * collection's current size (~2,648 rows per the perf comment above), but
+ * flagged here rather than silently treated as free like the other two.
+ * Anything unrecognized (including no `sortBy` at all) falls back to the
+ * existing default, unchanged.
+ */
+const COMPANY_LIST_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
+  name: { company_name: 1 },
+  views: { view_counts: -1 },
+  score: { profile_score: -1 },
+  oldest: { _id: 1 },
+  newest: { _id: -1 },
+}
+
 function buildCategoryStatusStage(categoryStatus?: number) {
   if (categoryStatus === undefined || Number.isNaN(categoryStatus) || ![0, 1].includes(categoryStatus)) {
     return []
@@ -100,12 +119,15 @@ export function buildCompanyListPipeline({
   categoryStatus,
   skip,
   limit,
+  sortBy,
 }: {
   matchQuery: ReturnType<typeof buildCompanyListMatchQuery>
   categoryStatus?: number
   skip: number
   limit: number
+  sortBy?: string
 }) {
+  const sortStage = (sortBy && COMPANY_LIST_SORT_MAP[sortBy]) || { _id: -1 }
   return [
     { $match: matchQuery },
     // CONFIRMED BUG FIX (live testing, 2026-08-11): the 5 display-only $lookups below
@@ -125,7 +147,7 @@ export function buildCompanyListPipeline({
       },
     },
     ...buildCategoryStatusStage(categoryStatus),
-    { $sort: { _id: -1 } },
+    { $sort: sortStage },
     {
       $facet: {
         data: [
@@ -155,6 +177,8 @@ export function buildCompanyListPipeline({
           { $unwind: { path: '$sub_admin_info', preserveNullAndEmptyArrays: true } },
           { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },
           { $unwind: { path: '$main_business_info', preserveNullAndEmptyArrays: true } },
+          { $lookup: { from: 'cln_static_countries', localField: 'country_id', foreignField: '_id', as: 'country_info', pipeline: [{ $project: { country_name: 1 } }] } },
+          { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
           buildCompanyListProjectStage(),
         ],
         totalCount: [{ $count: 'count' }],
@@ -204,6 +228,11 @@ function buildCompanyListProjectStage() {
       updated_by_row_id: 1,
       updated_date_n_time: 1,
       updated_by_full_name: UPDATED_BY_FULL_NAME_SWITCH,
+      view_counts: 1,
+      country_name: '$country_info.country_name',
+      company_location: 1,
+      city: 1,
+      state: 1,
     },
   }
 }
