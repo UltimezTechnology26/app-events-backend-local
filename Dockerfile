@@ -15,5 +15,5 @@ RUN echo "@ultimez-interview:registry=https://npm.pkg.github.com" > .npmrc && \
     npm install pm2 -g && \
     rm -f .npmrc
 COPY . .
-
+RUN npm run build
 CMD ["pm2-runtime", "dist/index.js"]
