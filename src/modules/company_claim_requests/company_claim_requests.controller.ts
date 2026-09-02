@@ -27,17 +27,27 @@ export const companyClaimRequestsAdminRouter: Router = express.Router()
 // ─── App-side ───────────────────────────────────────────────────────────────
 
 /**
- * Additive safety net: every route on this router uses checkUserLoginToken(req.headers) as a
+ * Additive safety net: the 3 claim-request routes below use checkUserLoginToken(req.headers) as a
  * hard gate (enforced today inside company_claim_requests.service.ts, which returns the actor
  * object unchanged when actor.status is false). Does not replace that per-handler/service check.
+ *
+ * Scoped to these 3 paths explicitly (not a bare router.use()) because this router is mounted at
+ * the shared '/company/front_page' prefix alongside partnersAppRouter and companyRouter — an
+ * unscoped .use() here intercepted every request under that prefix before companyRouter's own
+ * routes (company_list, popular_companies, etc.) ever ran, hard-rejecting anonymous public
+ * traffic with "The Token field is required in headers." Found via live reproduction against the
+ * shared dev database.
  */
-companyClaimRequestsAppRouter.use((req: Request, res: Response, next) => {
-  const actor = checkUserLoginToken(req.headers)
-  if (!actor.status) {
-    return res.json(actor)
+companyClaimRequestsAppRouter.use(
+  ['/save_claim_request_details/:company_row_id', '/claim_company', '/verify_claim/:claim_token'],
+  (req: Request, res: Response, next) => {
+    const actor = checkUserLoginToken(req.headers)
+    if (!actor.status) {
+      return res.json(actor)
+    }
+    next()
   }
-  next()
-})
+)
 
 companyClaimRequestsAppRouter.get('/save_claim_request_details/:company_row_id', asyncRoute('Save claim request details.', async (req, res) => {
   const actor = checkUserLoginToken(req.headers)
