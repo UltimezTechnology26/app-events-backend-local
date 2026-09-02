@@ -12,12 +12,16 @@ import { getHoldingsForCompare } from '../company_holdings/company_holdings.quer
 export const companyProductsRouter: Router = express.Router()
 
 // Router-level auth middleware (additive safety net — does not replace the per-route
-// checkAllLoginToken checks below). Every route here requires a logged-in user (role 7 or 4)
-// except GET /company_product_details/:company_row_id/:skip/:limit and GET
-// /compare_company_products, both documented as intentionally public/unauthenticated —
-// exempted explicitly rather than silently gating them.
-companyProductsRouter.use(async (req: Request, res: Response, next) => {
-  if (req.path.startsWith('/company_product_details/') || req.path === '/compare_company_products') return next()
+// checkAllLoginToken checks below). Every route under /company_products/* requires a logged-in
+// user (role 7 or 4); GET /company_product_details/:company_row_id/:skip/:limit and GET
+// /compare_company_products stay outside that prefix and are intentionally public/unauthenticated.
+//
+// Scoped to the '/company_products' path prefix (not a bare router.use()) because this router is
+// mounted at the shared '/company/products_n_holding' prefix alongside companyHoldingsRouter — an
+// unscoped .use() here intercepted every request under that prefix, including
+// companyHoldingsRouter's own public route (/company_holdings_details/...), before that router
+// ever ran. Same bug class as company_claim_requests.controller.ts's companyClaimRequestsAppRouter.
+companyProductsRouter.use('/company_products', async (req: Request, res: Response, next) => {
   const actor = await checkAllLoginToken(req.headers, [7, 4])
   if (!actor.status) return res.json(actor)
   next()

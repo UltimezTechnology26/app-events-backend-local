@@ -212,7 +212,25 @@ companyRevenueRouter.get('/delete_revenue/:revenue_row_id', writeEndpointRateLim
  * now calls invalidateCompanyRevenueCaches() same as the app-side write path.
  */
 // Additive safety net: every route in this router requires checkAdminLoginToken(req.headers, [7]).
-companyRevenueAdminRouter.use(requireAdminAccess([7]))
+//
+// Scoped to these 6 paths explicitly (not a bare router.use()) because this router is mounted at
+// the shared '/company' admin-panel prefix alongside companyAdminRouter and partnersAdminRouter —
+// an unscoped .use() here intercepted every request under that prefix before companyAdminRouter's
+// own routes ever ran: wrongly requiring role 7 for routes companyAdminRouter allows role 4 on,
+// and hard-gating companyAdminRouter's own explicitly-exempted /new_company_years_overview (meant
+// to be checkApiKey-only, no admin login). Same bug class as
+// company_claim_requests.controller.ts's companyClaimRequestsAppRouter.
+companyRevenueAdminRouter.use(
+  [
+    '/save_revenue_details/:company_row_id',
+    '/revenue_individual/:request_row_id',
+    '/revenue_list/:company_row_id',
+    '/update_revenue_details/:request_row_id',
+    '/revenue_delete/:request_row_id',
+    '/revenue_bulk_data',
+  ],
+  requireAdminAccess([7])
+)
 
 companyRevenueAdminRouter.post('/save_revenue_details/:company_row_id', writeEndpointRateLimiter, [
   check('year')
