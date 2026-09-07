@@ -16,8 +16,16 @@ import {
   AcquisitionWriteAttrs,
   DuplicateAcquisitionQuery,
   AcquisitionActionResult,
-  AcquisitionListResult
+  AcquisitionListResult,
+  AcquisitionActor
 } from './company_acquisitions.types'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
+import { SECTION_ACQUISITIONS } from '../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
+import { ChangeRequestDoc, SubmitChangeRequestResult } from '../../common/change-request/change-request.types'
+
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
 /**
  * Resolves the registered company row owned by this user, if any. Mirrors
@@ -59,9 +67,12 @@ async function findDuplicateAcquisition(input: AcquisitionInput, excludeId?: num
 export async function createOrUpdateAcquisition(params: {
   acquisition_row_id?: number
   input: AcquisitionInput
-  submittedByType: 1 | 2
-  submittedByCompanyRowId?: number
-}): Promise<AcquisitionActionResult> {
+} & (
+  | { submittedByType: 2; submittedByCompanyRowId: number }
+  // Admin-only path (POST /update_details) — actor/editingCompanyRowId are required so the
+  // publish gate below always has what it needs; there is no "admin write with no actor" case.
+  | { submittedByType: 1; actor: AcquisitionActor; editingCompanyRowId: number }
+)): Promise<AcquisitionActionResult | SubmitChangeRequestResult> {
   const { valid, errObj } = validateAcquisitionInput(params.input)
   if (!valid) {
     return { status: false, message: errObj }
@@ -75,16 +86,47 @@ export async function createOrUpdateAcquisition(params: {
     }
   }
 
-  const isAdminSubmission = params.submittedByType === 1
+  // Publish gate applies to admin-panel writes (design §2, same shape as every other section)
+  // — an admin submission previously auto-approved and wrote live immediately; now it submits a
+  // change request instead. This is entirely separate from the PRE-EXISTING submit/verify/reject
+  // workflow below (submittedByType 2, company-owner submissions) — that workflow's own pending
+  // state (verified_status 0) is untouched, still starts pending and still resolves via
+  // /verify or /reject, exactly as before.
+  //
+  // rootDocumentId is "whichever company's admin screen the edit was made from"
+  // (editingCompanyRowId) — a deliberate design choice for this section's two-company shape.
+  // The OTHER side of the deal rides along in the SAME submitted payload (not a separate write);
+  // it just isn't what the pending change is filed/scoped under.
+  if (params.submittedByType === 1) {
+    if (!params.actor.status) {
+      return { status: false, message: params.actor.message as Record<string, string> }
+    }
+    const adminRowId = Number(params.actor.message.user_row_id)
+    const existing = params.acquisition_row_id ? await findAcquisitionById(params.acquisition_row_id) : null
+    const liveValues = existing ? (typeof (existing as any).toObject === 'function' ? (existing as any).toObject() : { ...existing }) : {}
+
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_ACQUISITIONS,
+      rootDocumentId: params.editingCompanyRowId,
+      targetRowId: params.acquisition_row_id ?? null,
+      liveValues,
+      submitted: { ...params.input, acquisition_date: params.input.acquisition_date },
+      actor: toActorRefWithId(
+        { updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin', updated_by_row_id: adminRowId },
+        adminRowId,
+      ),
+    })
+  }
 
   const attrs: AcquisitionWriteAttrs = {
     _id: params.acquisition_row_id,
     ...params.input,
     acquisition_date: new Date(params.input.acquisition_date),
     submitted_by_type: params.submittedByType,
-    submitted_by_company_row_id: isAdminSubmission ? undefined : params.submittedByCompanyRowId,
-    verified_status: isAdminSubmission ? 1 : 0,
-    verified_on: isAdminSubmission ? getPresentDateTime() : undefined,
+    submitted_by_company_row_id: params.submittedByCompanyRowId,
+    verified_status: 0,
+    verified_on: undefined,
     date_n_time: getPresentDateTime()
   }
 
@@ -100,6 +142,92 @@ export async function createOrUpdateAcquisition(params: {
   await invalidateCompanyAcquisitionsCaches()
 
   return { status: true, message: { alert_message: 'Acquisition record saved successfully.' } }
+}
+
+/**
+ * The section-specific writer dispatched from change-request.apply.ts (via the registry's
+ * customWriter flag) for a publish of the `acquisitions` section — mirrors
+ * createOrUpdateAcquisition's admin-submission attrs exactly (submitted_by_type: 1,
+ * auto-approved), but running inside the caller's publish transaction against a change
+ * request's stored payload instead of a live request body. A delete just removes the row —
+ * no soft-delete concept exists for this section (see registry doc comment).
+ */
+export async function applyAcquisitionWrite({
+  request,
+  session,
+}: {
+  request: ChangeRequestDoc
+  session: unknown
+}): Promise<{ appliedFieldCount: number }> {
+  const companyAcquisitionsM = require('../../../models/app/company/companyAcquisitionsM')
+
+  if (request.action === 'delete') {
+    await companyAcquisitionsM.findByIdAndDelete(request.target_row_id, { session })
+    return { appliedFieldCount: 0 }
+  }
+
+  const payload = (request.payload ?? {}) as Record<string, any>
+  const present_date_n_time = getPresentDateTime()
+  const attrs: AcquisitionWriteAttrs = {
+    acquirer_registered_type: payload.acquirer_registered_type,
+    acquirer_company_row_id: payload.acquirer_company_row_id,
+    acquired_registered_type: payload.acquired_registered_type,
+    acquired_company_row_id: payload.acquired_company_row_id,
+    acquisition_date: new Date(payload.acquisition_date),
+    acquisition_price: payload.acquisition_price,
+    facilitators: payload.facilitators,
+    stake_acquired_percent: payload.stake_acquired_percent,
+    acquisition_multiple: payload.acquisition_multiple,
+    submitted_by_type: 1,
+    verified_status: 1,
+    verified_on: present_date_n_time,
+    date_n_time: present_date_n_time
+  }
+
+  if (request.action === 'create') {
+    const doc = new companyAcquisitionsM(attrs)
+    await doc.save({ session })
+    return { appliedFieldCount: 1 }
+  }
+
+  await companyAcquisitionsM.findByIdAndUpdate(request.target_row_id, attrs, { session })
+  return { appliedFieldCount: 1 }
+}
+
+/**
+ * Admin-only delete (GET /delete/:acquisition_row_id), gated the same way as
+ * createOrUpdateAcquisition's admin path above — submits a pending delete instead of removing
+ * the row immediately. editingCompanyRowId (whichever company's admin screen the delete was
+ * clicked from) scopes the request the same way as the create/update path.
+ */
+export async function adminDeleteAcquisition(params: {
+  actor: AcquisitionActor
+  acquisitionRowId: number
+  editingCompanyRowId: number
+}): Promise<AcquisitionActionResult | SubmitChangeRequestResult> {
+  if (!params.actor.status) {
+    return { status: false, message: params.actor.message as Record<string, string> }
+  }
+
+  const record = await findAcquisitionById(params.acquisitionRowId)
+  if (!record) {
+    return { status: false, message: { alert_message: 'Acquisition record not found.' } }
+  }
+
+  const adminRowId = Number(params.actor.message.user_row_id)
+  const rowSnapshot = typeof (record as any).toObject === 'function' ? (record as any).toObject() : { ...record }
+
+  return submitChildDeleteRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_ACQUISITIONS,
+    rootDocumentId: params.editingCompanyRowId,
+    targetRowId: params.acquisitionRowId,
+    rowSnapshot,
+    actor: toActorRefWithId(
+      { updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin', updated_by_row_id: adminRowId },
+      adminRowId,
+    ),
+  })
 }
 
 export async function verifyAcquisition(acquisitionRowId: number): Promise<AcquisitionActionResult> {

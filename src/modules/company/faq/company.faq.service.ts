@@ -1,8 +1,15 @@
 // modules/company/company.faq.service.ts
 const { checkCompanyRowID, deleteFAQ, calculateCompanyProfileScore } = require('../../../../utils/helpers/app_helper')
-import { buildFaqSearchMatch, findFaqByIdAndCompany, updateFaqById, insertFaq, aggregateFaqList, findFaqById } from './company.faq.queries'
+import { buildFaqSearchMatch, findFaqByIdAndCompany, findFaqByIdAndCompanyLean, updateFaqById, insertFaq, aggregateFaqList, findFaqById, findFaqByIdLean } from './company.faq.queries'
 import { extractPaginatedResult } from '../../common/common.pagination'
 import { invalidateFaqCaches, buildFaqListKey, getCache, setCache } from './company.faq.cache'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../../common/change-request/change-request.child.service'
+import { computeDiff } from '../../../common/change-request/change-request.diff'
+import { COMPANY_SECTION_REGISTRY, SECTION_FAQ } from '../../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../../common/status-audit/status-audit.registry'
+import { insertChangeLog } from '../../../common/status-audit/status-audit.queries'
+import logger from '../../../../config/logger'
 
 interface ActorMessage {
   user_type?: number
@@ -19,6 +26,11 @@ export interface SaveFaqDetailsParams {
   body: Record<string, any>
   preValidationErrors: Record<string, string>
 }
+
+const USER_TYPE_COMPANY_OWNER = 1
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
+const LOG_ACTION_CREATE = 'create'
+const LOG_ACTION_UPDATE = 'update'
 
 /** Ports faq.js's POST /update_faq_details (lines 11-91) — creates a new FAQ row, or updates an existing one when body.faq_row_id is a valid row belonging to the same company. */
 export async function saveOrUpdateFaqDetails({ actor, body, preValidationErrors }: SaveFaqDetailsParams) {
@@ -56,21 +68,102 @@ export async function saveOrUpdateFaqDetails({ actor, body, preValidationErrors 
     return { status: false, message: errObj }
   }
 
-  const update_object: Record<string, any> = {
+  const faqFields = {
     faq_question: body.faq_question,
     faq_answer: body.faq_answer,
   }
 
+  // Publish gate applies to admin-panel edits only (design §2), same branch shape as
+  // updateCompanySeo / saveOrUpdateSocialDetails.
+  const isFaqCompanyOwner = Number(actor.message.user_type) === USER_TYPE_COMPANY_OWNER
+  if (!isFaqCompanyOwner) {
+    const liveValues = faq_row_id
+      ? ((await findFaqByIdAndCompanyLean({ faqRowId: faq_row_id, companyRowId: company_row_id })) ?? {})
+      : {}
+    const actorRowId = Number(actor.message.user_row_id)
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_FAQ,
+      rootDocumentId: company_row_id,
+      targetRowId: faq_row_id || null,
+      liveValues,
+      submitted: faqFields,
+      actor: toActorRefWithId(
+        {
+          updated_by: actorRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actorRowId,
+        },
+        actorRowId,
+      ),
+    })
+  }
+
+  const update_object: Record<string, any> = { ...faqFields }
+  const ownerRowId = Number(actor.message.user_row_id)
+  const ownerActor = toActorRefWithId({ updated_by: 'user', updated_by_row_id: ownerRowId }, ownerRowId)
+
   if (faq_row_id) {
+    const preWriteFaqValues = (await findFaqByIdAndCompanyLean({ faqRowId: faq_row_id, companyRowId: company_row_id })) ?? {}
+
     await updateFaqById({ faqRowId: faq_row_id, updateObject: update_object })
     await invalidateFaqCaches()
+
+    const ownerFaqChanges = await computeDiff({
+      before: preWriteFaqValues,
+      submitted: faqFields,
+      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
+      editableFields: COMPANY_SECTION_REGISTRY[SECTION_FAQ].editableFields,
+    })
+    if (ownerFaqChanges.length > 0) {
+      try {
+        await insertChangeLog({
+          module: AUDIT_MODULE_COMPANY,
+          target_collection: 'cln_company_faq_lists',
+          target_row_id: faq_row_id,
+          root_document_id: company_row_id,
+          section: SECTION_FAQ,
+          action: LOG_ACTION_UPDATE,
+          actor: ownerActor,
+          changes: ownerFaqChanges,
+          reason: null,
+          snapshot: null,
+        })
+      } catch (err) {
+        logger.error({ err, company_row_id, faq_row_id }, 'company.faq: owner update change log write failed')
+      }
+    }
+
     return { status: true, message: { alert_message: 'This FAQ details has been updated successfully.' } }
   }
 
   update_object['company_row_id'] = company_row_id
-  await insertFaq(update_object)
+  const inserted = await insertFaq(update_object)
   await invalidateFaqCaches()
   await calculateCompanyProfileScore(company_row_id, ['faq'])
+
+  const ownerFaqCreateChanges = await computeDiff({
+    before: {},
+    submitted: faqFields,
+    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
+    editableFields: COMPANY_SECTION_REGISTRY[SECTION_FAQ].editableFields,
+  })
+  try {
+    await insertChangeLog({
+      module: AUDIT_MODULE_COMPANY,
+      target_collection: 'cln_company_faq_lists',
+      target_row_id: inserted._id,
+      root_document_id: company_row_id,
+      section: SECTION_FAQ,
+      action: LOG_ACTION_CREATE,
+      actor: ownerActor,
+      changes: ownerFaqCreateChanges,
+      reason: null,
+      snapshot: null,
+    })
+  } catch (err) {
+    logger.error({ err, company_row_id }, 'company.faq: owner create change log write failed')
+  }
+
   return { status: true, message: { alert_message: 'New FAQ details has been listed successfully.' } }
 }
 
@@ -176,9 +269,48 @@ export async function deleteFaqDetail({ actor, faqRowIdRaw }: DeleteFaqParams) {
     return { status: false, message: errObj }
   }
 
+  const rowSnapshot = (await findFaqByIdLean(faq_row_id)) ?? {}
+
+  // Publish gate applies to admin-panel edits only (design §2).
+  const isDeleteCompanyOwner = Number(actor.message.user_type) === USER_TYPE_COMPANY_OWNER
+  if (!isDeleteCompanyOwner) {
+    const actorRowId = Number(actor.message.user_row_id)
+    return submitChildDeleteRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_FAQ,
+      rootDocumentId: company_row_id,
+      targetRowId: faq_row_id,
+      rowSnapshot,
+      actor: toActorRefWithId(
+        {
+          updated_by: actorRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actorRowId,
+        },
+        actorRowId,
+      ),
+    })
+  }
+
   await deleteFAQ({ type: 1, company_row_id, faq_row_id })
   await invalidateFaqCaches()
   await calculateCompanyProfileScore(company_row_id, ['faq'])
+
+  try {
+    await insertChangeLog({
+      module: AUDIT_MODULE_COMPANY,
+      target_collection: 'cln_company_faq_lists',
+      target_row_id: faq_row_id,
+      root_document_id: company_row_id,
+      section: SECTION_FAQ,
+      action: 'delete',
+      actor: toActorRefWithId({ updated_by: 'user', updated_by_row_id: Number(actor.message.user_row_id) }, Number(actor.message.user_row_id)),
+      changes: [],
+      reason: null,
+      snapshot: rowSnapshot,
+    })
+  } catch (err) {
+    logger.error({ err, company_row_id, faq_row_id }, 'company.faq: owner delete change log write failed')
+  }
 
   return { status: true, message: { alert_message: 'This FAQ details for this company have been deleted successfully.' } }
 }

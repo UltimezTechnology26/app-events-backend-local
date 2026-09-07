@@ -1,6 +1,34 @@
 import type { PipelineStage } from 'mongoose'
 import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
 
+export interface RoundInvestorRow {
+  investor_type: number
+  investor_registered_type: number
+  investor_row_id: number
+  investor_category_row_id: number
+}
+
+/**
+ * Reconstructs a funding round's investors[] array from its sibling rows (one document per
+ * investor, all sharing `round_id`) — the shape createOrUpdateRound's `investors` param takes,
+ * used as the change-request diff's `liveValues.investors` (change-request.diff.ts's default
+ * branch structurally compares the two arrays). Sorted by `_id` (insertion order) so the same
+ * round produces a stable comparison key across calls.
+ */
+export async function findRoundInvestors(roundId: number): Promise<RoundInvestorRow[]> {
+  const fundingInvestmentM = require('../../../models/app/funding/fundingInvestmentM')
+  const rows = await fundingInvestmentM
+    .find({ round_id: roundId }, { _id: 1, investor_type: 1, investor_registered_type: 1, investor_row_id: 1, investor_category_row_id: 1 })
+    .sort({ _id: 1 })
+    .lean()
+  return rows.map((row: any) => ({
+    investor_type: row.investor_type,
+    investor_registered_type: row.investor_registered_type,
+    investor_row_id: row.investor_row_id,
+    investor_category_row_id: row.investor_category_row_id,
+  }))
+}
+
 /**
  * Builds a Mongo aggregation expression that joins a resolved positions[] array
  * (as produced by getPositionResolutionStages()) into a single display string,

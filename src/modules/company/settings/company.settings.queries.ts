@@ -218,6 +218,33 @@ export function findCompanySocialLinksId(company_row_id: number): Promise<{ _id:
   return company_social_linksM.findOne({ company_row_id }, { _id: 1 })
 }
 
+// Explicit projection — CLAUDE.md forbids `SELECT *`. These are exactly the eleven fields the
+// Social Media tab edits.
+export const COMPANY_SOCIAL_LINKS_FIELDS_PROJECTION = {
+  _id: 0,
+  facebook: 1,
+  twitter: 1,
+  linkedin: 1,
+  instagram: 1,
+  video_link: 1,
+  telegram: 1,
+  youtube_channel: 1,
+  medium: 1,
+  reddit: 1,
+  feed_url: 1,
+  other_social_links: 1,
+} as const
+
+/**
+ * Lean read for diffing. findCompanySocialLinksId only ever projects { _id: 1 } (an existence
+ * check for the create/update branch), so it cannot serve as a diff baseline. Returns null when
+ * no row exists yet — the create case — which computeDiff already handles correctly: every
+ * submitted field diffs against undefined/null and is reported as a genuine change.
+ */
+export function findCompanySocialLinksLean(company_row_id: number): Promise<Record<string, unknown> | null> {
+  return company_social_linksM.findOne({ company_row_id }, COMPANY_SOCIAL_LINKS_FIELDS_PROJECTION).lean()
+}
+
 /** Moved from saveOrUpdateSocialDetails / saveOrUpdateSocialMediaDetailsTeamPanel. */
 export function updateCompanySocialLinks({
   company_row_id,
@@ -336,6 +363,11 @@ export function findCompanyById(company_row_id: number): Promise<CompanyDoc | nu
   return companyM.findOne({ _id: company_row_id })
 }
 
+/** `.lean()` sibling of findCompanyById — the Basic Details change-request's diff baseline needs a plain object, not a hydrated document. */
+export function findCompanyBasicDetailsLean(company_row_id: number): Promise<Record<string, unknown> | null> {
+  return companyM.findOne({ _id: company_row_id }).lean()
+}
+
 /** Moved from followCompany. */
 export function countCompanyFollowersDocs(company_row_id: number): Promise<number> {
   return followersM.countDocuments({ company_row_id })
@@ -412,6 +444,32 @@ export function findCompanyByCondition(condition: Record<string, unknown>): Prom
 /** Moved from updateCompanySeo. */
 export function findCompanySeoDetailsRaw(company_row_id: number): Promise<Record<string, unknown> | null> {
   return company_seo_detailsM.findOne({ company_row_id })
+}
+
+// Explicit projection — CLAUDE.md forbids `SELECT *`. These are exactly the ten fields the
+// SEO tab edits.
+export const COMPANY_SEO_FIELDS_PROJECTION = {
+  _id: 0,
+  meta_title: 1,
+  meta_description: 1,
+  meta_keywords: 1,
+  robots_index: 1,
+  robots_follow: 1,
+  twitter_creator: 1,
+  og_title: 1,
+  og_description: 1,
+  twitter_title: 1,
+  twitter_description: 1,
+} as const
+
+/**
+ * Lean counterpart to findCompanySeoDetailsRaw. Diffing requires a plain object: a Mongoose
+ * document exposes `$__`, `_doc` and other internals to Object.keys(), which would surface as
+ * phantom field changes (design §13.3 failure mode 5). The raw version stays for its existing
+ * caller.
+ */
+export function findCompanySeoDetailsLean(company_row_id: number): Promise<Record<string, unknown> | null> {
+  return company_seo_detailsM.findOne({ company_row_id }, COMPANY_SEO_FIELDS_PROJECTION).lean()
 }
 
 /** Moved from updateCompanySeo. */

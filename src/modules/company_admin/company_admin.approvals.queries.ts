@@ -227,6 +227,19 @@ export async function findCompanyById(companyRowId: number | string) {
   return companyM.findOne({ _id: companyRowId })
 }
 
+// Explicit projection — CLAUDE.md forbids `SELECT *`. Only the display fields the global pending-
+// changes queue's entity column needs (name/id/logo), not the full company document.
+const COMPANY_QUEUE_DISPLAY_PROJECTION = { _id: 1, company_name: 1, company_id: 1, company_logo: 1 } as const
+
+/**
+ * Bulk-loads display fields (name/id/logo) for the entity column of the global pending-changes
+ * queue. A single `$in` query, not one lookup per row — the queue's row count is bounded by
+ * pagination, so this stays a single round trip regardless of how many total companies exist.
+ */
+export async function findCompaniesDisplayInfoByIds(companyRowIds: number[]) {
+  return companyM.find({ _id: { $in: companyRowIds } }, COMPANY_QUEUE_DISPLAY_PROJECTION).lean()
+}
+
 /** Used by approveCompanyRequest/rejectCompanyRequest to confirm the company is still pending approval. */
 export async function findPendingApprovalCompanyById(companyRowId: number | string) {
   return companyM.findOne({ _id: companyRowId, approval_status: 0 })

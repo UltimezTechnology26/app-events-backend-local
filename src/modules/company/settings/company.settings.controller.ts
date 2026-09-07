@@ -157,7 +157,11 @@ companySettingsRouter.get('/individual_details', asyncRoute('Company details.', 
   const guard = await requireAllLogin7(req)
   if (guard) return res.json(guard)
   const actor = await checkAllLoginToken(req.headers, [7])
-  const result = await getIndividualDetails({ actor, queryCompanyRowId: req.query.company_row_id as string | undefined })
+  const result = await getIndividualDetails({
+    actor,
+    queryCompanyRowId: req.query.company_row_id as string | undefined,
+    includePendingOverlay: req.query.include_pending_overlay === 'true',
+  })
   res.json(result)
 }))
 

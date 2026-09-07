@@ -15,10 +15,14 @@ import {
   extractDeletedListResult,
   buildDeletedListMatchQuery,
   findCompanyById,
+  findCompaniesDisplayInfoByIds,
   findPendingApprovalCompanyById,
   updateCompanyApprovalFields,
 } from './company_admin.approvals.queries'
 import { Actor } from './company_admin.types'
+import { recordCompanyStatusChange } from './company_admin.audit'
+import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities } from '../../common/change-request/change-request.service'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 
 export interface GetCompaniesListParams {
   approvalStatusRaw: string
@@ -79,6 +83,12 @@ export async function approveCompanyRequest({ admin, requestRowIdRaw }: ApproveC
 
   const updateFields = getUpdateTrackerFields(admin)
   await updateCompanyApprovalFields(requestRowIdRaw, { approval_status: 1, ...updateFields, updated_date_n_time: new Date() })
+  await recordCompanyStatusChange({
+    documentId: company_row_id,
+    action: 'approve',
+    tracker: updateFields,
+    adminRowId: admin.message.admin_row_id,
+  })
   await deleteKeysByPattern('app_company_individual_details_*')
   await deleteKeysByPattern('app_company_list_*')
 
@@ -160,6 +170,13 @@ export async function rejectCompanyRequest({ admin, requestRowIdRaw, reasonRejec
     ...updateFields,
   }
   await updateCompanyApprovalFields(company_row_id, updateArray)
+  await recordCompanyStatusChange({
+    documentId: company_row_id,
+    action: 'reject',
+    tracker: updateFields,
+    adminRowId: admin.message.admin_row_id,
+    reason: reasonRejected,
+  })
   await deleteKeysByPattern('app_company_individual_details_*')
   await deleteKeysByPattern('app_company_list_*')
 
@@ -198,8 +215,107 @@ export async function deleteCompanyRequest({ admin, requestRowIdRaw }: DeleteCom
   }
 
   await deleteCompanyDetails({ company_row_id: queryRun._id })
+  // `queryRun` was fetched before the delete, so it is the only surviving copy of the
+  // row once deleteCompanyDetails has relocated it out of cln_company_lists.
+  await recordCompanyStatusChange({
+    documentId: request_row_id,
+    action: 'delete',
+    tracker: getUpdateTrackerFields(admin),
+    adminRowId: admin.message.admin_row_id,
+    snapshot: queryRun,
+  })
 
   return { status: true, message: { alert_message: 'Company Deleted successfully' } }
+}
+
+export interface GetGlobalPendingChangesParams {
+  skipRaw: string
+  limitRaw: string
+}
+
+export interface PendingChangeQueueRow {
+  change_request_id: number
+  section: string
+  revision: number
+  requested_by: unknown
+  requested_at: Date
+  changes: unknown[]
+  root_document_id: number
+  entity: { company_row_id: number; company_name: string | null; company_id: string | null; company_logo: string | null } | null
+}
+
+/**
+ * Global cross-entity pending-changes queue — every company's pending requests together, one
+ * paginated list, mirroring markets' `GET /change_requests/:skip/:limit`. The common
+ * change-request service returns bare requests; this is where they gain the entity display
+ * info (name/id/logo) the queue's UI needs, via one bulk `$in` lookup rather than N+1 queries.
+ */
+export async function getGlobalPendingChangeRequests({ skipRaw, limitRaw }: GetGlobalPendingChangesParams) {
+  const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
+  const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 20
+
+  const { message: requests, count } = await getPendingChangeRequestsAcrossEntities({ module: AUDIT_MODULE_COMPANY, skip, limit })
+
+  const companyIds = Array.from(new Set(requests.map((request) => request.root_document_id)))
+  const companies = companyIds.length > 0 ? await findCompaniesDisplayInfoByIds(companyIds) : []
+  const companyById = new Map(companies.map((company: { _id: number }) => [company._id, company]))
+
+  const data: PendingChangeQueueRow[] = requests.map((request) => {
+    const company = companyById.get(request.root_document_id) as
+      | { _id: number; company_name?: string; company_id?: string; company_logo?: string }
+      | undefined
+    return {
+      ...request,
+      entity: company
+        ? { company_row_id: company._id, company_name: company.company_name ?? null, company_id: company.company_id ?? null, company_logo: company.company_logo ?? null }
+        : null,
+    }
+  })
+
+  return { status: true, message: data, count }
+}
+
+export interface RejectedChangeQueueRow {
+  change_request_id: number
+  section: string
+  revision: number
+  requested_by: unknown
+  requested_at: Date
+  reviewed_by: unknown
+  reviewed_at: Date | null
+  reason: string | null
+  changes: unknown[]
+  root_document_id: number
+  entity: { company_row_id: number; company_name: string | null; company_id: string | null; company_logo: string | null } | null
+}
+
+/**
+ * Global cross-entity rejected-changes queue — same shape as getGlobalPendingChangeRequests
+ * above, mirroring markets' own Pending/Rejected Changes tab pair.
+ */
+export async function getGlobalRejectedChangeRequests({ skipRaw, limitRaw }: GetGlobalPendingChangesParams) {
+  const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
+  const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 20
+
+  const { message: requests, count } = await getRejectedChangeRequestsAcrossEntities({ module: AUDIT_MODULE_COMPANY, skip, limit })
+
+  const companyIds = Array.from(new Set(requests.map((request) => request.root_document_id)))
+  const companies = companyIds.length > 0 ? await findCompaniesDisplayInfoByIds(companyIds) : []
+  const companyById = new Map(companies.map((company: { _id: number }) => [company._id, company]))
+
+  const data: RejectedChangeQueueRow[] = requests.map((request) => {
+    const company = companyById.get(request.root_document_id) as
+      | { _id: number; company_name?: string; company_id?: string; company_logo?: string }
+      | undefined
+    return {
+      ...request,
+      entity: company
+        ? { company_row_id: company._id, company_name: company.company_name ?? null, company_id: company.company_id ?? null, company_logo: company.company_logo ?? null }
+        : null,
+    }
+  })
+
+  return { status: true, message: data, count }
 }
 
 export interface GetDeletedCompaniesListParams {

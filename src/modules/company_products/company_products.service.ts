@@ -22,8 +22,17 @@ import {
   findTokenOwnedByUser,
   findChainOwnedByUser,
   findExchangeOwnedByUser,
+  findProductByIdAndCompanyLean,
+  findProductByIdLean,
   ProductUpdateFields
 } from './company_products.queries'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
+import { computeDiff } from '../../common/change-request/change-request.diff'
+import { COMPANY_SECTION_REGISTRY, SECTION_OWNED_PRODUCTS } from '../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
+import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
+import logger from '../../../config/logger'
 
 const { calculateCompanyProfileScore } = require('../../../utils/helpers/app_helper')
 const { getPresentDateTime } = require('../../../utils/helpers/helper')
@@ -55,6 +64,12 @@ export interface ProductResultMessage {
   owned_product_score?: number
   [key: string]: string | boolean | number | undefined
 }
+
+const USER_TYPE_COMPANY_OWNER = 1
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
+const LOG_ACTION_CREATE = 'create'
+const LOG_ACTION_UPDATE = 'update'
+const LOG_ACTION_DELETE = 'delete'
 
 /**
  * Ports controllers/app/company/products_n_holding/company_products.js's POST
@@ -160,11 +175,68 @@ export async function saveOrUpdateProduct({ actor, body, preValidationErrors }: 
     return { status: false, message: errObj }
   }
 
+  const productFields = { company_type, register_type, product_row_id, product_type }
+
+  // Publish gate applies to admin-panel edits only (design §2), same branch shape as every prior
+  // tab. submitted_from_type === 2 is a separate, unreachable-from-either-frontend path (see plan
+  // context) — if it were ever reached, it would still flow through this same owner/non-owner
+  // branch since nothing here special-cases it.
+  const isProductCompanyOwner = actor.user_type === USER_TYPE_COMPANY_OWNER
+  if (!isProductCompanyOwner) {
+    const liveValues = edit_product_row_id
+      ? ((await findProductByIdAndCompanyLean(edit_product_row_id, company_row_id)) ?? {})
+      : {}
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_OWNED_PRODUCTS,
+      rootDocumentId: company_row_id,
+      targetRowId: edit_product_row_id || null,
+      liveValues,
+      submitted: productFields,
+      actor: toActorRefWithId(
+        {
+          updated_by: actor.user_row_id === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actor.user_row_id,
+        },
+        actor.user_row_id,
+      ),
+    })
+  }
+
   const update_object: ProductUpdateFields = { company_type, company_row_id, register_type, product_row_id, product_type }
+  const ownerActor = toActorRefWithId({ updated_by: 'user', updated_by_row_id: actor.user_row_id }, actor.user_row_id)
 
   if (edit_product_row_id) {
+    const preWriteProductValues = (await findProductByIdAndCompanyLean(edit_product_row_id, company_row_id)) ?? {}
+
     await updateProductById(edit_product_row_id, update_object)
     await invalidateCompanyProductsCaches()
+
+    const ownerProductChanges = await computeDiff({
+      before: preWriteProductValues,
+      submitted: productFields,
+      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
+      editableFields: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
+    })
+    if (ownerProductChanges.length > 0) {
+      try {
+        await insertChangeLog({
+          module: AUDIT_MODULE_COMPANY,
+          target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+          target_row_id: edit_product_row_id,
+          root_document_id: company_row_id,
+          section: SECTION_OWNED_PRODUCTS,
+          action: LOG_ACTION_UPDATE,
+          actor: ownerActor,
+          changes: ownerProductChanges,
+          reason: null,
+          snapshot: null,
+        })
+      } catch (err) {
+        logger.error({ err, company_row_id, edit_product_row_id }, 'company_products: owner update change log write failed')
+      }
+    }
+
     return { status: true, message: { alert_message: 'This company product details has been updated successfully.' } }
   }
 
@@ -181,6 +253,30 @@ export async function saveOrUpdateProduct({ actor, body, preValidationErrors }: 
   }
 
   await invalidateCompanyProductsCaches()
+
+  const ownerProductCreateChanges = await computeDiff({
+    before: {},
+    submitted: productFields,
+    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
+    editableFields: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
+  })
+  try {
+    await insertChangeLog({
+      module: AUDIT_MODULE_COMPANY,
+      target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+      target_row_id: company_row_id,
+      root_document_id: company_row_id,
+      section: SECTION_OWNED_PRODUCTS,
+      action: LOG_ACTION_CREATE,
+      actor: ownerActor,
+      changes: ownerProductCreateChanges,
+      reason: null,
+      snapshot: null,
+    })
+  } catch (err) {
+    logger.error({ err, company_row_id }, 'company_products: owner create change log write failed')
+  }
+
   return {
     status: true,
     message: { alert_message: 'New company product details has been listed successfully.', products, owned_product_score }
@@ -251,6 +347,27 @@ export async function deleteProduct({ actor, edit_product_row_id_raw }: DeletePr
   }
 
   const check_query = await findProductById(edit_product_row_id)
+  const rowSnapshot = (await findProductByIdLean(edit_product_row_id)) ?? {}
+
+  // Publish gate applies to admin-panel edits only (design §2).
+  const isDeleteCompanyOwner = actor.user_type === USER_TYPE_COMPANY_OWNER
+  if (!isDeleteCompanyOwner) {
+    return submitChildDeleteRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_OWNED_PRODUCTS,
+      rootDocumentId: check_query?.company_row_id ?? 0,
+      targetRowId: edit_product_row_id,
+      rowSnapshot,
+      actor: toActorRefWithId(
+        {
+          updated_by: actor.user_row_id === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actor.user_row_id,
+        },
+        actor.user_row_id,
+      ),
+    })
+  }
+
   await deleteProductById(edit_product_row_id)
   await invalidateCompanyProductsCaches()
 
@@ -260,6 +377,23 @@ export async function deleteProduct({ actor, edit_product_row_id_raw }: DeletePr
     await setChainOwningCompaniesScore(check_query.product_row_id, 0)
   } else if (check_query?.product_type == 3) {
     await setExchangeOwningCompaniesScore(check_query.product_row_id, 0)
+  }
+
+  try {
+    await insertChangeLog({
+      module: AUDIT_MODULE_COMPANY,
+      target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+      target_row_id: edit_product_row_id,
+      root_document_id: check_query?.company_row_id ?? 0,
+      section: SECTION_OWNED_PRODUCTS,
+      action: LOG_ACTION_DELETE,
+      actor: toActorRefWithId({ updated_by: 'user', updated_by_row_id: actor.user_row_id }, actor.user_row_id),
+      changes: [],
+      reason: null,
+      snapshot: rowSnapshot,
+    })
+  } catch (err) {
+    logger.error({ err, edit_product_row_id }, 'company_products: owner delete change log write failed')
   }
 
   return { status: true, message: { alert_message: 'This own company details for this company have been deleted successfully.' } }

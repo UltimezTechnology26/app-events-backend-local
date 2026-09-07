@@ -95,3 +95,13 @@ export interface AcquisitionListResult {
   status: boolean
   message: AcquisitionListItem[]
 }
+
+/** Raw `checkAllLoginToken(req.headers, [1, 7])` result, threaded from controller into service exactly as every other company module does (see `company.settings.service.ts`'s own local `Actor` type). */
+export interface AcquisitionActorMessage {
+  user_type: number
+  user_row_id: number
+}
+
+export type AcquisitionActor =
+  | { status: true; message: AcquisitionActorMessage }
+  | { status: false; message: unknown }

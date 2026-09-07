@@ -817,3 +817,36 @@ export async function getPartnerHoldingsReportList(params: PartnerHoldingsReport
 
   return { list, count, token_list }
 }
+
+// Explicit projection — CLAUDE.md forbids `SELECT *`. Must mirror HOLDING_CRYPTO_EDITABLE_FIELDS
+// in change-request.registry.ts: an editable field missing here reads as `null` on the `before`
+// side of computeDiff, so a value the admin didn't touch would always appear "changed".
+const HOLDING_EDITABLE_FIELDS_PROJECTION = {
+  _id: 0,
+  company_type: 1,
+  token_type: 1,
+  token_row_id: 1,
+  purchased_date: 1,
+  purchased_value: 1,
+  purchased_value_in_usd: 1,
+} as const
+
+/** Lean read for diffing an UPDATE against an existing row. */
+export async function findHoldingByIdAndCompanyLean(
+  holdingRowId: number,
+  companyRowId: number,
+): Promise<Record<string, unknown> | null> {
+  const company_holdingM = require('../../../models/markets/products_n_holding/company_holdingM')
+  return company_holdingM
+    .findOne({ _id: holdingRowId, company_row_id: companyRowId }, HOLDING_EDITABLE_FIELDS_PROJECTION)
+    .lean()
+}
+
+/**
+ * Lean read for a pending DELETE's row_snapshot. No projection beyond the model's own fields —
+ * the snapshot should capture the whole row, unlike the diff read above.
+ */
+export async function findHoldingByIdLean(holdingRowId: number): Promise<Record<string, unknown> | null> {
+  const company_holdingM = require('../../../models/markets/products_n_holding/company_holdingM')
+  return company_holdingM.findOne({ _id: holdingRowId }).lean()
+}

@@ -15,6 +15,7 @@ import {
   findManualCompanyById,
   findProfessionalFullName,
   findCompanySocialLinksId,
+  findCompanySocialLinksLean,
   updateCompanySocialLinks,
   aggregateProfessionalContactInfo,
   aggregateSubAdminContactInfo,
@@ -39,10 +40,23 @@ import {
   updateCompanyEmailVerifyOtp,
   findCompanyByCondition,
   findCompanySeoDetailsRaw,
+  findCompanySeoDetailsLean,
+  findCompanyBasicDetailsLean,
   upsertCompanySeoData,
   runGetCompanySeoAggregate,
   runCompanyFollowersAggregate
 } from './company.settings.queries'
+import { submitChangeRequest } from '../../../common/change-request/change-request.service'
+import { findPendingRequest } from '../../../common/change-request/change-request.queries'
+import { computeDiff } from '../../../common/change-request/change-request.diff'
+import { SECTION_SEO, SECTION_SOCIAL_MEDIA, SECTION_BASIC_DETAILS } from '../../../common/change-request/change-request.registry'
+import { CHANGE_REQUEST_ACTION } from '../../../common/change-request/change-request.types'
+import { toActorRefWithId } from '../../../common/status-audit/status-audit.actor'
+import { ActorRef } from '../../../common/status-audit/status-audit.types'
+import { AUDIT_MODULE_COMPANY } from '../../../common/status-audit/status-audit.registry'
+import { insertChangeLog } from '../../../common/status-audit/status-audit.queries'
+import logger from '../../../../config/logger'
+const { getCollectionID } = require('../../../../utils/helpers/database_helper')
 import {
   invalidateBasicDetailsCaches,
   invalidateCompanyLogoCaches,
@@ -55,6 +69,25 @@ import {
   getCache,
   setCache,
 } from './company.settings.cache'
+
+const USER_TYPE_COMPANY_OWNER = 1
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
+
+// Same ten fields as COMPANY_SECTION_REGISTRY[SECTION_SEO].editableFields. Kept as a local
+// constant rather than importing the registry entry: the registry is built around admin-panel
+// change requests, and this owner-path log write is a separate, ungated concern that happens
+// to reuse the same diff engine.
+const OWNER_SEO_EDITABLE_FIELDS = [
+  'meta_title', 'meta_description', 'meta_keywords', 'robots_index', 'robots_follow',
+  'twitter_creator', 'og_title', 'og_description', 'twitter_title', 'twitter_description',
+] as const
+
+// Same eleven fields as COMPANY_SECTION_REGISTRY[SECTION_SOCIAL_MEDIA].editableFields — see
+// OWNER_SEO_EDITABLE_FIELDS for why this is a local constant rather than a registry import.
+const OWNER_SOCIAL_MEDIA_EDITABLE_FIELDS = [
+  'facebook', 'twitter', 'linkedin', 'instagram', 'video_link', 'telegram',
+  'youtube_channel', 'medium', 'reddit', 'feed_url', 'other_social_links',
+] as const
 
 const sanitize = require('mongo-sanitize')
 const randomstring = require('randomstring')
@@ -201,6 +234,25 @@ export interface CompanySeoUpdatePayload {
   // Index signature so this structurally satisfies upsertCompanySeoDetails'
   // generic Record<string, unknown> Mongo $set parameter.
   [key: string]: unknown
+}
+
+/**
+ * CONFIRMED BUG FIX: `regularities_details` entries carry a Mongo-injected subdocument `_id`
+ * when read live (`findCompanyBasicDetailsLean`), but the submitted payload (rebuilt from the
+ * admin form's own regulatory-rows state) never includes one — every admin edit produced a
+ * spurious "changed" diff on this field, even when the admin never touched the regulatory
+ * section at all. `_id` is DB bookkeeping, not admin-editable content, so it's stripped from the
+ * live baseline before diffing (found live, 2026-09-05, reviewing a real submitted change request).
+ */
+function stripRegulatoryDetailIds(value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  return value.map((entry) => {
+    if (entry && typeof entry === 'object' && '_id' in entry) {
+      const { _id, ...rest } = entry as Record<string, unknown>
+      return rest
+    }
+    return entry
+  })
 }
 
 export interface SaveBasicCompanyDetailsParams {
@@ -387,6 +439,39 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
     }
     insertArray['created_date_n_time'] = date_n_time
 
+    // Publish gate applies to admin-panel edits only (design §2, same shape as every other
+    // section) — a company owner creating their OWN profile keeps writing live immediately.
+    // Unlike every other section, an admin-created company has no existing root_document_id to
+    // scope the request to (the company doesn't exist yet) — a company_row_id is reserved here,
+    // upfront, from the SAME counter companyM's own pre-save hook uses, so the pending request
+    // (and its eventual publish) can be scoped to it. If the request is later rejected, that id
+    // is simply skipped in the sequence — a harmless, purely cosmetic gap, same tradeoff already
+    // accepted for Investment's round_id and Funding's round_id reservations.
+    if (actor.status && actor.message.user_type !== USER_TYPE_COMPANY_OWNER) {
+      const reservedCompanyRowId: number = await getCollectionID('cln_company_lists')
+      const adminRowId = Number(actor.message.user_row_id)
+      const submittedPayload: Record<string, unknown> = { ...insertArray }
+      if (body.manual_company_row_id) {
+        submittedPayload.manual_company_row_id = body.manual_company_row_id
+      }
+      return submitChangeRequest({
+        module: AUDIT_MODULE_COMPANY,
+        section: SECTION_BASIC_DETAILS,
+        rootDocumentId: reservedCompanyRowId,
+        targetRowId: null,
+        liveValues: {},
+        submitted: submittedPayload,
+        actor: toActorRefWithId(
+          {
+            updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+            updated_by_row_id: adminRowId,
+          },
+          adminRowId,
+        ),
+        action: CHANGE_REQUEST_ACTION.CREATE,
+      })
+    }
+
     const saveCompanyDetails = await companyM(insertArray).save()
 
     seoArray['company_row_id'] = saveCompanyDetails._id
@@ -486,6 +571,31 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
   Object.assign(insertArray, getUpdateTrackerFields(actor))
   insertArray['updated_date_n_time'] = date_n_time
 
+  // Publish gate applies to admin-panel edits only (design §2) — a company owner editing their
+  // own profile keeps writing live immediately, exactly as before.
+  if (actor.status && actor.message.user_type !== USER_TYPE_COMPANY_OWNER) {
+    const adminRowId = Number(actor.message.user_row_id)
+    const liveValues = (await findCompanyBasicDetailsLean(company_row_id)) ?? {}
+    if ('regularities_details' in liveValues) {
+      liveValues.regularities_details = stripRegulatoryDetailIds(liveValues.regularities_details)
+    }
+    return submitChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_BASIC_DETAILS,
+      rootDocumentId: company_row_id,
+      targetRowId: null,
+      liveValues,
+      submitted: insertArray,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
+  }
+
   await updateCompanyBasicDetails({ company_row_id, insertArray })
 
   if (insertArray.about_company) {
@@ -567,6 +677,180 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
 export interface SaveBasicCompanyDetailsTeamPanelParams {
   body: CompanyBasicDetailsBody
   preValidationErrors: Record<string, string>
+}
+
+export interface ApplyBasicDetailsSideEffectsParams {
+  action: 'create' | 'update'
+  companyRowId: number
+  payload: Record<string, unknown>
+  actor: ActorRef
+}
+
+/**
+ * Deferred side effects for the Basic Details change-request section, run by change-request.
+ * apply.ts AFTER its transaction commits the actual company-row write (handled generically by
+ * applyDocumentWrite there, same as every other document-scope section — this function never
+ * writes the company row itself). Best-effort, same convention as that file's own post-
+ * transaction insertChangeLog: a failure here doesn't roll back the already-committed row write.
+ *
+ * Replicates saveOrUpdateBasicCompanyDetails' own create/update side effects (SEO/social
+ * seeding or merging, its audit log, sub-admin notification, manual-company shift, profile
+ * score) against the APPROVED request's payload instead of a live request body, and
+ * companyRowId instead of a freshly-resolved company_row_id — everything else about the
+ * original logic (field names, SEO-merge rules, audit-log shape) is preserved verbatim.
+ */
+export async function applyBasicDetailsSideEffects({ action, companyRowId, payload, actor }: ApplyBasicDetailsSideEffectsParams): Promise<void> {
+  const companyName = typeof payload.company_name === 'string' ? payload.company_name : undefined
+  const aboutCompany = typeof payload.about_company === 'string' ? payload.about_company : undefined
+  const auditActorType = actor.type === 'admin' || actor.type === 'subadmin' || actor.type === 'user' ? actor.type : 'admin'
+  const auditActorId = actor.id ?? 0
+  const hasChanged = (newVal: string | undefined) => (newVal ?? '').trim() !== ''
+
+  if (action === 'create') {
+    const seoArray: CompanySeoUpdatePayload = { company_row_id: companyRowId }
+    const socialArray: CompanySocialLinksPayload = { company_row_id: companyRowId }
+
+    if (aboutCompany) {
+      const cleanedBio = removeHtmltag(aboutCompany).slice(0, 160)
+      seoArray.meta_description = cleanedBio
+      seoArray.og_description = cleanedBio
+      seoArray.twitter_description = cleanedBio
+    }
+    if (companyName) {
+      const title = `${companyName} | Coinpedia Company Listing`
+      seoArray.meta_title = title
+      seoArray.og_title = title
+      seoArray.twitter_title = title
+      seoArray.meta_keywords = companyName
+    }
+
+    await seo_change_logsM.create({
+      module_key: 'company',
+      module_id: companyRowId,
+      old_meta_title: '',
+      new_meta_title: hasChanged(seoArray.meta_title) ? seoArray.meta_title : '',
+      old_meta_description: '',
+      new_meta_description: hasChanged(seoArray.meta_description) ? seoArray.meta_description : '',
+      old_meta_keywords: '',
+      new_meta_keywords: hasChanged(seoArray.meta_keywords) ? seoArray.meta_keywords : '',
+      old_og_title: '',
+      new_og_title: hasChanged(seoArray.og_title) ? seoArray.og_title : '',
+      old_og_description: '',
+      new_og_description: hasChanged(seoArray.og_description) ? seoArray.og_description : '',
+      old_twitter_title: '',
+      new_twitter_title: hasChanged(seoArray.twitter_title) ? seoArray.twitter_title : '',
+      old_twitter_description: '',
+      new_twitter_description: hasChanged(seoArray.twitter_description) ? seoArray.twitter_description : '',
+      user_type: auditActorType,
+      updated_by: auditActorId,
+    })
+
+    await company_social_linksM(socialArray).save()
+    await company_seo_detailsM(seoArray).save()
+    await invalidateBasicDetailsCaches()
+
+    await updateThreadNotification({
+      user_row_id: -1,
+      notify_type: 2,
+      notify_type_row_id: companyRowId,
+      message_row_id: 9,
+      action_row_id: companyRowId,
+    })
+
+    const manualCompanyRowIdRaw = payload.manual_company_row_id
+    const manualCompanyRowId = typeof manualCompanyRowIdRaw === 'string' || typeof manualCompanyRowIdRaw === 'number'
+      ? Number.parseInt(String(manualCompanyRowIdRaw))
+      : Number.NaN
+    if (!Number.isNaN(manualCompanyRowId)) {
+      const check_manual_query = await findManualCompanyById(manualCompanyRowId)
+      if (check_manual_query) {
+        const subAdminRowId = typeof payload.sub_admin_row_id === 'number' ? payload.sub_admin_row_id : 0
+        await shiftCompanyFromManualToRegister({ manual_company_row_id: manualCompanyRowId, register_company_row_id: companyRowId, sub_admin_row_id: subAdminRowId })
+      }
+    }
+
+    const userRowId = typeof payload.user_row_id === 'number' ? payload.user_row_id : 0
+    if (userRowId) {
+      const sub_admin_data = await sub_admin_emailsM.find({ type: { $in: [2, 3] } }, { full_name: 1, email_id: 1 })
+      const user_query = await findProfessionalFullName(userRowId)
+      const companyDoc = await findCompanyBasicDetailsLean(companyRowId)
+      await notifySubAdminsOfNewCompany(sub_admin_data, {
+        full_name: user_query!.full_name,
+        company_name: companyName ?? '',
+        updated_date_n_time: (companyDoc?.updated_date_n_time as Date | string | undefined) ?? new Date(),
+      })
+    }
+
+    await calculateCompanyProfileScore(companyRowId, ['basic', 'team_detail'])
+    return
+  }
+
+  const check_company_seo = await findCompanySeoDetailsForUpdate(companyRowId)
+  const seoArray: CompanySeoUpdatePayload = {}
+
+  if (aboutCompany) {
+    if (!check_company_seo?.meta_description) {
+      const cleanedBio = removeHtmltag(aboutCompany).slice(0, 160)
+      seoArray.meta_description = cleanedBio
+      seoArray.og_description = cleanedBio
+      seoArray.twitter_description = cleanedBio
+    } else if (!check_company_seo.og_description) {
+      seoArray.og_description = check_company_seo?.meta_description
+      seoArray.twitter_description = check_company_seo?.meta_description
+    }
+  }
+
+  if (companyName) {
+    const title = `${companyName} | Coinpedia Company Listing`
+    if (!check_company_seo?.meta_title) {
+      seoArray.meta_title = title
+      seoArray.og_title = title
+      seoArray.twitter_title = title
+    } else if (!check_company_seo.og_title) {
+      seoArray.og_title = check_company_seo?.meta_title
+      seoArray.twitter_title = check_company_seo?.meta_title
+    }
+    if (!check_company_seo?.meta_keywords) {
+      seoArray.meta_keywords = companyName
+    }
+  }
+
+  const hasChangedPair = (oldVal: string | undefined, newVal: string | undefined) => (newVal ?? '').trim() !== '' && (oldVal ?? '').trim() !== (newVal ?? '').trim()
+  const changed =
+    hasChangedPair(check_company_seo?.meta_title, seoArray.meta_title) ||
+    hasChangedPair(check_company_seo?.meta_description, seoArray.meta_description) ||
+    hasChangedPair(check_company_seo?.meta_keywords, seoArray.meta_keywords) ||
+    hasChangedPair(check_company_seo?.og_title, seoArray.og_title) ||
+    hasChangedPair(check_company_seo?.og_description, seoArray.og_description) ||
+    hasChangedPair(check_company_seo?.twitter_title, seoArray.twitter_title) ||
+    hasChangedPair(check_company_seo?.twitter_description, seoArray.twitter_description)
+
+  if (changed) {
+    await seo_change_logsM.create({
+      module_key: 'company',
+      module_id: companyRowId,
+      old_meta_title: check_company_seo?.meta_title || '',
+      new_meta_title: hasChangedPair(check_company_seo?.meta_title, seoArray.meta_title) ? seoArray.meta_title : '',
+      old_meta_description: check_company_seo?.meta_description || '',
+      new_meta_description: hasChangedPair(check_company_seo?.meta_description, seoArray.meta_description) ? seoArray.meta_description : '',
+      old_meta_keywords: check_company_seo?.meta_keywords || '',
+      new_meta_keywords: hasChangedPair(check_company_seo?.meta_keywords, seoArray.meta_keywords) ? seoArray.meta_keywords : '',
+      old_og_title: check_company_seo?.og_title || '',
+      new_og_title: hasChangedPair(check_company_seo?.og_title, seoArray.og_title) ? seoArray.og_title : '',
+      old_og_description: check_company_seo?.og_description || '',
+      new_og_description: hasChangedPair(check_company_seo?.og_description, seoArray.og_description) ? seoArray.og_description : '',
+      old_twitter_title: check_company_seo?.twitter_title || '',
+      new_twitter_title: hasChangedPair(check_company_seo?.twitter_title, seoArray.twitter_title) ? seoArray.twitter_title : '',
+      old_twitter_description: check_company_seo?.twitter_description || '',
+      new_twitter_description: hasChangedPair(check_company_seo?.twitter_description, seoArray.twitter_description) ? seoArray.twitter_description : '',
+      user_type: auditActorType,
+      updated_by: auditActorId,
+    })
+  }
+
+  await invalidateBasicDetailsCaches()
+  await upsertCompanySeoDetails({ company_row_id: companyRowId, seoArray })
+  await calculateCompanyProfileScore(companyRowId, ['basic', 'team_detail'])
 }
 
 /**
@@ -816,7 +1100,7 @@ export async function saveOrUpdateSocialDetails({ actor, body, preValidationErro
     return { status: false, message: errObj }
   }
 
-  const insert_object: CompanySocialLinksPayload = {
+  const socialFields = {
     facebook: body.facebook,
     twitter: body.twitter,
     linkedin: body.linkedin,
@@ -830,6 +1114,36 @@ export async function saveOrUpdateSocialDetails({ actor, body, preValidationErro
     other_social_links: body.other_social_links,
   }
 
+  // Publish gate applies to admin-panel edits only (design §2), same branch shape as
+  // updateCompanySeo. A company owner editing their own profile keeps writing live immediately.
+  const isSocialCompanyOwner = Number(actor.message.user_type) === USER_TYPE_COMPANY_OWNER
+  if (!isSocialCompanyOwner) {
+    const liveValues = (await findCompanySocialLinksLean(company_row_id)) ?? {}
+    const actorRowId = Number(actor.message.user_row_id)
+    return submitChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_SOCIAL_MEDIA,
+      rootDocumentId: company_row_id,
+      targetRowId: null,
+      liveValues,
+      submitted: socialFields,
+      actor: toActorRefWithId(
+        {
+          updated_by: actorRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actorRowId,
+        },
+        actorRowId,
+      ),
+    })
+  }
+
+  const insert_object: CompanySocialLinksPayload = { ...socialFields }
+
+  // Captured before the create/update branch writes, so the owner-path change-log diff below
+  // compares against the pre-write state. Reading it again after the write would compare the
+  // new value against itself and silently report zero changes.
+  const preWriteSocialValues = (await findCompanySocialLinksLean(company_row_id)) ?? {}
+
   const check_query = await findCompanySocialLinksId(company_row_id)
   let social_links_key_deleted
   if (check_query) {
@@ -842,6 +1156,33 @@ export async function saveOrUpdateSocialDetails({ actor, body, preValidationErro
   } else {
     insert_object['company_row_id'] = company_row_id
     await company_social_linksM(insert_object).save()
+  }
+
+  // Owner edits are not gated but must still appear in the shared timeline (same reasoning as
+  // updateCompanySeo's owner-path log write).
+  const ownerSocialChanges = await computeDiff({
+    before: preWriteSocialValues,
+    submitted: socialFields,
+    schemaPaths: (field: string) => company_social_linksM.schema.path(field),
+    editableFields: OWNER_SOCIAL_MEDIA_EDITABLE_FIELDS,
+  })
+  if (ownerSocialChanges.length > 0) {
+    try {
+      await insertChangeLog({
+        module: AUDIT_MODULE_COMPANY,
+        target_collection: 'cln_company_social_links',
+        target_row_id: company_row_id,
+        root_document_id: company_row_id,
+        section: SECTION_SOCIAL_MEDIA,
+        action: 'update',
+        actor: toActorRefWithId({ updated_by: 'user', updated_by_row_id: actor.message.user_row_id }, actor.message.user_row_id),
+        changes: ownerSocialChanges,
+        reason: null,
+        snapshot: null,
+      })
+    } catch (err) {
+      logger.error({ err, company_row_id }, 'company.settings: owner social links change log write failed')
+    }
   }
 
   await calculateCompanyProfileScore(company_row_id, ['social_media'])
@@ -1158,10 +1499,17 @@ export async function getCompanyIndividualDetailsData({ company_row_id, includeA
 export interface GetIndividualDetailsParams {
   actor: Actor
   queryCompanyRowId?: string
+  /**
+   * Opt-in only - see fetchCompanyIndividualDetails's (frontend) own doc comment. The admin EDIT
+   * form passes this so resubmitting untouched fields never reverts an already-pending edit; a
+   * read-only VIEW surface must leave it false/omitted so it only ever shows genuinely live data,
+   * never a preview of something approved but not yet published.
+   */
+  includePendingOverlay?: boolean
 }
 
 /** Ports setting.js's GET /individual_details (lines 1042-1086) — app-user/admin, self-scoped. */
-export async function getIndividualDetails({ actor, queryCompanyRowId }: GetIndividualDetailsParams) {
+export async function getIndividualDetails({ actor, queryCompanyRowId, includePendingOverlay }: GetIndividualDetailsParams) {
   if (!actor.status) {
     return actor
   }
@@ -1189,10 +1537,39 @@ export async function getIndividualDetails({ actor, queryCompanyRowId }: GetIndi
     return { status: false, message: { alert_message: check_company.message.alert_message, sdf: 3 } }
   }
 
-  return getCompanyIndividualDetailsData({
-    company_row_id: check_company.message.company_row_id,
+  const resolvedCompanyRowId = check_company.message.company_row_id as number
+  const result = await getCompanyIndividualDetailsData({
+    company_row_id: resolvedCompanyRowId,
     includeAdminExtras: actor.message.user_type === 2,
   })
+
+  // Admin edit-context only (includePendingOverlay, opt-in - see this param's own doc comment):
+  // overlay any already-pending basic_details/social_media change request's payload onto the live
+  // values this endpoint otherwise returns unconditionally. Without this, the admin editor's forms
+  // (BasicDetailsForm, SocialMediaForm) hydrate purely from live data even when a field is already
+  // pending review - and since both forms resubmit their ENTIRE current state on every save (not
+  // just the touched fields), the next unrelated edit on the same section would silently resend
+  // the stale live value for every OTHER field too, reverting an already-pending edit back toward
+  // live the moment that request is approved. Gated behind the opt-in flag (not just user_type===2)
+  // because the read-only company VIEW page uses this SAME endpoint and must never show an
+  // approved-but-unpublished change as if it were already live - that would mislead a reviewer into
+  // thinking publish already happened (confirmed report: approving a change made it "look live" on
+  // the view page despite publish being a deliberate separate action).
+  if (includePendingOverlay && actor.message.user_type === 2 && result.status) {
+    await overlayPendingSectionPayloads(result.message as Record<string, unknown>, resolvedCompanyRowId)
+  }
+
+  return result
+}
+
+/** See getIndividualDetails's own comment on why this overlay exists. */
+async function overlayPendingSectionPayloads(details: Record<string, unknown>, companyRowId: number): Promise<void> {
+  const [pendingBasicDetails, pendingSocialMedia] = await Promise.all([
+    findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyRowId, section: SECTION_BASIC_DETAILS }),
+    findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyRowId, section: SECTION_SOCIAL_MEDIA }),
+  ])
+  if (pendingBasicDetails?.payload) Object.assign(details, pendingBasicDetails.payload)
+  if (pendingSocialMedia?.payload) Object.assign(details, pendingSocialMedia.payload)
 }
 
 /** Ports setting.js's GET /individual_company_details/:user_row_id (lines 1089-1131) — API-key-only team panel. */
@@ -1666,6 +2043,34 @@ export async function updateCompanySeo({ actor, body, preValidationErrors }: Upd
     return { status: false, message: { alert_message: 'Invalid Company ID.' } }
   }
 
+  const seoFields = {
+    meta_title, meta_description, meta_keywords, robots_index, robots_follow,
+    twitter_creator, og_title, og_description, twitter_title, twitter_description,
+  }
+
+  // Publish gate applies to admin-panel edits only (design §2). A company owner editing their
+  // own profile keeps writing live immediately, exactly as before.
+  const isCompanyOwner = Number(actor.message.user_type) === USER_TYPE_COMPANY_OWNER
+  if (!isCompanyOwner) {
+    const liveValues = (await findCompanySeoDetailsLean(Number(module_id))) ?? {}
+    const actorRowId = Number(actor.message.user_row_id)
+    return submitChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_SEO,
+      rootDocumentId: Number(module_id),
+      targetRowId: null,
+      liveValues,
+      submitted: seoFields,
+      actor: toActorRefWithId(
+        {
+          updated_by: actorRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: actorRowId,
+        },
+        actorRowId,
+      ),
+    })
+  }
+
   const checkQuery = await findCompanySeoDetailsRaw(condition._id as number)
 
   const seoChanged =
@@ -1720,6 +2125,40 @@ export async function updateCompanySeo({ actor, body, preValidationErrors }: Upd
     return { status: false, message: { alert_message: 'Company SEO details could not be saved. Please try again.' } }
   }
 
+  // Company-owner edits are not gated (design §2 — only admin-panel edits go through
+  // change_requests), but they must still appear in the shared timeline: without this, an
+  // owner's edit is invisible to cln_change_logs while every admin submit/publish is recorded.
+  // Reuses the same computeDiff engine as the admin-panel path rather than a second comparison.
+  // findCompanySeoDetailsRaw is typed Record<string, unknown> | null (its return type is shared
+  // with other Record-shaped callers), but at runtime it is the live Mongoose document
+  // findCompanySeoDetailsRaw's own implementation returns — hence the narrowing cast to reach
+  // .toObject() rather than diffing against Mongoose internals directly.
+  const checkQueryDoc = checkQuery as { toObject(): Record<string, unknown> } | null
+  const ownerChanges = await computeDiff({
+    before: checkQueryDoc ? checkQueryDoc.toObject() : {},
+    submitted: seoFields,
+    schemaPaths: (field: string) => company_seo_detailsM.schema.path(field),
+    editableFields: OWNER_SEO_EDITABLE_FIELDS,
+  })
+  if (ownerChanges.length > 0) {
+    try {
+      await insertChangeLog({
+        module: AUDIT_MODULE_COMPANY,
+        target_collection: 'cln_company_seo_details',
+        target_row_id: Number(module_id),
+        root_document_id: Number(module_id),
+        section: SECTION_SEO,
+        action: 'update',
+        actor: toActorRefWithId({ updated_by: 'user', updated_by_row_id: actor.message.user_row_id }, actor.message.user_row_id),
+        changes: ownerChanges,
+        reason: null,
+        snapshot: null,
+      })
+    } catch (err) {
+      logger.error({ err, module_id }, 'company.settings: owner seo change log write failed')
+    }
+  }
+
   await invalidateSeoCaches(Number(module_id))
   await calculateCompanyProfileScore(module_id, ['basic'])
 
@@ -1762,18 +2201,30 @@ export async function getCompanySeo({ actor, companyId }: GetCompanySeoParams) {
 
   const cacheKey = buildCompanySeoKey(Number(companyId), condition.user_row_id ?? 'admin')
   const cache_response = await getCache({ key: cacheKey })
+  let seoData: Record<string, unknown>
+
   if (cache_response.status) {
-    return { status: true, message: { alert_message: 'Company SEO fetched successfully' }, data: cache_response.message }
+    seoData = cache_response.message as Record<string, unknown>
+  } else {
+    const companyData = await runGetCompanySeoAggregate(condition)
+    if (!companyData.length) {
+      return { status: false, message: { alert_message: 'Invalid Company ID.' } }
+    }
+    seoData = companyData[0]
+    await setCache({ key: cacheKey, value: seoData, ttl: 1800 })
   }
 
-  const companyData = await runGetCompanySeoAggregate(condition)
-  if (!companyData.length) {
-    return { status: false, message: { alert_message: 'Invalid Company ID.' } }
+  // Admin-only, applied AFTER the cache (never baked into the cached live value - see
+  // getIndividualDetails's own comment for why this overlay exists at all). A fresh object copy
+  // so the overlay never mutates whatever was just cached above.
+  if (actor.message.user_type === 2) {
+    const pendingSeo = await findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: Number(companyId), section: SECTION_SEO })
+    if (pendingSeo?.payload) {
+      seoData = { ...seoData, ...pendingSeo.payload }
+    }
   }
 
-  await setCache({ key: cacheKey, value: companyData[0], ttl: 1800 })
-
-  return { status: true, message: { alert_message: 'Company SEO fetched successfully' }, data: companyData[0] }
+  return { status: true, message: { alert_message: 'Company SEO fetched successfully' }, data: seoData }
 }
 
 /**

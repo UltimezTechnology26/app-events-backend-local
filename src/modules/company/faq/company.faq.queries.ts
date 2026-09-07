@@ -48,3 +48,26 @@ export async function aggregateFaqList({ searchMatch, skip, limit }: { searchMat
 export async function findFaqById(faqRowId: number) {
   return company_faqM.findOne({ _id: faqRowId })
 }
+
+// Explicit projection — CLAUDE.md forbids `SELECT *`.
+const FAQ_EDITABLE_FIELDS_PROJECTION = { _id: 0, faq_question: 1, faq_answer: 1 } as const
+
+/** Lean read for diffing an UPDATE against an existing row. */
+export async function findFaqByIdAndCompanyLean({
+  faqRowId,
+  companyRowId,
+}: {
+  faqRowId: number
+  companyRowId: number
+}): Promise<Record<string, unknown> | null> {
+  return company_faqM.findOne({ _id: faqRowId, company_row_id: companyRowId }, FAQ_EDITABLE_FIELDS_PROJECTION).lean()
+}
+
+/**
+ * Lean read for a pending DELETE's row_snapshot. No projection beyond the model's own fields —
+ * the snapshot should capture the whole row, unlike the diff read above, which only needs the
+ * editable fields.
+ */
+export async function findFaqByIdLean(faqRowId: number): Promise<Record<string, unknown> | null> {
+  return company_faqM.findOne({ _id: faqRowId }).lean()
+}
