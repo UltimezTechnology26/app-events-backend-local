@@ -1,16 +1,20 @@
 # This file is a template, and might need editing before it works on your project.
 FROM node:24.5.0
- 
 
 # Set the working directory to /app
 WORKDIR /app
 
-# Copy the package.json and package-lock.json files to the container
+# Build step: install dependencies and compile TypeScript
 COPY package*.json ./
+ARG NPM_TOKEN
+RUN echo "@ultimez-interview:registry=https://npm.pkg.github.com" > .npmrc && \
+    echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
+    npm install --production=false && \
+    rm -f .npmrc
 
-# nodemon install
-RUN npm install
-RUN npm install -g pm2
 COPY . .
 RUN npm run build
-CMD ["pm2-runtime", "dist/index.js"]
+
+# Start the application directly with Node
+CMD ["node", "dist/index.js"]
+
