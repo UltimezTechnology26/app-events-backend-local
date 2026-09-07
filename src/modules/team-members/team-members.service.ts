@@ -11,6 +11,12 @@ import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-librar
 const { checkUserLoginToken } = require('../../../middleware/authorization')
 import { validatePositions, ResolvedPosition } from '../work-experience/work-experience.service'
 import { buildCompanyTeamMemberCountPipeline, getTeamMembersForCompanyIds } from './team-members.queries'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
+import { SECTION_TEAM_MEMBERS } from '../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
+
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
 /**
  * Full result of checkAdminLoginToken(...) for the acting admin — used only for
@@ -245,16 +251,19 @@ export async function adminCreateOrUpdateEmployeeDetails({
   let company_row_id = 0
   let user_account_type = 0
   let user_row_id = 0
-
-  const check_access = await checkCompanySubadminAccess({
-    admin_row_id: Number.parseInt(admin_context.message.admin_row_id),
-    admin_manager_type: admin_context.message.admin_manager_type,
-    sub_admin_type: Number.parseInt(admin_context.message.sub_admin_type),
-    company_row_id: Number.parseInt(body.company_row_id)
-  })
-  if (!check_access.status) {
-    errObj['alert_message'] = check_access.message
-  }
+  // CONFIRMED BUG FIX: this used to call checkCompanySubadminAccess unconditionally with
+  // `body.company_row_id` BEFORE knowing whether this was a create or an edit - on an edit, the
+  // frontend correctly omits company_row_id entirely (the real one belongs to the existing work
+  // experience row, not something the client re-supplies), so `Number.parseInt(undefined)` was
+  // always NaN there. For any sub-admin (admin_manager_type !== 1 - a main admin short-circuits
+  // this check entirely), that NaN reached `companyM.findOne({_id: NaN})`, which Mongoose rejects
+  // with a CastError, silently swallowed inside checkCompanySubadminAccess's own try/catch and
+  // surfaced as a generic "An unexpected error occurred" alert_message - making every sub-admin
+  // edit of an existing team member fail, unrelated to anything actually wrong with the edit
+  // itself. The access check now runs AFTER resolving which company_row_id actually applies to
+  // this request - the existing row's own company_row_id for an edit, the submitted one for a
+  // create - so it validates against a real id in both cases.
+  let check_access_company_row_id: number | null = null
 
   // ── Positions validation (accumulated into errObj, does not short-circuit) — reuses
   // validatePositions() rather than re-deriving the identical loop. ──
@@ -276,6 +285,8 @@ export async function adminCreateOrUpdateEmployeeDetails({
       const check_query = await professionals_work_experienceM.findOne({ _id: resolved_work_row_id })
       if (!check_query) {
         errObj['alert_message'] = 'Invalid work row id'
+      } else {
+        check_access_company_row_id = check_query.company_row_id
       }
     }
   } else {
@@ -283,6 +294,7 @@ export async function adminCreateOrUpdateEmployeeDetails({
       errObj['company_row_id'] = 'The Company Row ID field is required.'
     } else {
       company_row_id = Number.parseInt(body.company_row_id)
+      check_access_company_row_id = company_row_id
       const check_company_query = await companyM.findOne({ _id: company_row_id }, { _id: 1 })
       if (!check_company_query) {
         errObj['alert_message'] = 'Sorry, Invalid Company Row ID.'
@@ -314,6 +326,18 @@ export async function adminCreateOrUpdateEmployeeDetails({
     }
   }
 
+  if (check_access_company_row_id !== null) {
+    const check_access = await checkCompanySubadminAccess({
+      admin_row_id: Number.parseInt(admin_context.message.admin_row_id),
+      admin_manager_type: admin_context.message.admin_manager_type,
+      sub_admin_type: Number.parseInt(admin_context.message.sub_admin_type),
+      company_row_id: check_access_company_row_id
+    })
+    if (!check_access.status) {
+      errObj['alert_message'] = check_access.message
+    }
+  }
+
   if (Object.keys(errObj).length > 0) {
     return { status: false, message: errObj }
   }
@@ -333,44 +357,52 @@ export async function adminCreateOrUpdateEmployeeDetails({
   update_array['sub_position_row_id'] = sub_position_row_id
   update_array['public_view'] = true
 
+  // Publish gate applies to admin-panel edits (design §2, same shape as every other section) —
+  // this whole function is admin-only (no owner path exists here; the app-side equivalent is
+  // createOrUpdateEmployeeDetails above), so every call submits a change request instead of
+  // writing live. The public_view demotion of a caller's other records (updateMany below in the
+  // pre-existing code) and the notification/profile-score side effects only make sense once a
+  // write actually lands live, so they stay entirely on this function's OLD code path — which
+  // no longer runs; they'll need to move into the publish step if/when this section needs them
+  // there (not done here, out of scope for wiring the review gate itself).
+  const adminRowId = Number.parseInt(admin_context.message.admin_row_id)
+  const actor = toActorRefWithId(
+    {
+      updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+      updated_by_row_id: adminRowId,
+    },
+    adminRowId,
+  )
+
   if (!resolved_work_row_id) {
     update_array['user_row_id'] = user_row_id
     update_array['user_account_type'] = user_account_type
     update_array['company_type'] = 1
-    update_array['company_row_id'] = company_row_id
     update_array['till_date_status'] = 2
     update_array['verified_status'] = true
     update_array['verified_on'] = getPresentDateTime()
 
-    await professionals_work_experienceM.updateMany({ user_row_id, user_account_type }, { $set: { public_view: false } })
-    const insert_query = await professionals_work_experienceM(update_array).save()
-    await deleteKeysByPattern('employee_list_*')
-    await deleteKeysByPattern('app_company_individual_other_details_*')
-    await deleteKeysByPattern('app_user_other_details_*')
-    if (user_account_type == 1) {
-      await updateNotification({
-        user_row_id,
-        notify_type: 2,
-        notify_type_row_id: company_row_id,
-        message_row_id: 18,
-        action_row_id: insert_query._id
-      })
-    }
-    await calculateCompanyProfileScore(company_row_id, ['team_detail'])
-
-    return { status: true, message: { alert_message: 'This employee details are added successfully.' } }
-  } else {
-    await professionals_work_experienceM.updateMany(
-      { _id: { $ne: resolved_work_row_id }, user_row_id, user_account_type },
-      { $set: { public_view: false } }
-    )
-    await professionals_work_experienceM.updateOne({ _id: resolved_work_row_id }, { $set: update_array })
-    await deleteKeysByPattern('employee_list_*')
-    await deleteKeysByPattern('app_company_individual_other_details_*')
-    await deleteKeysByPattern('app_user_other_details_*')
-
-    return { status: true, message: { alert_message: 'This employee details are updated successfully.' } }
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_TEAM_MEMBERS,
+      rootDocumentId: company_row_id,
+      targetRowId: null,
+      liveValues: {},
+      submitted: update_array,
+      actor,
+    })
   }
+
+  const liveValues = (await professionals_work_experienceM.findOne({ _id: resolved_work_row_id }).lean()) ?? {}
+  return submitChildChangeRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_TEAM_MEMBERS,
+    rootDocumentId: liveValues.company_row_id ?? company_row_id,
+    targetRowId: resolved_work_row_id,
+    liveValues,
+    submitted: update_array,
+    actor,
+  })
 }
 
 /**
@@ -494,13 +526,25 @@ export async function adminRemoveEmployee({
     return { status: false, message: { alert_message: check_access.message } }
   }
 
-  await deleteProfessionalDetails({ professional_details_id: request_row_id, type: 1 })
-  await deleteKeysByPattern('employee_list_*')
-  await deleteKeysByPattern('app_company_individual_other_details_*')
-  await deleteKeysByPattern('app_user_other_details_*')
-  await calculateCompanyProfileScore(check_query.company_row_id, ['team_detail'])
-
-  return { status: true, message: { alert_message: 'This employee details has been removed successfully.' } }
+  // Publish gate applies here too (design §2) — a delete is staged for review, not applied
+  // immediately. check_query is a hydrated Mongoose document (plain findOne() above, no
+  // .lean()); toObject() gives a plain snapshot object for row_snapshot, same intent as every
+  // other section's row-snapshot fetch.
+  const adminRowId = Number.parseInt(admin_context.message.admin_row_id)
+  return submitChildDeleteRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_TEAM_MEMBERS,
+    rootDocumentId: check_query.company_row_id,
+    targetRowId: request_row_id,
+    rowSnapshot: typeof check_query.toObject === 'function' ? check_query.toObject() : { ...check_query },
+    actor: toActorRefWithId(
+      {
+        updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+        updated_by_row_id: adminRowId,
+      },
+      adminRowId,
+    ),
+  })
 }
 
 /**

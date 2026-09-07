@@ -31,7 +31,8 @@ const saveSchema = mongoose.Schema({
     }, // 1:Crypto token, 2:Blockchain, 3:Exchange
     date_n_time: {
         type: Date,
-        required: true
+        required: true,
+        default: Date.now
     }
 })
 

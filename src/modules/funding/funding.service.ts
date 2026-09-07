@@ -32,6 +32,14 @@ const professionals_manual_retrievalsM = require('../../../models/app/users/prof
 const funding_investor_typesM = require('../../../models/app/static/funding_investor_typesM')
 const funding_roundsM = require('../../../models/app/static/funding_roundsM')
 
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
+import { SECTION_INVESTMENT, SECTION_FUNDING_ROUND } from '../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
+import { ChangeRequestDoc } from '../../common/change-request/change-request.types'
+
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
+
 export interface ValidatedInvestor {
   investor_type: number
   investor_registered_type: number
@@ -100,12 +108,30 @@ export async function validateInvestorsArray(investorsInput: unknown[]): Promise
   return { errObj, validated }
 }
 
+/**
+ * CONFIRMED BUG FIX: `investor_user_row_id` is a transient value `validateInvestorsArray` always
+ * resolves fresh (for the create path's own notification loop below) — it is NOT a real
+ * `cln_funding_investment_lists` field, never stored, never returned by `findRoundInvestors`'s
+ * own projection. Submitting `validated` as-is meant every admin edit's `investors` diff compared
+ * a 5-field submitted entry against a 4-field live one, showing "changed" even when the investor
+ * list was untouched (found live, 2026-09-05, reviewing a real submitted change request). Stripped
+ * here so the diffed shape matches `findRoundInvestors` exactly on both sides.
+ */
+function stripInvestorUserRowId(validated: ValidatedInvestor[]): Omit<ValidatedInvestor, 'investor_user_row_id'>[] {
+  return validated.map(({ investor_type, investor_registered_type, investor_row_id, investor_category_row_id }) => ({
+    investor_type,
+    investor_registered_type,
+    investor_row_id,
+    investor_category_row_id,
+  }))
+}
+
 const { getCollectionID } = require('../../../utils/helpers/database_helper')
 const { getPresentDateTime } = require('../../../utils/helpers/helper')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 const { calculateUserProfileScore, calculateCompanyProfileScore } = require('../../../utils/helpers/app_helper')
 import { invalidateFundingCaches } from './funding.cache'
-import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview, joinPositionNamesExpr, buildCompanyListFundsRaisedPipeline, buildCompanyListFundsInvestedPipeline, buildPartnersListFundsRaisedPipeline, buildPartnersListFundsInvestedPipeline, buildVerifiedInvestorCountPipeline, buildVerifiedFundsInvestedTotalPipeline, buildVerifiedFundsRaisedTotalPipeline } from './funding.queries'
+import { resolveFundsRaisedCompanyStages, resolveInvestorStages, syndicateDetectionStages, groupRoundWithInvestorsStages, getFundsRaisedOverview, joinPositionNamesExpr, buildCompanyListFundsRaisedPipeline, buildCompanyListFundsInvestedPipeline, buildPartnersListFundsRaisedPipeline, buildPartnersListFundsInvestedPipeline, buildVerifiedInvestorCountPipeline, buildVerifiedFundsInvestedTotalPipeline, buildVerifiedFundsRaisedTotalPipeline, findRoundInvestors } from './funding.queries'
 import { getPositionResolutionStages } from '../work-experience/work-experience.queries'
 import { extractPaginatedResult } from '../common/common.pagination'
 import { escapeRegex } from '@ultimez-interview/coinpedia-backend-library/validation'
@@ -171,6 +197,34 @@ export async function createOrUpdateRound(params: {
       if (!check_access.status) {
         return { status: false, message: { alert_message: check_access.message } }
       }
+
+      // Publish gate applies here too (design §2) — a "round" is N sibling rows sharing one
+      // round_id, a shape the generic single-row applyChildWrite can't express at all, so this
+      // section gets its own writer (applyFundingRoundWrite below, dispatched from
+      // change-request.apply.ts via the registry's customWriter flag) rather than a special-case
+      // branch inside the generic one. A round id is reserved now (same "harmless gap if
+      // rejected" tradeoff already accepted for Investment/Basic Details' reserved ids) so the
+      // eventual publish has something to write against.
+      const reservedRoundId = await getCollectionID('funding_round_id')
+      const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+      return submitChildChangeRequest({
+        module: AUDIT_MODULE_COMPANY,
+        section: SECTION_FUNDING_ROUND,
+        rootDocumentId: params.funds_raised_company_row_id,
+        targetRowId: null,
+        liveValues: {},
+        submitted: {
+          category_row_id: params.category_row_id,
+          announcement_date: params.announcement_date,
+          amount: params.amount || 0,
+          investors: stripInvestorUserRowId(validated),
+          reserved_round_id: reservedRoundId,
+        },
+        actor: toActorRefWithId(
+          { updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin', updated_by_row_id: adminRowId },
+          adminRowId,
+        ),
+      })
     }
 
     const present_date_n_time = getPresentDateTime()
@@ -220,7 +274,10 @@ export async function createOrUpdateRound(params: {
     return { status: true, message: { alert_message: 'Congratulations! Your funding details have been successfully added', save_query } }
   }
 
-  const existing = await fundingInvestmentM.findOne({ round_id: params.funding_row_id }, { verified_status: 1, verified_on: 1, reject_type: 1, reject_reason: 1, funds_raised_company_row_id: 1, date_n_time: 1 })
+  const existing = await fundingInvestmentM.findOne(
+    { round_id: params.funding_row_id },
+    { verified_status: 1, verified_on: 1, reject_type: 1, reject_reason: 1, funds_raised_company_row_id: 1, date_n_time: 1, category_row_id: 1, announcement_date: 1, amount: 1 },
+  )
   if (!existing) {
     return { status: false, message: { alert_message: 'Invalid funding row id.' } }
   }
@@ -244,6 +301,35 @@ export async function createOrUpdateRound(params: {
     if (!check_access.status) {
       return { status: false, message: { alert_message: check_access.message } }
     }
+
+    // Publish gate applies here too — same customWriter shape as the create branch above.
+    // liveValues.investors is reconstructed from the round's current sibling rows so the diff
+    // (and a second editor amending the same pending request) compares against the real current
+    // set, not nothing.
+    const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+    const liveInvestors = await findRoundInvestors(params.funding_row_id)
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_FUNDING_ROUND,
+      rootDocumentId: existing.funds_raised_company_row_id,
+      targetRowId: params.funding_row_id,
+      liveValues: {
+        category_row_id: existing.category_row_id,
+        announcement_date: existing.announcement_date,
+        amount: existing.amount,
+        investors: liveInvestors,
+      },
+      submitted: {
+        category_row_id: params.category_row_id,
+        announcement_date: params.announcement_date,
+        amount: params.amount || 0,
+        investors: stripInvestorUserRowId(validated),
+      },
+      actor: toActorRefWithId(
+        { updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin', updated_by_row_id: adminRowId },
+        adminRowId,
+      ),
+    })
   }
 
   // BUG FIX: date_n_time (used by the dashboard's Today/Yesterday/1 Week/1 Month
@@ -281,6 +367,89 @@ export async function createOrUpdateRound(params: {
   await invalidateFundingCaches()
 
   return { status: true, message: { alert_message: 'Great job! Your funding details have been successfully updated.', save_query } }
+}
+
+/**
+ * The section-specific writer dispatched from change-request.apply.ts (via the registry's
+ * customWriter flag) for a publish of the `funding_round` section — mirrors createOrUpdateRound's
+ * own live create/update logic above exactly (same shared/carried fields, same round_id
+ * semantics) but running inside the caller's publish transaction against a change request's
+ * stored payload instead of a live request body.
+ *
+ * CREATE: `payload.reserved_round_id` (reserved at submit time) becomes the fresh round's id.
+ * UPDATE: `request.target_row_id` IS the round_id being edited (see the registry's keyField doc
+ * comment) — every existing row for it is deleted and replaced, same as the live path. Unlike the
+ * live path, verified_status/verified_on/reject_type/reject_reason/date_n_time are re-read fresh
+ * here (at publish time) rather than trusted from the submit-time snapshot, in case they changed
+ * (e.g. a verify/reject action) while the request sat pending.
+ */
+export async function applyFundingRoundWrite({
+  request,
+  session,
+}: {
+  request: ChangeRequestDoc
+  session: unknown
+}): Promise<{ appliedFieldCount: number }> {
+  const fundingInvestmentM = require('../../../models/app/funding/fundingInvestmentM')
+  const payload = (request.payload ?? {}) as Record<string, any>
+  const investors = (payload.investors ?? []) as ValidatedInvestor[]
+  const funds_raised_company_row_id = request.root_document_id
+  const funds_raised_registered_type = 1
+  const sharedFields = {
+    category_row_id: payload.category_row_id,
+    announcement_date: payload.announcement_date,
+    amount: payload.amount || 0,
+  }
+
+  if (request.action === 'create') {
+    const roundId = Number(payload.reserved_round_id)
+    const present_date_n_time = getPresentDateTime()
+    const docs = investors.map((inv) => ({
+      ...sharedFields,
+      round_id: roundId,
+      investor_type: inv.investor_type,
+      investor_registered_type: inv.investor_registered_type,
+      investor_row_id: inv.investor_row_id,
+      investor_category_row_id: inv.investor_category_row_id,
+      funds_raised_registered_type,
+      funds_raised_company_row_id,
+      verified_status: 1,
+      verified_on: present_date_n_time,
+      date_n_time: present_date_n_time,
+    }))
+    await fundingInvestmentM.insertMany(docs, { session })
+    return { appliedFieldCount: docs.length }
+  }
+
+  const roundId = request.target_row_id as number
+  const existing = await fundingInvestmentM.findOne(
+    { round_id: roundId },
+    { verified_status: 1, verified_on: 1, reject_type: 1, reject_reason: 1, date_n_time: 1 },
+    { session },
+  )
+  const carriedFields = {
+    verified_status: existing ? existing.verified_status : 0,
+    verified_on: existing ? existing.verified_on : undefined,
+    reject_type: existing ? existing.reject_type : undefined,
+    reject_reason: existing ? existing.reject_reason : undefined,
+    date_n_time: existing?.date_n_time ? existing.date_n_time : getPresentDateTime(),
+  }
+
+  await fundingInvestmentM.deleteMany({ round_id: roundId }, { session })
+
+  const docs = investors.map((inv) => ({
+    ...sharedFields,
+    ...carriedFields,
+    round_id: roundId,
+    investor_type: inv.investor_type,
+    investor_registered_type: inv.investor_registered_type,
+    investor_row_id: inv.investor_row_id,
+    investor_category_row_id: inv.investor_category_row_id,
+    funds_raised_registered_type,
+    funds_raised_company_row_id,
+  }))
+  await fundingInvestmentM.insertMany(docs, { session })
+  return { appliedFieldCount: docs.length }
 }
 
 const { checkUserSubadminAccess, checkCompanySubadminAccess } = require('../../../utils/helpers/helper')
@@ -349,6 +518,38 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
     if (!check_access.status) {
       return { status: false, message: { alert_message: check_access.message } }
     }
+  }
+
+  // Publish gate applies to admin-panel deletes on the Investments (investor) side — an
+  // investor-created row's round_id is always freshly minted just for that one row (see
+  // createInvestorUpdateAdmin above), never shared with another investor's row, so isSyndicate
+  // is already guaranteed false here (the check above already refuses a syndicate delete from
+  // this scope) and a single-row submitChildDeleteRequest is safe. The funds-raised side
+  // (scopeType !== 2, a syndicate-capable multi-row delete) is still NOT wired here — Funding
+  // (Raised)'s create/update now have their own customWriter (applyFundingRoundWrite, dispatched
+  // via change-request.apply.ts) since that scope was requested and built, but delete wasn't
+  // part of that ask; wiring it would reuse the same customWriter shape (an ACTION_DELETE branch
+  // deleting every row for round_id) but is tracked separately, and still deletes live below.
+  if (params.actor.user_type !== 1 && params.scopeType === 2) {
+    const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+    // first_row is a hydrated Mongoose document (fundingInvestmentM.find() above, no .lean()) —
+    // toObject() gives a plain snapshot object, same intent as every other section's row-
+    // snapshot fetch (e.g. company_revenue.queries.ts's findRevenueByIdLean).
+    const rowSnapshot = typeof first_row.toObject === 'function' ? first_row.toObject() : { ...first_row }
+    return submitChildDeleteRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_INVESTMENT,
+      rootDocumentId: first_row.investor_row_id,
+      targetRowId: first_row._id,
+      rowSnapshot,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
   }
 
   // CONFIRMED BUG FIX: this used to also call deleteUserFunding({funding_row_id: round_id,
@@ -875,6 +1076,28 @@ export async function createInvestorUpdateAdmin(params: {
     insertArray.date_n_time = date_n_time
     insertArray.round_id = await getCollectionID('funding_round_id')
 
+    // Publish gate applies to admin-panel edits when the investor is itself a company (design
+    // §2, same shape as every other section) — a person investing (investor_type 1) has no
+    // company to scope a change request to, so that path stays a direct write, unchanged below.
+    if (params.investor_type === 2) {
+      const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+      return submitChildChangeRequest({
+        module: AUDIT_MODULE_COMPANY,
+        section: SECTION_INVESTMENT,
+        rootDocumentId: params.investor_row_id,
+        targetRowId: null,
+        liveValues: {},
+        submitted: insertArray,
+        actor: toActorRefWithId(
+          {
+            updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+            updated_by_row_id: adminRowId,
+          },
+          adminRowId,
+        ),
+      })
+    }
+
     const save_query = await new fundingInvestmentM(insertArray).save()
     await invalidateFundingCaches()
 
@@ -895,6 +1118,26 @@ export async function createInvestorUpdateAdmin(params: {
     await calculateCompanyProfileScore(params.funds_raised_company_row_id, ['funding', 'investment'])
 
     return { status: true, message: { alert_message: 'Congratulations! Your investment details have been successfully added', save_query } }
+  }
+
+  if (params.investor_type === 2) {
+    const liveValues = (await fundingInvestmentM.findOne({ _id: params.funding_row_id }).lean()) ?? {}
+    const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_INVESTMENT,
+      rootDocumentId: params.investor_row_id,
+      targetRowId: params.funding_row_id,
+      liveValues,
+      submitted: insertArray,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
   }
 
   await fundingInvestmentM.updateOne({ _id: params.funding_row_id }, { $set: insertArray })

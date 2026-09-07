@@ -17,7 +17,7 @@ export function asyncRoute(label: string, handler: (req: Request, res: Response)
     try {
       await handler(req, res)
     } catch (err) {
-      logger.error(`${label} ${err instanceof Error ? err.message : String(err)}`)
+      logger.error({ err, path: req.path }, `${label} ${err instanceof Error ? err.message : String(err)}`)
       res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
     }
   }

@@ -221,6 +221,15 @@ export async function getCompanyProductsList(params: GetCompanyProductsListParam
 
   // Real source's extra fields (not present on the public variant below) — merged back in by
   // array position, since enrichProducts() preserves the input order 1:1.
+  //
+  // CONFIRMED BUG FIX: this used to `.filter((p) => p.product_data)`, silently dropping any row
+  // whose DB2 lookup came back empty (a stale/removed token/chain/exchange reference) - `count`
+  // above is the raw pre-filter document count from the aggregate facet, so a company whose
+  // product(s) all failed to resolve returned an empty `list` alongside a non-zero `count`
+  // (admin proxy showed "no details" while the same company's real product rows genuinely
+  // existed - confirmed report). Now matches getCompanyProductsListPublic below, which never
+  // filtered these out: every row is returned, `product_data` simply null when unresolved, so a
+  // broken reference is visible instead of invisible.
   const finalList = enriched
     .map((p: EnrichedProduct, i: number): CompanyProductsListItem => ({
       ...p,
@@ -229,9 +238,6 @@ export async function getCompanyProductsList(params: GetCompanyProductsListParam
       country_id: data[i].country_id,
       country_details: data[i].country_details
     }))
-    // Preserve the real source's behavior of dropping rows whose DB2 lookup came back empty
-    // (register_type/product_type combo pointing at a product that no longer resolves).
-    .filter((p: CompanyProductsListItem) => p.product_data)
 
   return { list: finalList, count }
 }
@@ -999,4 +1005,37 @@ export async function findProductById(edit_product_row_id: number): Promise<RawP
 export async function deleteProductById(edit_product_row_id: number): Promise<void> {
   const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
   await company_productsM.deleteOne({ _id: edit_product_row_id })
+}
+
+// Explicit projection — CLAUDE.md forbids `SELECT *`. Must mirror OWNED_PRODUCTS_EDITABLE_FIELDS
+// in change-request.registry.ts exactly: an editable field missing here reads as `null` on the
+// `before` side of computeDiff, so a value the admin didn't touch would always appear "changed"
+// (this is the bug the Holding Crypto plan's final review found and fixed after the fact — get it
+// right here from the start).
+const PRODUCT_EDITABLE_FIELDS_PROJECTION = {
+  _id: 0,
+  company_type: 1,
+  register_type: 1,
+  product_type: 1,
+  product_row_id: 1,
+} as const
+
+/** Lean read for diffing an UPDATE against an existing row. */
+export async function findProductByIdAndCompanyLean(
+  editProductRowId: number,
+  companyRowId: number,
+): Promise<Record<string, unknown> | null> {
+  const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
+  return company_productsM
+    .findOne({ _id: editProductRowId, company_row_id: companyRowId }, PRODUCT_EDITABLE_FIELDS_PROJECTION)
+    .lean()
+}
+
+/**
+ * Lean read for a pending DELETE's row_snapshot. No projection beyond the model's own fields —
+ * the snapshot should capture the whole row, unlike the diff read above.
+ */
+export async function findProductByIdLean(editProductRowId: number): Promise<Record<string, unknown> | null> {
+  const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
+  return company_productsM.findOne({ _id: editProductRowId }).lean()
 }

@@ -38,6 +38,7 @@ const { companyHoldingsRouter } = require('../src/modules/company_holdings/compa
 //company - Ends here
 
 const jobs = require('../controllers/app/jobs/job')
+const { jobsRouter } = require('../src/modules/jobs/jobs.controller')
 const job_applicant = require('../controllers/app/jobs/job_applicants')
 //jobs Ends Here
 
@@ -122,6 +123,10 @@ router.use('/company/products_n_holding', companyProductsRouter)
 router.use('/company/products_n_holding', companyHoldingsRouter)
 
 //jobs
+// Write routes (add_n_update_details/delete/job_status) now live in jobsRouter (modules/jobs) -
+// mounted first so its 3 routes take precedence; `jobs` still serves this file's own remaining
+// read-only routes (list/education_type_list/skill_list), left unmigrated (see jobs.controller.ts).
+router.use('/job', jobsRouter)
 router.use('/job', jobs)
 router.use('/job_applicant', job_applicant)
 

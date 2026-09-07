@@ -3,6 +3,7 @@ import { checkCompanyOwnership } from '../common/common.ownership'
 import { invalidateCompanyRevenueCaches } from './company_revenue.cache'
 import {
   findRevenueById,
+  findRevenueByIdAndCompany,
   findRevenueForDeletion,
   findExistingRevenueRecord,
   findExistingYearlyRevenueRecord,
@@ -12,11 +13,26 @@ import {
   insertBulkRevenueRow,
   fetchCompanyRevenueSummaryRows,
   insertRevenueRecord,
-  updateRevenueRecord
+  updateRevenueRecord,
+  findRevenueByIdAndCompanyLean,
+  findRevenueByIdLean
 } from './company_revenue.queries'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
+import { computeDiff } from '../../common/change-request/change-request.diff'
+import { COMPANY_SECTION_REGISTRY, SECTION_REVENUE } from '../../common/change-request/change-request.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
+import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
+import logger from '../../../config/logger'
 
 const { deleteCompanyRevenue, calculateCompanyProfileScore } = require('../../../utils/helpers/app_helper')
 const { getPresentDateTime } = require('../../../utils/helpers/helper')
+
+const USER_TYPE_COMPANY_OWNER = 1
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
+const LOG_ACTION_CREATE = 'create'
+const LOG_ACTION_UPDATE = 'update'
+const LOG_ACTION_DELETE = 'delete'
 
 export interface RevenueStreamInput {
   category_row_id?: string | number
@@ -134,7 +150,7 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
         if (body.revenue_row_id) {
           if (!Number.isNaN(Number.parseInt(body.revenue_row_id as string))) {
             revenue_row_id = Number.parseInt(body.revenue_row_id as string)
-            const check_revenue_query = await findRevenueById(revenue_row_id)
+            const check_revenue_query = await findRevenueByIdAndCompany(revenue_row_id, company_row_id)
             if (!check_revenue_query) {
               errObj['revenue_row_id'] = 'Sorry, Invalid Revenue Row ID.'
             }
@@ -180,6 +196,36 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
     return { status: false, message: errObj }
   }
 
+  const revenueFields = { year, quarter, revenue: Number.parseFloat(body.revenue as string), revenue_streams }
+
+  // Publish gate applies to admin-panel edits only (design §2), same branch shape as every prior
+  // tab. admin_actor is guaranteed defined here — the errObj check above already returns early
+  // when user_type === 2 and admin_actor is missing, so this branch only runs for a genuine
+  // admin_actor when the caller isn't the company owner.
+  const isRevenueCompanyOwner = user_type === USER_TYPE_COMPANY_OWNER
+  if (!isRevenueCompanyOwner) {
+    const resolvedAdminActor = admin_actor as AdminActor
+    const adminRowId = Number(resolvedAdminActor.admin_row_id)
+    const liveValues = revenue_row_id
+      ? ((await findRevenueByIdAndCompanyLean(revenue_row_id, company_row_id)) ?? {})
+      : {}
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_REVENUE,
+      rootDocumentId: company_row_id,
+      targetRowId: revenue_row_id || null,
+      liveValues,
+      submitted: revenueFields,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId
+        },
+        adminRowId
+      )
+    })
+  }
+
   const insert_object: { year: number; quarter: number; revenue: number; revenue_streams: { category_row_id: number; stream_amount: number }[]; updated_date_n_time: string; company_row_id?: number } = {
     year,
     quarter,
@@ -188,11 +234,37 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
     updated_date_n_time: getPresentDateTime()
   }
 
+  const ownerActor = toActorRefWithId({ updated_by: 'user', updated_by_row_id: user_row_id }, user_row_id)
+
   if (!revenue_row_id) {
     insert_object.company_row_id = company_row_id
     await insertRevenueRecord({ ...insert_object, company_row_id })
     await invalidateCompanyRevenueCaches()
     await calculateCompanyProfileScore(company_row_id, ['revenue'])
+
+    const ownerRevenueCreateChanges = await computeDiff({
+      before: {},
+      submitted: revenueFields,
+      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
+      editableFields: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].editableFields
+    })
+    try {
+      await insertChangeLog({
+        module: AUDIT_MODULE_COMPANY,
+        target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+        target_row_id: company_row_id,
+        root_document_id: company_row_id,
+        section: SECTION_REVENUE,
+        action: LOG_ACTION_CREATE,
+        actor: ownerActor,
+        changes: ownerRevenueCreateChanges,
+        reason: null,
+        snapshot: null
+      })
+    } catch (err) {
+      logger.error({ err, company_row_id }, 'company_revenue: owner create change log write failed')
+    }
+
     return {
       status: true,
       message: { alert_message: "Your company's revenue details have been saved successfully. Thank you for keeping your financial information current!" },
@@ -200,8 +272,36 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
     }
   }
 
+  const preWriteRevenueValues = (await findRevenueByIdAndCompanyLean(revenue_row_id, company_row_id)) ?? {}
+
   await updateRevenueRecord({ _id: revenue_row_id, company_row_id }, insert_object)
   await invalidateCompanyRevenueCaches()
+
+  const ownerRevenueChanges = await computeDiff({
+    before: preWriteRevenueValues,
+    submitted: revenueFields,
+    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
+    editableFields: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].editableFields
+  })
+  if (ownerRevenueChanges.length > 0) {
+    try {
+      await insertChangeLog({
+        module: AUDIT_MODULE_COMPANY,
+        target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+        target_row_id: revenue_row_id,
+        root_document_id: company_row_id,
+        section: SECTION_REVENUE,
+        action: LOG_ACTION_UPDATE,
+        actor: ownerActor,
+        changes: ownerRevenueChanges,
+        reason: null,
+        snapshot: null
+      })
+    } catch (err) {
+      logger.error({ err, company_row_id, revenue_row_id }, 'company_revenue: owner update change log write failed')
+    }
+  }
+
   return {
     status: true,
     message: { alert_message: "Your company's revenue details have been updated successfully. Thank you for keeping your financial information current!" },
@@ -256,10 +356,10 @@ export async function deleteRevenueDetails({ user_row_id, user_type, revenue_row
     return { status: false, message: { alert_message: 'Sorry, Invalid Revenue Row ID' } }
   }
 
-  // ADMIN AUTHZ FIX: same reasoning as saveOrUpdateRevenue above — this route's admin fallback
-  // only confirms generic "revenue" permission, not per-company assignment. Validate against the
-  // record's OWN company (now known from the lookup above) before allowing the delete, matching
-  // deleteRevenueDetailsAdmin's scoping.
+  // ADMIN AUTHZ FIX (unchanged from the original source): same reasoning as saveOrUpdateRevenue —
+  // this route's admin fallback only confirms generic "revenue" permission, not per-company
+  // assignment. Validate against the record's OWN company (now known from the lookup above)
+  // before allowing the delete, matching deleteRevenueDetailsAdmin's scoping.
   if (user_type === 2) {
     if (!admin_actor) {
       return { status: false, message: { alert_message: 'Sorry, You are not authorized to perform this action.' } }
@@ -270,9 +370,49 @@ export async function deleteRevenueDetails({ user_row_id, user_type, revenue_row
     }
   }
 
+  const rowSnapshot = (await findRevenueByIdLean(revenue_row_id)) ?? {}
+
+  // Publish gate applies to admin-panel edits only (design §2).
+  const isDeleteRevenueOwner = user_type === USER_TYPE_COMPANY_OWNER
+  if (!isDeleteRevenueOwner) {
+    const resolvedAdminActor = admin_actor as AdminActor
+    const adminRowId = Number(resolvedAdminActor.admin_row_id)
+    return submitChildDeleteRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_REVENUE,
+      rootDocumentId: checkCompanyData.company_row_id,
+      targetRowId: revenue_row_id,
+      rowSnapshot,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
+  }
+
   await deleteCompanyRevenue({ type: 1, revenue_row_id })
   await invalidateCompanyRevenueCaches()
   await calculateCompanyProfileScore(checkCompanyData?.company_row_id, ['revenue'])
+
+  try {
+    await insertChangeLog({
+      module: AUDIT_MODULE_COMPANY,
+      target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+      target_row_id: revenue_row_id,
+      root_document_id: checkCompanyData.company_row_id,
+      section: SECTION_REVENUE,
+      action: LOG_ACTION_DELETE,
+      actor: toActorRefWithId({ updated_by: 'user', updated_by_row_id: user_row_id }, user_row_id),
+      changes: [],
+      reason: null,
+      snapshot: rowSnapshot,
+    })
+  } catch (err) {
+    logger.error({ err, revenue_row_id }, 'company_revenue: owner delete change log write failed')
+  }
 
   return { status: true, message: { alert_message: 'The revenue details have been successfully deleted. Thank you for your action!' } }
 }
@@ -375,9 +515,27 @@ export async function saveRevenueDetailsAdmin({ actor, company_row_id_raw, body,
     return { status: false, message: errObj }
   }
 
-  await insertRevenueRecord({ year, quarter, revenue: Number.parseInt(body.revenue as string), company_row_id, revenue_streams })
-  await invalidateCompanyRevenueCaches()
-  return { status: true, message: { alert_message: 'Your company revenue details saved successfully.' } }
+  const revenueFields = { year, quarter, revenue: Number.parseInt(body.revenue as string), revenue_streams }
+  const adminRowId = Number(actor.admin_row_id)
+
+  // Admin-only route — no owner path exists here. Every call submits a change request, same as
+  // updateRevenueDetailsAdmin below (design §2): a brand-new revenue row still goes through
+  // publish, not just an edit to an existing one.
+  return submitChildChangeRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_REVENUE,
+    rootDocumentId: company_row_id,
+    targetRowId: null,
+    liveValues: {},
+    submitted: revenueFields,
+    actor: toActorRefWithId(
+      {
+        updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+        updated_by_row_id: adminRowId,
+      },
+      adminRowId,
+    ),
+  })
 }
 
 export interface UpdateRevenueDetailsAdminParams {
@@ -399,20 +557,23 @@ export async function updateRevenueDetailsAdmin({ actor, request_row_id_raw, bod
     errObj['alert_message'] = check_access.message
   }
 
+  // Resolved before the revenue-row check below so that check can be scoped to this company —
+  // findRevenueById alone has no company scoping, which would otherwise let a caller reference a
+  // revenue row belonging to a DIFFERENT company than the one they were just authorized against.
+  let company_row_id = 0
+  if (!Number.isNaN(Number.parseInt(body.company_row_id as string))) {
+    company_row_id = Number.parseInt(body.company_row_id as string)
+  }
+
   let revenue_row_id = 0
   if (!Number.isNaN(Number.parseInt(request_row_id_raw))) {
     revenue_row_id = Number.parseInt(request_row_id_raw)
-    const checkCompanyData = await findRevenueById(revenue_row_id)
+    const checkCompanyData = await findRevenueByIdAndCompany(revenue_row_id, company_row_id)
     if (!checkCompanyData) {
       errObj['revenue_row_id'] = 'Invalid revenue Row Id'
     }
   } else {
     errObj['revenue_row_id'] = 'Invalid revenue Row Id'
-  }
-
-  let company_row_id = 0
-  if (!Number.isNaN(Number.parseInt(body.company_row_id as string))) {
-    company_row_id = Number.parseInt(body.company_row_id as string)
   }
 
   let year = 0
@@ -453,9 +614,36 @@ export async function updateRevenueDetailsAdmin({ actor, request_row_id_raw, bod
     return { status: false, message: errObj }
   }
 
-  await updateRevenueRecord({ _id: revenue_row_id }, { year, quarter, revenue: Number.parseInt(body.revenue as string), revenue_streams })
-  await invalidateCompanyRevenueCaches()
-  return { status: true, message: { alert_message: 'Your company revenue details updated successfully.' } }
+  const revenueFields = { year, quarter, revenue: Number.parseFloat(body.revenue as string), revenue_streams }
+  const liveValues = (await findRevenueByIdAndCompanyLean(revenue_row_id, company_row_id)) ?? {}
+  // Live revenue_streams entries carry a Mongo-injected subdocument _id that the resubmitted
+  // payload (rebuilt via buildRevenueStreamsFromBody) never has - strip it before diffing so the
+  // reviewer sees a clean old/new comparison instead of an extra _id-only difference on the old side.
+  if ('revenue_streams' in liveValues && Array.isArray((liveValues as { revenue_streams?: unknown[] }).revenue_streams)) {
+    ;(liveValues as { revenue_streams: { category_row_id: number; stream_amount: number }[] }).revenue_streams = (
+      liveValues as { revenue_streams: { category_row_id: number; stream_amount: number; _id?: unknown }[] }
+    ).revenue_streams.map(({ category_row_id, stream_amount }) => ({ category_row_id, stream_amount }))
+  }
+  const adminRowId = Number(actor.admin_row_id)
+
+  // Admin-only function — no owner path exists for this route. Every call submits a change
+  // request; a main admin's own edit still goes through the same publish step as a sub-admin's,
+  // consistent with every other tab's design (§2): editing and publishing are separate actions.
+  return submitChildChangeRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_REVENUE,
+    rootDocumentId: company_row_id,
+    targetRowId: revenue_row_id,
+    liveValues,
+    submitted: revenueFields,
+    actor: toActorRefWithId(
+      {
+        updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+        updated_by_row_id: adminRowId,
+      },
+      adminRowId,
+    ),
+  })
 }
 
 /**
@@ -478,9 +666,26 @@ export async function deleteRevenueDetailsAdmin({ actor, revenue_row_id_raw }: {
     return { status: false, message: { alert_message: check_access.message } }
   }
 
-  await deleteCompanyRevenue({ type: 1, revenue_row_id })
-  await invalidateCompanyRevenueCaches()
-  return { status: true, message: { alert_message: 'This revenue details has been deleted successfully.' } }
+  const rowSnapshot = (await findRevenueByIdLean(revenue_row_id)) ?? {}
+  const adminRowId = Number(actor.admin_row_id)
+
+  // Admin-only route — no owner path exists here. Same publish gate as create/update above:
+  // a delete is staged for review, not applied immediately (design §13.1 item 13's "cancel
+  // leaves no trace, reject is recorded in full" distinction only kicks in once this is reviewed).
+  return submitChildDeleteRequest({
+    module: AUDIT_MODULE_COMPANY,
+    section: SECTION_REVENUE,
+    rootDocumentId: checkCompanyData.company_row_id,
+    targetRowId: revenue_row_id,
+    rowSnapshot,
+    actor: toActorRefWithId(
+      {
+        updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+        updated_by_row_id: adminRowId,
+      },
+      adminRowId,
+    ),
+  })
 }
 
 /**

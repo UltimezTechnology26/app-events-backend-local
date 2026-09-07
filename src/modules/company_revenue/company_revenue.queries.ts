@@ -698,6 +698,18 @@ export async function findRevenueById(revenueRowId: number): Promise<CompanyReve
 }
 
 /**
+ * Company-scoped existence check for a `revenue_row_id` supplied alongside a `company_row_id` —
+ * used by saveOrUpdateRevenue's and updateRevenueDetailsAdmin's UPDATE validation so a caller
+ * can't reference a revenue row belonging to a DIFFERENT company than the one they're authorized
+ * against (the bare `findRevenueById` above has no such scoping, which the publish-gate's
+ * `applyChildWrite` UPDATE branch — also unscoped by company — would otherwise let through).
+ */
+export async function findRevenueByIdAndCompany(revenueRowId: number, companyRowId: number): Promise<CompanyRevenueGrowthRecord | null> {
+  const company_revenue_growthM = require('../../../models/app/company/company_revenue_growthM')
+  return company_revenue_growthM.findOne({ _id: revenueRowId, company_row_id: companyRowId })
+}
+
+/**
  * Ports deleteRevenueDetails's `company_revenue_growthM.findOne(check_query)` (revenue.js's
  * GET /delete_revenue/:revenue_row_id) — check_query is either `{ _id }` (admin caller) or
  * `{ _id, company_row_id }` (app user caller, scoped to their own company), extracted
@@ -1231,4 +1243,35 @@ export function buildCompanyLastYearRevenuePipeline(companyRowId: number) {
     { $limit: 1 },
     { $project: { _id: 0, total: 1 } },
   ]
+}
+
+// Explicit projection — CLAUDE.md forbids `SELECT *`. Must mirror REVENUE_EDITABLE_FIELDS in
+// change-request.registry.ts exactly: an editable field missing here reads as `null` on the
+// `before` side of computeDiff, so a value the admin didn't touch would always appear "changed".
+const REVENUE_EDITABLE_FIELDS_PROJECTION = {
+  _id: 0,
+  year: 1,
+  quarter: 1,
+  revenue: 1,
+  revenue_streams: 1,
+} as const
+
+/** Lean read for diffing an UPDATE against an existing row. */
+export async function findRevenueByIdAndCompanyLean(
+  revenueRowId: number,
+  companyRowId: number,
+): Promise<Record<string, unknown> | null> {
+  const company_revenue_growthM = require('../../../models/app/company/company_revenue_growthM')
+  return company_revenue_growthM
+    .findOne({ _id: revenueRowId, company_row_id: companyRowId }, REVENUE_EDITABLE_FIELDS_PROJECTION)
+    .lean()
+}
+
+/**
+ * Lean read for a pending DELETE's row_snapshot. No projection beyond the model's own fields —
+ * the snapshot should capture the whole row, unlike the diff read above.
+ */
+export async function findRevenueByIdLean(revenueRowId: number): Promise<Record<string, unknown> | null> {
+  const company_revenue_growthM = require('../../../models/app/company/company_revenue_growthM')
+  return company_revenue_growthM.findOne({ _id: revenueRowId }).lean()
 }

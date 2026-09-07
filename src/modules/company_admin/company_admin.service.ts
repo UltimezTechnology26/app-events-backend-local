@@ -7,6 +7,7 @@ const { calculateCompanyProfileScore } = require('../../../utils/helpers/app_hel
 import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-library/auth'
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-library/cache'
+import { recordCompanyStatusChange } from './company_admin.audit'
 const eventM = require('../../../models/app/events/eventM')
 import {
   buildCompanyEventsCreatedPipeline,
@@ -210,6 +211,12 @@ export async function enableCompany({ admin, companyRowIdRaw }: EnableCompanyPar
 
   const updateFields = getUpdateTrackerFields(admin)
   await updateCompanyFields(company_row_id, { active_status: 1, ...updateFields })
+  await recordCompanyStatusChange({
+    documentId: company_row_id,
+    action: 'enable',
+    tracker: updateFields,
+    adminRowId: admin.message.admin_row_id,
+  })
 
   if (queryRunCheck.user_row_id) {
     await updateNotification({ user_row_id: queryRunCheck.user_row_id, notify_type: 2, notify_type_row_id: company_row_id, message_row_id: 15, action_row_id: company_row_id })
@@ -271,6 +278,13 @@ export async function disableCompany({ admin, companyRowIdRaw, disableReason }: 
     disabled_date_n_time: getPresentDateTime(),
     active_status: 0,
     ...updateFields,
+  })
+  await recordCompanyStatusChange({
+    documentId: company_row_id,
+    action: 'disable',
+    tracker: updateFields,
+    adminRowId: admin.message.admin_row_id,
+    reason: disableReason,
   })
 
   const checkEvents = await findEventByCompanyRowId(company_row_id)

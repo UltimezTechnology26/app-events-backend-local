@@ -31,7 +31,9 @@ function unauthorizedApprover() {
   return { status: false, message: { alert_message: 'Sorry, only an admin or the other company involved in this acquisition can approve or reject it.' } }
 }
 
-// --- Admin-only: create or update a record (auto-approved) ---
+// --- Admin-only: create or update a record. Publish-gated (design §2) - submits a change
+// request instead of auto-approving/writing live; see company_acquisitions.service.ts's
+// createOrUpdateAcquisition doc comment. ---
 companyAcquisitionsRouter.post('/update_details', writeEndpointRateLimiter, asyncRoute('Company acquisitions update.', async (req, res) => {
   const guard = await requireAllLogin17(req)
   if (guard) return res.json(guard)
@@ -39,10 +41,20 @@ companyAcquisitionsRouter.post('/update_details', writeEndpointRateLimiter, asyn
   if (!auth.status) return res.json(auth)
   if (auth.message.user_type !== 2) return res.json(unauthorizedAdminOnly())
 
+  // Whichever company's admin screen this edit was made from - scopes the resulting pending
+  // change request (see the service function's doc comment). Not a real cln_company_acquisitions
+  // field, purely a routing hint for the change-request layer.
+  const editingCompanyRowId = Number.parseInt(req.body.editing_company_row_id)
+  if (!editingCompanyRowId || Number.isNaN(editingCompanyRowId)) {
+    return res.json({ status: false, message: { alert_message: 'Sorry, editing_company_row_id is required.' } })
+  }
+
   const result = await service.createOrUpdateAcquisition({
     acquisition_row_id: req.body.acquisition_row_id,
     input: req.body,
-    submittedByType: 1
+    submittedByType: 1,
+    actor: auth,
+    editingCompanyRowId
   })
   return res.json(result)
 }))
@@ -192,7 +204,8 @@ companyAcquisitionsRouter.post('/reject', writeEndpointRateLimiter, asyncRoute('
   return res.json(result)
 }))
 
-// --- Admin-only: delete ---
+// --- Admin-only: delete. Publish-gated the same way as /update_details - submits a pending
+// delete instead of removing the row immediately. ---
 companyAcquisitionsRouter.get('/delete/:acquisition_row_id', writeEndpointRateLimiter, asyncRoute('Company acquisitions delete.', async (req, res) => {
   const guard = await requireAllLogin17(req)
   if (guard) return res.json(guard)
@@ -200,6 +213,15 @@ companyAcquisitionsRouter.get('/delete/:acquisition_row_id', writeEndpointRateLi
   if (!auth.status) return res.json(auth)
   if (auth.message.user_type !== 2) return res.json(unauthorizedAdminOnly())
 
-  const result = await service.deleteAcquisition(Number.parseInt(req.params.acquisition_row_id as string))
+  const editingCompanyRowId = Number.parseInt(req.query.company_row_id as string)
+  if (!editingCompanyRowId || Number.isNaN(editingCompanyRowId)) {
+    return res.json({ status: false, message: { alert_message: 'Sorry, company_row_id is required.' } })
+  }
+
+  const result = await service.adminDeleteAcquisition({
+    actor: auth,
+    acquisitionRowId: Number.parseInt(req.params.acquisition_row_id as string),
+    editingCompanyRowId
+  })
   return res.json(result)
 }))
