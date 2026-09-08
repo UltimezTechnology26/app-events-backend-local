@@ -439,39 +439,14 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
     }
     insertArray['created_date_n_time'] = date_n_time
 
-    // Publish gate applies to admin-panel edits only (design §2, same shape as every other
-    // section) — a company owner creating their OWN profile keeps writing live immediately.
-    // Unlike every other section, an admin-created company has no existing root_document_id to
-    // scope the request to (the company doesn't exist yet) — a company_row_id is reserved here,
-    // upfront, from the SAME counter companyM's own pre-save hook uses, so the pending request
-    // (and its eventual publish) can be scoped to it. If the request is later rejected, that id
-    // is simply skipped in the sequence — a harmless, purely cosmetic gap, same tradeoff already
-    // accepted for Investment's round_id and Funding's round_id reservations.
-    if (actor.status && actor.message.user_type !== USER_TYPE_COMPANY_OWNER) {
-      const reservedCompanyRowId: number = await getCollectionID('cln_company_lists')
-      const adminRowId = Number(actor.message.user_row_id)
-      const submittedPayload: Record<string, unknown> = { ...insertArray }
-      if (body.manual_company_row_id) {
-        submittedPayload.manual_company_row_id = body.manual_company_row_id
-      }
-      return submitChangeRequest({
-        module: AUDIT_MODULE_COMPANY,
-        section: SECTION_BASIC_DETAILS,
-        rootDocumentId: reservedCompanyRowId,
-        targetRowId: null,
-        liveValues: {},
-        submitted: submittedPayload,
-        actor: toActorRefWithId(
-          {
-            updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
-            updated_by_row_id: adminRowId,
-          },
-          adminRowId,
-        ),
-        action: CHANGE_REQUEST_ACTION.CREATE,
-      })
-    }
-
+    // REVERTED: admin-panel company creation used to route through submitChangeRequest here
+    // (a reserved company_row_id, staged as a pending 'create' request), extending the same
+    // publish gate every EDIT to an existing company already goes through. Explicitly reverted —
+    // unlike an edit, a brand-new company has no existing view page for an admin to open and
+    // review/publish a pending creation against, so the request would sit in the global Pending
+    // Changes queue with nowhere else to action it from. Company creation (admin or self-service
+    // owner alike) now always saves directly, live immediately; only EDITS to an already-existing
+    // company go through the change-request/approval flow.
     const saveCompanyDetails = await companyM(insertArray).save()
 
     seoArray['company_row_id'] = saveCompanyDetails._id
@@ -519,6 +494,30 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
       user_type: seoLogTrackerFields.updated_by ?? 'admin',
       updated_by: seoLogTrackerFields.updated_by_row_id ?? 0,
     })
+
+    // Company creation itself was never logged — the History tab only ever showed later
+    // events (an edit's own submit/approve/publish entries), never who actually created the
+    // company or when, even though that's already known here (seoLogTrackerFields, right
+    // above). `section: 'creation'` matches the same literal section markets' own
+    // approveExchangeCreation/approveDexCreation already use for a whole-entity creation
+    // entry (see HistoryFeed.tsx's own getBadge/getContext special-casing for it) — renders
+    // as a plain "Created" card instead of an awkwardly-worded "Basic_details Created" one.
+    try {
+      await insertChangeLog({
+        module: AUDIT_MODULE_COMPANY,
+        target_collection: 'cln_company_lists',
+        target_row_id: saveCompanyDetails._id,
+        root_document_id: saveCompanyDetails._id,
+        section: 'creation',
+        action: 'create',
+        actor: toActorRefWithId(seoLogTrackerFields, seoLogTrackerFields.updated_by_row_id),
+        changes: [{ field: 'name', field_label: 'Name', old_value: null, old_label: null, new_value: saveCompanyDetails.company_name, new_label: null }],
+        reason: null,
+        snapshot: null,
+      })
+    } catch (err) {
+      logger.error({ err, company_row_id: saveCompanyDetails._id }, 'company.settings: creation change log write failed')
+    }
 
     await company_social_linksM(socialArray).save()
     await company_seo_detailsM(seoArray).save()
