@@ -421,6 +421,18 @@ export async function applyFundingRoundWrite({
     return { appliedFieldCount: docs.length }
   }
 
+  // CONFIRMED BUG FIX: a delete request for this section used to fall through to the update
+  // branch below — it happened to still delete every row correctly (payload.investors is always
+  // [] for a delete, per submitChildDeleteRequest, so the re-insert below was a harmless no-op),
+  // but relying on an empty payload to accidentally produce the right no-op is fragile and not
+  // what a reviewer's action='delete' should silently depend on. Explicit branch: delete every
+  // row for this round_id, insert nothing back.
+  if (request.action === 'delete') {
+    const roundId = request.target_row_id as number
+    const result = await fundingInvestmentM.deleteMany({ round_id: roundId }, { session })
+    return { appliedFieldCount: result.deletedCount ?? 0 }
+  }
+
   const roundId = request.target_row_id as number
   const existing = await fundingInvestmentM.findOne(
     { round_id: roundId },
@@ -524,12 +536,7 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
   // investor-created row's round_id is always freshly minted just for that one row (see
   // createInvestorUpdateAdmin above), never shared with another investor's row, so isSyndicate
   // is already guaranteed false here (the check above already refuses a syndicate delete from
-  // this scope) and a single-row submitChildDeleteRequest is safe. The funds-raised side
-  // (scopeType !== 2, a syndicate-capable multi-row delete) is still NOT wired here — Funding
-  // (Raised)'s create/update now have their own customWriter (applyFundingRoundWrite, dispatched
-  // via change-request.apply.ts) since that scope was requested and built, but delete wasn't
-  // part of that ask; wiring it would reuse the same customWriter shape (an ACTION_DELETE branch
-  // deleting every row for round_id) but is tracked separately, and still deletes live below.
+  // this scope) and a single-row submitChildDeleteRequest is safe.
   if (params.actor.user_type !== 1 && params.scopeType === 2) {
     const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
     // first_row is a hydrated Mongoose document (fundingInvestmentM.find() above, no .lean()) —
@@ -541,6 +548,44 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
       section: SECTION_INVESTMENT,
       rootDocumentId: first_row.investor_row_id,
       targetRowId: first_row._id,
+      rowSnapshot,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
+  }
+
+  // CONFIRMED BUG FIX: the funds-raised side (scopeType !== 2 — an admin deleting on behalf of
+  // the company that raised the round, a syndicate-capable multi-row delete) used to fall
+  // straight through to the direct deleteMany below, unlike this same section's create/update
+  // (createOrUpdateRound above), which already go through submitChildChangeRequest for an admin
+  // actor. Same publish gate now applies here — matches applyFundingRoundWrite's new explicit
+  // 'delete' branch (added alongside this fix), which deletes every row for round_id on publish.
+  // rowSnapshot is shaped like create/update's own submitted payload (not a single raw DB row —
+  // a round is N rows) so the reviewer's diff shows the same category/date/amount/investors a
+  // create shows, not one arbitrary sibling row.
+  if (params.actor.user_type !== 1 && params.scopeType !== 2) {
+    const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+    const rowSnapshot = {
+      category_row_id: first_row.category_row_id,
+      announcement_date: first_row.announcement_date,
+      amount: first_row.amount,
+      investors: round_rows.map((row: any) => ({
+        investor_type: row.investor_type,
+        investor_registered_type: row.investor_registered_type,
+        investor_row_id: row.investor_row_id,
+        investor_category_row_id: row.investor_category_row_id,
+      })),
+    }
+    return submitChildDeleteRequest({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_FUNDING_ROUND,
+      rootDocumentId: first_row.funds_raised_company_row_id,
+      targetRowId: params.round_id,
       rowSnapshot,
       actor: toActorRefWithId(
         {
@@ -577,12 +622,33 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
   return { status: true, message: { alert_message: 'Your investment funding details have been successfully deleted from your profile.' } }
 }
 
-async function resolveNotifyUserRowId(row: any): Promise<number> {
-  if (row.investor_registered_type !== 1) return 0
-  if (row.investor_type === 1) return row.investor_row_id
+// PERF FIX: previously called companyM.findOne() once per row inside verifyRound/rejectRound's
+// loop — a syndicate round with N company investors meant N sequential DB round-trips. Batches
+// every row's company lookup into one companyM.find({_id:{$in:...}}) up front, then resolves
+// each row's notify target from an in-memory map — zero DB calls left inside the loop.
+async function resolveNotifyUserRowIds(rows: any[]): Promise<Map<any, number>> {
   const companyM = require('../../../models/app/company/companyM')
-  const company = await companyM.findOne({ _id: row.investor_row_id }, { _id: 1, user_row_id: 1 })
-  return company?.user_row_id ?? 0
+  const companyLookupIds = [...new Set(
+    rows
+      .filter((row) => row.investor_registered_type === 1 && row.investor_type !== 1)
+      .map((row) => row.investor_row_id)
+  )]
+  const companies = companyLookupIds.length
+    ? await companyM.find({ _id: { $in: companyLookupIds } }, { _id: 1, user_row_id: 1 })
+    : []
+  const companyUserRowIdById = new Map<number, number>(companies.map((company: any) => [company._id, company.user_row_id]))
+
+  const notifyUserRowIdByRow = new Map<any, number>()
+  for (const row of rows) {
+    if (row.investor_registered_type !== 1) {
+      notifyUserRowIdByRow.set(row, 0)
+    } else if (row.investor_type === 1) {
+      notifyUserRowIdByRow.set(row, row.investor_row_id)
+    } else {
+      notifyUserRowIdByRow.set(row, companyUserRowIdById.get(row.investor_row_id) ?? 0)
+    }
+  }
+  return notifyUserRowIdByRow
 }
 
 /** Merged verify_funds_raised_details (app + admin). companyScopeId, when provided, restricts to rounds raised by that company (app's ownership scope); admin omits it. */
@@ -602,8 +668,9 @@ export async function verifyRound(params: { actor: FundingActor; round_id: numbe
   await fundingInvestmentM.updateMany({ round_id: params.round_id, verified_status: 0 }, { $set: { verified_status: 1, verified_on: verified_on_date } })
   await invalidateFundingCaches()
 
+  const notifyUserRowIdByRow = await resolveNotifyUserRowIds(round_rows)
   for (const row of round_rows) {
-    const investor_user_row_id = await resolveNotifyUserRowId(row)
+    const investor_user_row_id = notifyUserRowIdByRow.get(row) ?? 0
     if (investor_user_row_id) {
       await updateNotification({ user_row_id: investor_user_row_id, notify_type: 2, notify_type_row_id: row.funds_raised_company_row_id, message_row_id: 22, action_row_id: row._id })
     }
@@ -626,8 +693,9 @@ export async function rejectRound(params: { actor: FundingActor; round_id: numbe
   }
 
   const verified_on_date = getPresentDateTime()
+  const notifyUserRowIdByRow = await resolveNotifyUserRowIds(round_rows)
   for (const row of round_rows) {
-    const investor_user_row_id = await resolveNotifyUserRowId(row)
+    const investor_user_row_id = notifyUserRowIdByRow.get(row) ?? 0
     if (investor_user_row_id) {
       await updateNotification({ user_row_id: investor_user_row_id, notify_type: 2, notify_type_row_id: row.funds_raised_company_row_id, message_row_id: 27, action_row_id: row._id })
     }
