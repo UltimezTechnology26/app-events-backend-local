@@ -392,16 +392,19 @@ export async function applyFundingRoundWrite({
 }): Promise<{ appliedFieldCount: number }> {
   const fundingInvestmentM = require('../../../models/app/funding/fundingInvestmentM')
   const payload = (request.payload ?? {}) as Record<string, any>
-  const investors = (payload.investors ?? []) as ValidatedInvestor[]
   const funds_raised_company_row_id = request.root_document_id
   const funds_raised_registered_type = 1
-  const sharedFields = {
-    category_row_id: payload.category_row_id,
-    announcement_date: payload.announcement_date,
-    amount: payload.amount || 0,
-  }
 
   if (request.action === 'create') {
+    // CREATE's payload always holds every field (submitChildChangeRequest diffs against an empty
+    // `liveValues: {}`, so anything present in the submission counts as "changed" and survives the
+    // diff) - no fallback needed here, only on the UPDATE branch below.
+    const investors = (payload.investors ?? []) as ValidatedInvestor[]
+    const sharedFields = {
+      category_row_id: payload.category_row_id,
+      announcement_date: payload.announcement_date,
+      amount: payload.amount || 0,
+    }
     const roundId = Number(payload.reserved_round_id)
     const present_date_n_time = getPresentDateTime()
     const docs = investors.map((inv) => ({
@@ -434,11 +437,18 @@ export async function applyFundingRoundWrite({
   }
 
   const roundId = request.target_row_id as number
-  const existing = await fundingInvestmentM.findOne(
-    { round_id: roundId },
-    { verified_status: 1, verified_on: 1, reject_type: 1, reject_reason: 1, date_n_time: 1 },
-    { session },
-  )
+  const existingRows = await fundingInvestmentM
+    .find(
+      { round_id: roundId },
+      {
+        verified_status: 1, verified_on: 1, reject_type: 1, reject_reason: 1, date_n_time: 1,
+        category_row_id: 1, announcement_date: 1, amount: 1,
+        investor_type: 1, investor_registered_type: 1, investor_row_id: 1, investor_category_row_id: 1,
+      },
+      { session },
+    )
+    .lean()
+  const existing: any = existingRows[0]
   const carriedFields = {
     verified_status: existing ? existing.verified_status : 0,
     verified_on: existing ? existing.verified_on : undefined,
@@ -446,6 +456,28 @@ export async function applyFundingRoundWrite({
     reject_reason: existing ? existing.reject_reason : undefined,
     date_n_time: existing?.date_n_time ? existing.date_n_time : getPresentDateTime(),
   }
+
+  // CONFIRMED BUG FIX: submitChildChangeRequest's payload only carries FIELDS THAT ACTUALLY
+  // CHANGED (change-request.diff.ts's computeDiff skips anything whose normalised value matches
+  // the live one) — it is not a full snapshot the way the live createOrUpdateRound edit path
+  // always sends. An admin edit that only touched `amount` therefore arrived here with
+  // `category_row_id`/`announcement_date`/`investors` all absent from `payload`. The old code read
+  // those straight off `payload` with `investors` defaulting to `[]`, so after deleteMany below ran
+  // there was nothing to re-insert — the whole round silently vanished on any edit that didn't
+  // itself touch the investors list (reported: edited amount, entry gone after approval). Falling
+  // back to the pre-delete live round (existingRows, fetched above) for anything the diff omitted
+  // fixes it for every partial field, not just investors.
+  const sharedFields = {
+    category_row_id: payload.category_row_id ?? existing?.category_row_id,
+    announcement_date: payload.announcement_date ?? existing?.announcement_date,
+    amount: payload.amount ?? existing?.amount ?? 0,
+  }
+  const investors = (payload.investors ?? existingRows.map((row: any) => ({
+    investor_type: row.investor_type,
+    investor_registered_type: row.investor_registered_type,
+    investor_row_id: row.investor_row_id,
+    investor_category_row_id: row.investor_category_row_id,
+  }))) as ValidatedInvestor[]
 
   await fundingInvestmentM.deleteMany({ round_id: roundId }, { session })
 
