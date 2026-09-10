@@ -12,11 +12,6 @@
         "start": "node --max-old-space-size=4096 --require ts-node/register index.js",
         "typecheck": "tsc --noEmit",
         "test": "jest",
-        "test:quiet": "jest --silent --noStackTrace",
-        "test:summary": "jest --silent --noStackTrace --reporters=summary",
-        "characterize:discover": "ts-node scripts/characterization/discover-test-companies.ts",
-        "characterize:capture": "ts-node scripts/characterization/capture.ts",
-        "characterize:compare": "ts-node scripts/characterization/compare.ts",
         "postinstall": "apt-get update && apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 libpangocairo-1.0-0 fonts-liberation libxshmfence1 libxfixes3 libxext6 wget ca-certificates || true"
     },
     "keywords": [
