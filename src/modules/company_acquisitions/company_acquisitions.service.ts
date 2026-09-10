@@ -168,26 +168,54 @@ export async function applyAcquisitionWrite({
 
   const payload = (request.payload ?? {}) as Record<string, any>
   const present_date_n_time = getPresentDateTime()
+
+  if (request.action === 'create') {
+    // CREATE's payload always holds every field (diffed against an empty `liveValues: {}`, so
+    // anything submitted counts as "changed") - no existing-row fallback needed here, only below.
+    const attrs: AcquisitionWriteAttrs = {
+      acquirer_registered_type: payload.acquirer_registered_type,
+      acquirer_company_row_id: payload.acquirer_company_row_id,
+      acquired_registered_type: payload.acquired_registered_type,
+      acquired_company_row_id: payload.acquired_company_row_id,
+      acquisition_date: new Date(payload.acquisition_date),
+      acquisition_price: payload.acquisition_price,
+      facilitators: payload.facilitators,
+      stake_acquired_percent: payload.stake_acquired_percent,
+      acquisition_multiple: payload.acquisition_multiple,
+      submitted_by_type: 1,
+      verified_status: 1,
+      verified_on: present_date_n_time,
+      date_n_time: present_date_n_time
+    }
+    const doc = new companyAcquisitionsM(attrs)
+    await doc.save({ session })
+    return { appliedFieldCount: 1 }
+  }
+
+  // CONFIRMED BUG FIX: a field-level-filtered update payload only carries the fields just
+  // approved (submitChildChangeRequest's diff, further narrowed to approvedUnpublished by
+  // applyChangeRequest) - every OTHER field used to read straight off `payload` as `undefined`,
+  // which Mongoose silently omits from the update EXCEPT `acquisition_date`, built here as
+  // `new Date(payload.acquisition_date)` - `new Date(undefined)` is an Invalid Date, a real value
+  // that WOULD get written, corrupting the row's date the moment any update didn't itself touch
+  // that field. Falling back to the pre-update live row for anything the diff omitted (same
+  // pattern already fixed for Funding Round's own applyFundingRoundWrite) fixes it for every
+  // partial field, not just acquisition_date.
+  const existing = await companyAcquisitionsM.findById(request.target_row_id, {}, { session }).lean()
   const attrs: AcquisitionWriteAttrs = {
-    acquirer_registered_type: payload.acquirer_registered_type,
-    acquirer_company_row_id: payload.acquirer_company_row_id,
-    acquired_registered_type: payload.acquired_registered_type,
-    acquired_company_row_id: payload.acquired_company_row_id,
-    acquisition_date: new Date(payload.acquisition_date),
-    acquisition_price: payload.acquisition_price,
-    facilitators: payload.facilitators,
-    stake_acquired_percent: payload.stake_acquired_percent,
-    acquisition_multiple: payload.acquisition_multiple,
+    acquirer_registered_type: payload.acquirer_registered_type ?? existing?.acquirer_registered_type,
+    acquirer_company_row_id: payload.acquirer_company_row_id ?? existing?.acquirer_company_row_id,
+    acquired_registered_type: payload.acquired_registered_type ?? existing?.acquired_registered_type,
+    acquired_company_row_id: payload.acquired_company_row_id ?? existing?.acquired_company_row_id,
+    acquisition_date: payload.acquisition_date ? new Date(payload.acquisition_date) : existing?.acquisition_date,
+    acquisition_price: payload.acquisition_price ?? existing?.acquisition_price,
+    facilitators: payload.facilitators ?? existing?.facilitators,
+    stake_acquired_percent: payload.stake_acquired_percent ?? existing?.stake_acquired_percent,
+    acquisition_multiple: payload.acquisition_multiple ?? existing?.acquisition_multiple,
     submitted_by_type: 1,
     verified_status: 1,
     verified_on: present_date_n_time,
     date_n_time: present_date_n_time
-  }
-
-  if (request.action === 'create') {
-    const doc = new companyAcquisitionsM(attrs)
-    await doc.save({ session })
-    return { appliedFieldCount: 1 }
   }
 
   await companyAcquisitionsM.findByIdAndUpdate(request.target_row_id, attrs, { session })
