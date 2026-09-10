@@ -235,7 +235,11 @@ export async function getRejectedChangeRequestsAcrossEntities({
   const message = await Promise.all(data.map(async (request) => ({
     change_request_id: request._id,
     section: request.section,
-    status: CHANGE_REQUEST_STATUS.REJECTED,
+    // request.status, not a hardcoded REJECTED - a field-level rejection leaves the request's
+    // own top-level status at PENDING while it's still awaiting a decision on its other fields
+    // (see findRejectedRequestsPaginated's own doc comment); only a genuine whole-request reject
+    // is REJECTED here.
+    status: request.status as typeof CHANGE_REQUEST_STATUS.REJECTED | typeof CHANGE_REQUEST_STATUS.PENDING,
     revision: request.revision,
     requested_by: await withActorName(request.requested_by),
     requested_at: request.requested_at,
@@ -244,6 +248,7 @@ export async function getRejectedChangeRequestsAcrossEntities({
     reason: request.reason,
     changes: request.changes,
     action: request.action,
+    derived_status: request.derived_status,
     root_document_id: request.root_document_id,
   })))
 

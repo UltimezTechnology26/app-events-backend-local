@@ -148,6 +148,13 @@ const REJECTED_REQUEST_PROJECTION = {
  * same shape as findPendingRequestsPaginated above, mirroring markets' own Pending/Rejected
  * Changes tab pair. Pure data access; entity name/logo enrichment is the caller's own module's
  * job (see company_admin.approvals.service.ts's getGlobalRejectedChangeRequests).
+ *
+ * CONFIRMED BUG FIX: matched only the whole-request `status: REJECTED`, so a field-level
+ * rejection (rejectChangeRequestFields only ever touches its own changes[] entry - same reason
+ * PENDING_FIELD_LEVEL_FILTER exists above) never appeared here at all. Rejecting one of several
+ * fields on an otherwise-still-pending request made that field's rejection invisible everywhere -
+ * reported live: reject one field out of 3+ on a request, and it's simply missing from Rejected
+ * Changes. Same `$elemMatch` fallback already used for the approved list.
  */
 export async function findRejectedRequestsPaginated({
   module,
@@ -159,7 +166,15 @@ export async function findRejectedRequestsPaginated({
   limit: number
 }): Promise<{ data: (ChangeRequestDoc & { reviewed_by: ActorRef | null; reviewed_at: Date | null; reason: string | null })[]; count: number }> {
   const aggregateOutput = await change_requestM.aggregate([
-    { $match: { module, status: CHANGE_REQUEST_STATUS.REJECTED } },
+    {
+      $match: {
+        module,
+        $or: [
+          { status: CHANGE_REQUEST_STATUS.REJECTED },
+          { changes: { $elemMatch: { status: 'rejected' } } },
+        ],
+      },
+    },
     { $sort: { reviewed_at: -1 } },
     {
       $facet: {
