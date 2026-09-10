@@ -11,8 +11,8 @@ import { validateAuditRequest } from '../../common/status-audit/status-audit.val
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { getPendingChangeRequests, getApprovedChangeRequests, publishAllChangeRequests } from '../../common/change-request/change-request.service'
 import { applyChangeRequest } from '../../common/change-request/change-request.apply'
-import { approveChangeRequest } from '../../common/change-request/change-request.approve'
-import { rejectChangeRequest, cancelChangeRequest } from '../../common/change-request/change-request.review'
+import { approveChangeRequest, approveChangeRequestFields } from '../../common/change-request/change-request.approve'
+import { rejectChangeRequest, cancelChangeRequest, rejectChangeRequestFields } from '../../common/change-request/change-request.review'
 import {
   validateChangeRequestId,
   validateCompanyRowId,
@@ -317,6 +317,95 @@ companyAdminApprovalsRouter.post('/reject_change/:change_request_id', writeEndpo
   }
 
   const result = await rejectChangeRequest({ changeRequestId: requestId.value, actor: adminActorOf(checkToken), reason })
+  res.json(result)
+}))
+
+const FIELD_KEYS_REQUIRED_MESSAGE = 'Select at least one field to approve or reject'
+
+function validateFieldKeys(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  if (!raw.every((key) => typeof key === 'string' && key.trim() !== '')) return null
+  return raw
+}
+
+companyAdminApprovalsRouter.post('/approve_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Approve individual change request fields.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (!checkToken.status) {
+    res.json(checkToken)
+    return
+  }
+
+  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+    res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
+    return
+  }
+
+  const requestId = validateChangeRequestId(req.params.change_request_id as string)
+  if (!requestId.valid || requestId.value === null) {
+    res.json({ status: false, message: { alert_message: requestId.message } })
+    return
+  }
+
+  const fieldKeys = validateFieldKeys(req.body.field_keys)
+  if (!fieldKeys) {
+    res.json({ status: false, message: { field_keys: FIELD_KEYS_REQUIRED_MESSAGE } })
+    return
+  }
+
+  const rating = validateRating(req.body.rating)
+  if (!rating.valid || rating.value === null) {
+    res.json({ status: false, message: { rating: rating.message } })
+    return
+  }
+
+  const note = typeof req.body.note === 'string' ? req.body.note : undefined
+
+  const result = await approveChangeRequestFields({
+    changeRequestId: requestId.value,
+    fieldKeys,
+    actor: adminActorOf(checkToken),
+    rating: rating.value,
+    note,
+  })
+  res.json(result)
+}))
+
+companyAdminApprovalsRouter.post('/reject_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Reject individual change request fields.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (!checkToken.status) {
+    res.json(checkToken)
+    return
+  }
+
+  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+    res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
+    return
+  }
+
+  const requestId = validateChangeRequestId(req.params.change_request_id as string)
+  if (!requestId.valid || requestId.value === null) {
+    res.json({ status: false, message: { alert_message: requestId.message } })
+    return
+  }
+
+  const fieldKeys = validateFieldKeys(req.body.field_keys)
+  if (!fieldKeys) {
+    res.json({ status: false, message: { field_keys: FIELD_KEYS_REQUIRED_MESSAGE } })
+    return
+  }
+
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : ''
+  if (reason === '') {
+    res.json({ status: false, message: { reason: CHANGE_REQUEST_MESSAGES.REASON_REQUIRED } })
+    return
+  }
+
+  const result = await rejectChangeRequestFields({
+    changeRequestId: requestId.value,
+    fieldKeys,
+    actor: adminActorOf(checkToken),
+    reason,
+  })
   res.json(result)
 }))
 

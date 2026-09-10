@@ -51,6 +51,10 @@ export interface PendingChangeSummary {
   // against) - a reviewer-facing list showing "0 fields changed" for a real deletion reads as a
   // bug/empty request rather than what it is, so callers need this to render "Deletion" instead.
   action: ChangeRequestAction
+  // Field-level approval only (see FieldChange.status's doc comment) - lets the Pending Changes
+  // list show a "Partially Completed" badge once some but not all of this request's fields have
+  // been resolved. Absent on every request that doesn't use field-level approval.
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
 }
 
 export interface ApprovedChangeSummary {
@@ -128,6 +132,12 @@ export interface ChangeRequestDoc {
   row_snapshot: unknown | null
   rating: number | null
   note: string | null
+  /**
+   * Field-level approval only (see FieldChange.status's doc comment) - derived from changes[]'s
+   * own per-field statuses via deriveRequestStatus (change-request.status.ts), not set directly
+   * by a reviewer. Absent on every request that doesn't use field-level approval.
+   */
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
 }
 
 // Explicit projection — CLAUDE.md forbids `SELECT *`.
@@ -149,4 +159,5 @@ export const REQUEST_PROJECTION = {
   row_snapshot: 1,
   rating: 1,
   note: 1,
+  derived_status: 1,
 } as const

@@ -129,6 +129,28 @@ export interface SectionConfig {
    * its create and update branches.
    */
   invalidateCache?: (rootDocumentId: number) => Promise<void>
+  /**
+   * Field-level-approval groups (Basic Details/SEO/Social Media UPDATE requests only — see
+   * FieldChange.status's doc comment in status-audit.types.ts). Members of the same group key
+   * are approved/rejected together as one unit, never independently - e.g. editing a company's
+   * location touches city/state/latitude/longitude together; approving latitude alone while
+   * rejecting country would leave inconsistent data. Undefined = every field independent
+   * (existing behaviour, unaffected for every section that doesn't configure this).
+   */
+  fieldGroups?: Record<string, string[]>
+  /**
+   * Opts an UPDATE request on this section into field-level approval (a checkbox per field/group
+   * instead of one approve/reject decision for the whole request) - see FieldChange.status's doc
+   * comment. Originally gated on `!isList` (document-scope sections only: Basic Details/SEO/
+   * Social Media), since every OTHER section's writer either wasn't verified partial-payload-safe
+   * or, for Acquisitions specifically, genuinely wasn't (applyAcquisitionWrite used to build
+   * `acquisition_date` as `new Date(undefined)` — an Invalid Date, not an omitted field — from any
+   * update whose diff didn't touch that field; fixed alongside this flag being set for it). Every
+   * section listed here has a confirmed partial-`$set`-safe (or, for Funding Round/Acquisitions,
+   * explicitly existing-value-fallback) writer. FAQ and Owned Products are deliberately NOT opted
+   * in — never requested, not verified — and stay whole-request.
+   */
+  fieldLevelApproval?: boolean
 }
 
 const SEO_EDITABLE_FIELDS = [
@@ -564,6 +586,7 @@ export const COMPANY_SECTION_REGISTRY = {
     fieldLabels: SEO_FIELD_LABELS,
     schemaPaths: (field: string) => company_seo_detailsM.schema.path(field),
     invalidateCache: (rootDocumentId: number) => invalidateSeoCaches(rootDocumentId),
+    fieldLevelApproval: true,
   },
   [SECTION_SOCIAL_MEDIA]: {
     collection: 'cln_company_social_links',
@@ -574,6 +597,7 @@ export const COMPANY_SECTION_REGISTRY = {
     fieldLabels: SOCIAL_MEDIA_FIELD_LABELS,
     schemaPaths: (field: string) => company_social_linksM.schema.path(field),
     invalidateCache: () => invalidateSocialDetailsCache(),
+    fieldLevelApproval: true,
   },
   [SECTION_FAQ]: {
     collection: 'cln_company_faq_lists',
@@ -595,6 +619,7 @@ export const COMPANY_SECTION_REGISTRY = {
     displayFields: HOLDING_CRYPTO_DISPLAY_FIELDS,
     schemaPaths: (field: string) => company_holdingM.schema.path(field),
     invalidateCache: () => invalidateCompanyHoldingsCaches(),
+    fieldLevelApproval: true,
   },
   [SECTION_OWNED_PRODUCTS]: {
     collection: 'cln_company_products',
@@ -616,6 +641,7 @@ export const COMPANY_SECTION_REGISTRY = {
     fieldLabels: REVENUE_FIELD_LABELS,
     schemaPaths: (field: string) => company_revenue_growthM.schema.path(field),
     invalidateCache: () => invalidateCompanyRevenueCaches(),
+    fieldLevelApproval: true,
   },
   [SECTION_INVESTMENT]: {
     collection: 'cln_funding_investment_lists',
@@ -630,6 +656,7 @@ export const COMPANY_SECTION_REGISTRY = {
     displayFields: INVESTMENT_DISPLAY_FIELDS,
     schemaPaths: (field: string) => fundingInvestmentM.schema.path(field),
     invalidateCache: () => invalidateFundingCaches(),
+    fieldLevelApproval: true,
   },
   [SECTION_TEAM_MEMBERS]: {
     collection: 'cln_professionals_work_experiences',
@@ -641,6 +668,7 @@ export const COMPANY_SECTION_REGISTRY = {
     displayFields: TEAM_MEMBERS_DISPLAY_FIELDS,
     schemaPaths: (field: string) => professionals_work_experienceM.schema.path(field),
     invalidateCache: () => invalidateTeamMembersCaches(),
+    fieldLevelApproval: true,
   },
   [SECTION_BASIC_DETAILS]: {
     collection: 'cln_company_lists',
@@ -660,6 +688,11 @@ export const COMPANY_SECTION_REGISTRY = {
     fieldLabels: BASIC_DETAILS_FIELD_LABELS,
     displayFields: BASIC_DETAILS_DISPLAY_FIELDS,
     schemaPaths: (field: string) => companyM.schema.path(field),
+    fieldGroups: {
+      location: ['company_location', 'city', 'state', 'latitude', 'longitude'],
+      business_model: ['main_business_model_id', 'business_model_id'],
+    },
+    fieldLevelApproval: true,
   },
   [SECTION_JOBS]: {
     collection: 'cln_jobs',
@@ -671,6 +704,7 @@ export const COMPANY_SECTION_REGISTRY = {
     schemaPaths: (field: string) => jobsM.schema.path(field),
     softDeleteField: 'is_deleted',
     invalidateCache: () => invalidateJobCaches(),
+    fieldLevelApproval: true,
   },
   [SECTION_FUNDING_ROUND]: {
     collection: 'cln_funding_investment_lists',
@@ -690,6 +724,11 @@ export const COMPANY_SECTION_REGISTRY = {
     // invalidateFundingCaches' patterns (funds_raised_list_*, company_investment_funding_*, etc.)
     // already cover both sections' list views - there's no narrower "funding round only" cache.
     invalidateCache: () => invalidateFundingCaches(),
+    // Safe under a partial (field-level-filtered) payload already - applyFundingRoundWrite's
+    // update branch falls back to each row's existing value for any field this submission's diff
+    // didn't touch (see that function's own "CONFIRMED BUG FIX" comment), so a reviewer approving
+    // only `amount` while `investors` stays pending doesn't blank the round's other fields.
+    fieldLevelApproval: true,
   },
   [SECTION_ACQUISITIONS]: {
     collection: 'cln_company_acquisitions',
@@ -709,6 +748,10 @@ export const COMPANY_SECTION_REGISTRY = {
     schemaPaths: (field: string) => companyAcquisitionsM.schema.path(field),
     customWriter: true,
     invalidateCache: () => invalidateCompanyAcquisitionsCaches(),
+    // applyAcquisitionWrite's update branch now falls back to the row's existing value for any
+    // field this submission's diff didn't touch (matching Funding Round's own pattern) - see that
+    // function's own "CONFIRMED BUG FIX" comment for the Invalid Date corruption this fixes.
+    fieldLevelApproval: true,
   },
 } as const satisfies Record<string, SectionConfig>
 

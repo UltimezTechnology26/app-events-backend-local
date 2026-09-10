@@ -1,7 +1,7 @@
 import logger from '../../../config/logger'
 import { ActorRef } from '../status-audit/status-audit.types'
 import { insertChangeLog } from '../status-audit/status-audit.queries'
-import { computeDiff, filterDisplayChanges } from './change-request.diff'
+import { computeDiff, filterDisplayChanges, mergeFieldChanges } from './change-request.diff'
 import { COMPANY_SECTION_REGISTRY, isCompanySection, SectionConfig } from './change-request.registry'
 import { findPendingRequestForTargetRow } from './change-request.child.queries'
 import { amendPendingRequest, insertChangeRequest } from './change-request.queries'
@@ -79,11 +79,19 @@ export async function submitChildChangeRequest({
 
   let changeRequestId: number
   let logAction: string
+  // Total fields on the request after this submission - the merged set on an amend (matches
+  // submitChangeRequest's own storedChanges.length), just this submission's diff on a fresh one.
+  let totalChangeCount: number
 
   if (existing) {
-    await amendPendingRequest({ id: existing._id, payload, changes: displayChanges, actor })
+    // CONFIRMED BUG FIX: see mergeFieldChanges' own doc comment - without this, amending a row
+    // that already had a field decided (approved/rejected) discarded that field's entry, and
+    // every OTHER untouched field, from the request outright.
+    const storedChanges = filterDisplayChanges(mergeFieldChanges(existing.changes, displayChanges, actor), config.displayFields)
+    await amendPendingRequest({ id: existing._id, payload, changes: storedChanges, actor })
     changeRequestId = existing._id
     logAction = LOG_ACTION_AMEND
+    totalChangeCount = storedChanges.length
   } else {
     changeRequestId = await insertChangeRequest({
       module,
@@ -98,6 +106,7 @@ export async function submitChildChangeRequest({
       requested_by: actor,
     })
     logAction = LOG_ACTION_SUBMIT
+    totalChangeCount = displayChanges.length
   }
 
   try {
@@ -117,7 +126,7 @@ export async function submitChildChangeRequest({
     logger.error({ err, module, section, rootDocumentId, changeRequestId }, 'change-request: submit log write failed')
   }
 
-  return { status: true, message: { alert_message: SUBMITTED_MESSAGE }, changeRequestId, changeCount: displayChanges.length }
+  return { status: true, message: { alert_message: SUBMITTED_MESSAGE }, changeRequestId, changeCount: totalChangeCount }
 }
 
 export interface SubmitChildDeleteParams {
