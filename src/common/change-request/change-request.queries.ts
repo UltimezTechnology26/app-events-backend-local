@@ -175,7 +175,34 @@ export async function findRejectedRequestsPaginated({
         ],
       },
     },
-    { $sort: { reviewed_at: -1 } },
+    // CONFIRMED BUG FIX: a field-level rejection (rejectChangeRequestFields) only ever stamps
+    // reviewed_at on the individual changes[] entry it touched - the request's own top-level
+    // reviewed_at stays null forever for these, since the request never gets a whole-request
+    // decision. Sorting on the plain top-level `reviewed_at` therefore sank every field-level
+    // rejection to the bottom (Mongo sorts missing/null as the lowest value), no matter how
+    // recently it happened, while whole-request rejections sorted correctly among themselves -
+    // "latest rejected on top" was silently broken for the far more common field-level case.
+    // latest_rejected_at takes whichever is newer: the whole-request reviewed_at, or the newest
+    // reviewed_at among this request's own rejected fields.
+    {
+      $addFields: {
+        latest_rejected_at: {
+          $max: [
+            '$reviewed_at',
+            {
+              $max: {
+                $map: {
+                  input: { $filter: { input: '$changes', as: 'c', cond: { $eq: ['$$c.status', 'rejected'] } } },
+                  as: 'c',
+                  in: '$$c.reviewed_at',
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+    { $sort: { latest_rejected_at: -1 } },
     {
       $facet: {
         data: [{ $skip: skip }, { $limit: limit }, { $project: REJECTED_REQUEST_PROJECTION }],
