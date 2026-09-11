@@ -79,9 +79,12 @@ export interface ApprovedChangeSummary {
 export interface RejectedChangeSummary {
   change_request_id: number
   section: string
-  // Always REJECTED — findRejectedRequestsPaginated's query is already filtered to this status.
-  // Same shape convention as PendingChangeSummary/ApprovedChangeSummary above.
-  status: typeof CHANGE_REQUEST_STATUS.REJECTED
+  // The request's own top-level status - REJECTED for a whole-request reject, but still PENDING
+  // for a field-level reject of one field on a request that's otherwise still awaiting review
+  // (findRejectedRequestsPaginated also matches those now - see its own doc comment). `reviewed_
+  // by`/`reviewed_at`/`reason` below are request-level and stay null in that case; the per-field
+  // reviewer/reason live on the individual FieldChange entries in `changes` instead.
+  status: typeof CHANGE_REQUEST_STATUS.REJECTED | typeof CHANGE_REQUEST_STATUS.PENDING
   revision: number
   requested_by: ActorRef
   requested_at: Date
@@ -91,6 +94,10 @@ export interface RejectedChangeSummary {
   changes: FieldChange[]
   // See PendingChangeSummary's own comment on why 'delete' needs this field.
   action: ChangeRequestAction
+  // Field-level approval only (see PendingChangeSummary's own comment) - lets the Rejected
+  // Changes list distinguish "every field resolved, this whole request is done" from "this field
+  // was rejected but others on the same request are still pending or approved elsewhere".
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
 }
 
 export interface ApplyChangeRequestResult {
