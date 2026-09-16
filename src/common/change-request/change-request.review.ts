@@ -1,8 +1,14 @@
 import logger from '../../../config/logger'
 import { ActorRef } from '../status-audit/status-audit.types'
 import { insertChangeLog } from '../status-audit/status-audit.queries'
-import { deleteChangeRequest, findRequestById, markRejected } from './change-request.queries'
+import {
+  deleteChangeRequest,
+  findRequestById,
+  markRejected,
+  rejectChangeRequestFields as rejectFieldsInStore,
+} from './change-request.queries'
 import { ApplyChangeRequestResult, CHANGE_REQUEST_STATUS } from './change-request.types'
+import { COMPANY_SECTION_REGISTRY, isCompanySection, SectionConfig } from './change-request.registry'
 
 const LOG_ACTION_REJECT = 'reject'
 
@@ -73,4 +79,58 @@ export async function cancelChangeRequest({
   await deleteChangeRequest(changeRequestId)
 
   return { status: true, message: { alert_message: CANCELLED_MESSAGE } }
+}
+
+const FIELDS_REJECTED_MESSAGE = 'Selected fields rejected'
+
+/** Field-level reject counterpart to approveChangeRequestFields (change-request.approve.ts) -
+ * same group-expansion behaviour and same "doesn't touch top-level status" reasoning. */
+export async function rejectChangeRequestFields({
+  changeRequestId,
+  fieldKeys,
+  actor,
+  reason,
+}: {
+  changeRequestId: number
+  fieldKeys: string[]
+  actor: ActorRef
+  reason: string
+}): Promise<ApplyChangeRequestResult> {
+  const request = await findRequestById(changeRequestId)
+  if (!request) {
+    return { status: false, message: { alert_message: NOT_FOUND_MESSAGE } }
+  }
+
+  let groups: Record<string, string[]> = {}
+  if (isCompanySection(request.section)) {
+    const config: SectionConfig = COMPANY_SECTION_REGISTRY[request.section]
+    groups = config.fieldGroups ?? {}
+  }
+  const expanded = new Set<string>()
+  for (const key of fieldKeys) {
+    const members: string[] | undefined = groups[key]
+    if (members) members.forEach((m: string) => expanded.add(m))
+    else expanded.add(key)
+  }
+
+  await rejectFieldsInStore({ id: changeRequestId, fieldKeys: Array.from(expanded), actor, reason })
+
+  try {
+    await insertChangeLog({
+      module: request.module,
+      target_collection: request.target_collection,
+      target_row_id: request.target_row_id ?? request.root_document_id,
+      root_document_id: request.root_document_id,
+      section: request.section,
+      action: LOG_ACTION_REJECT,
+      actor,
+      changes: request.changes.filter((c) => expanded.has(c.field)),
+      reason,
+      snapshot: null,
+    })
+  } catch (err) {
+    logger.error({ err, changeRequestId }, 'change-request: reject-fields log write failed')
+  }
+
+  return { status: true, message: { alert_message: FIELDS_REJECTED_MESSAGE } }
 }

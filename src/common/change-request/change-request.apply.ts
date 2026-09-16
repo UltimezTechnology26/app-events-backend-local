@@ -3,7 +3,7 @@ import logger from '../../../config/logger'
 import { ActorRef } from '../status-audit/status-audit.types'
 import { insertChangeLog } from '../status-audit/status-audit.queries'
 import { COMPANY_SECTION_REGISTRY, SECTION_BASIC_DETAILS, SECTION_FUNDING_ROUND, SECTION_ACQUISITIONS, SectionConfig, isCompanySection } from './change-request.registry'
-import { findRequestById, markApplied, markApplyStarted } from './change-request.queries'
+import { findRequestById, markApplied, markApplyStarted, markChangeRequestFieldsPublished } from './change-request.queries'
 import { ApplyChangeRequestResult, ChangeRequestDoc, CHANGE_REQUEST_STATUS } from './change-request.types'
 import { applySectionWrite, SECTION_MODELS } from './change-request.apply.writers'
 import { applyBasicDetailsSideEffects } from '../../modules/company/settings/company.settings.service'
@@ -55,6 +55,7 @@ function rootDocumentTrackerFields(actor: ActorRef): UpdateTrackerFields {
 
 const LOG_ACTION_PUBLISH = 'publish'
 const ACTION_DELETE = 'delete'
+const ACTION_UPDATE = 'update'
 
 const NOT_FOUND_MESSAGE = 'Sorry, Invalid change request id'
 const NOT_APPROVED_MESSAGE = 'Sorry, This change request has not been approved yet'
@@ -84,26 +85,61 @@ export async function applyChangeRequest({
   if (!request) {
     return { status: false, message: { alert_message: NOT_FOUND_MESSAGE } }
   }
-  if (request.status !== CHANGE_REQUEST_STATUS.APPROVED) {
-    return { status: false, message: { alert_message: NOT_APPROVED_MESSAGE } }
-  }
   if (!isCompanySection(request.section)) {
     logger.error({ changeRequestId, section: request.section }, 'change-request: unknown section on apply')
     return { status: false, message: { alert_message: INVALID_SECTION_MESSAGE } }
-  }
-
-  // A delete's payload is correctly empty — nothing is being $set, the row is being removed.
-  // Only document-scope updates and list-scope creates/updates require a non-empty payload.
-  const payload = request.payload ?? {}
-  const fields = Object.keys(payload)
-  if (fields.length === 0 && request.action !== ACTION_DELETE) {
-    return { status: false, message: { alert_message: EMPTY_PAYLOAD_MESSAGE } }
   }
 
   // Widened to the general SectionConfig (not the exact per-key literal type
   // COMPANY_SECTION_REGISTRY[request.section] would otherwise infer) so the customWriter branch
   // below type-checks uniformly across every section, most of which don't declare that field.
   const config: SectionConfig = COMPANY_SECTION_REGISTRY[request.section]
+
+  // CONFIRMED DESIGN: field-level approval (UPDATE requests on a section with
+  // `fieldLevelApproval: true` only - see SectionConfig.fieldLevelApproval's own doc comment, and
+  // FieldChange.status's doc comment in status-audit.types.ts) never flips this request's own
+  // top-level `status` to APPROVED - approveChangeRequestFields/rejectChangeRequestFields
+  // (change-request.approve.ts/.review.ts) only ever touch individual changes[] entries, since a
+  // request can have some fields approved, some still pending, at the same time. Gate on "at
+  // least one field is approved and not yet published" instead of the whole-request status for
+  // these sections; every other section keeps the original whole-request APPROVED gate.
+  // Only engage field-level logic for a request that actually carries per-field statuses -
+  // computeDiff stamps every field 'pending' unconditionally from here on (change-request.diff.ts),
+  // but a request submitted BEFORE this shipped has no `status` on any change entry at all. Such
+  // a request falls through to the original whole-request APPROVED gate below unchanged, so an
+  // already-approved pre-existing request stays publishable in full exactly as before, instead of
+  // silently becoming stuck (every field reading undefined, never 'approved', if this branch
+  // engaged for it).
+  const hasFieldLevelStatuses = (request.changes ?? []).some((c) => c.status !== undefined)
+  const usesFieldLevelApproval = Boolean(config.fieldLevelApproval) && request.action === ACTION_UPDATE && hasFieldLevelStatuses
+  const approvedUnpublished = usesFieldLevelApproval
+    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published)
+    : []
+
+  if (usesFieldLevelApproval) {
+    if (approvedUnpublished.length === 0) {
+      return { status: false, message: { alert_message: NOT_APPROVED_MESSAGE } }
+    }
+  } else if (request.status !== CHANGE_REQUEST_STATUS.APPROVED) {
+    return { status: false, message: { alert_message: NOT_APPROVED_MESSAGE } }
+  }
+
+  // For a field-level section, this publish writes ONLY the fields just approved - everything
+  // still pending, already published by an earlier partial publish, or rejected is excluded.
+  const effectivePayload = usesFieldLevelApproval
+    ? Object.fromEntries(approvedUnpublished.map((c) => [c.field, c.new_value]))
+    : request.payload ?? {}
+  const effectiveRequest: ChangeRequestDoc = usesFieldLevelApproval
+    ? { ...request, payload: effectivePayload }
+    : request
+
+  // A delete's payload is correctly empty — nothing is being $set, the row is being removed.
+  // Only document-scope updates and list-scope creates/updates require a non-empty payload.
+  const fields = Object.keys(effectivePayload)
+  if (fields.length === 0 && request.action !== ACTION_DELETE) {
+    return { status: false, message: { alert_message: EMPTY_PAYLOAD_MESSAGE } }
+  }
+
   const model = SECTION_MODELS[config.collection]
   if (!model) {
     logger.error({ changeRequestId, collection: config.collection }, 'change-request: no model registered')
@@ -122,10 +158,18 @@ export async function applyChangeRequest({
       // sides) — see change-request.registry.ts's customWriter doc comments on both. Each gets
       // its own writer that fully replaces the generic one here rather than supplementing it.
       const result = config.customWriter
-        ? await applyCustomSectionWrite({ request, session })
-        : await applySectionWrite({ request, config, model, session })
+        ? await applyCustomSectionWrite({ request: effectiveRequest, session })
+        : await applySectionWrite({ request: effectiveRequest, config, model, session })
       appliedFieldCount = result.appliedFieldCount
-      await markApplied({ id: changeRequestId, actor, session })
+      if (usesFieldLevelApproval) {
+        await markChangeRequestFieldsPublished({
+          id: changeRequestId,
+          fieldNames: approvedUnpublished.map((c) => c.field),
+          session,
+        })
+      } else {
+        await markApplied({ id: changeRequestId, actor, session })
+      }
       await companyM.updateOne(
         { _id: request.root_document_id },
         { $set: rootDocumentTrackerFields(actor) },
@@ -148,7 +192,7 @@ export async function applyChangeRequest({
       section: request.section,
       action: LOG_ACTION_PUBLISH,
       actor,
-      changes: request.changes,
+      changes: usesFieldLevelApproval ? approvedUnpublished : request.changes,
       reason: null,
       snapshot: request.row_snapshot ?? null,
     })
@@ -181,7 +225,7 @@ export async function applyChangeRequest({
       await applyBasicDetailsSideEffects({
         action: request.action === 'create' ? 'create' : 'update',
         companyRowId: request.root_document_id,
-        payload,
+        payload: effectivePayload,
         actor,
       })
     } catch (err) {

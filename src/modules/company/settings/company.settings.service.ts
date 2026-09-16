@@ -48,7 +48,7 @@ import {
 } from './company.settings.queries'
 import { submitChangeRequest } from '../../../common/change-request/change-request.service'
 import { findPendingRequest } from '../../../common/change-request/change-request.queries'
-import { computeDiff } from '../../../common/change-request/change-request.diff'
+import { computeDiff, buildOverlayPayload } from '../../../common/change-request/change-request.diff'
 import { SECTION_SEO, SECTION_SOCIAL_MEDIA, SECTION_BASIC_DETAILS } from '../../../common/change-request/change-request.registry'
 import { CHANGE_REQUEST_ACTION } from '../../../common/change-request/change-request.types'
 import { toActorRefWithId } from '../../../common/status-audit/status-audit.actor'
@@ -1567,8 +1567,8 @@ async function overlayPendingSectionPayloads(details: Record<string, unknown>, c
     findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyRowId, section: SECTION_BASIC_DETAILS }),
     findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyRowId, section: SECTION_SOCIAL_MEDIA }),
   ])
-  if (pendingBasicDetails?.payload) Object.assign(details, pendingBasicDetails.payload)
-  if (pendingSocialMedia?.payload) Object.assign(details, pendingSocialMedia.payload)
+  if (pendingBasicDetails?.payload) Object.assign(details, buildOverlayPayload(pendingBasicDetails.payload, pendingBasicDetails.changes))
+  if (pendingSocialMedia?.payload) Object.assign(details, buildOverlayPayload(pendingSocialMedia.payload, pendingSocialMedia.changes))
 }
 
 /** Ports setting.js's GET /individual_company_details/:user_row_id (lines 1089-1131) — API-key-only team panel. */
@@ -2219,7 +2219,7 @@ export async function getCompanySeo({ actor, companyId }: GetCompanySeoParams) {
   if (actor.message.user_type === 2) {
     const pendingSeo = await findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: Number(companyId), section: SECTION_SEO })
     if (pendingSeo?.payload) {
-      seoData = { ...seoData, ...pendingSeo.payload }
+      seoData = { ...seoData, ...buildOverlayPayload(pendingSeo.payload, pendingSeo.changes) }
     }
   }
 

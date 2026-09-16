@@ -1,7 +1,7 @@
 import logger from '../../../config/logger'
 import { ActorRef, FieldChange } from '../status-audit/status-audit.types'
 import { insertChangeLog } from '../status-audit/status-audit.queries'
-import { computeDiff, filterDisplayChanges } from './change-request.diff'
+import { computeDiff, filterDisplayChanges, mergeFieldChanges } from './change-request.diff'
 import { resolveActorName } from '../status-audit/status-audit.actor'
 import { applyChangeRequest } from './change-request.apply'
 import { COMPANY_SECTION_REGISTRY, isCompanySection, SectionConfig } from './change-request.registry'
@@ -33,32 +33,6 @@ async function withActorName(actor: ActorRef): Promise<ActorRef> {
 async function withReviewerName(actor: ActorRef | null): Promise<ActorRef | null> {
   if (!actor) return actor
   return withActorName(actor)
-}
-
-/**
- * Merges this submission's field diffs into the request's cumulative change set, keyed by
- * field. A field touched again gets its `changed_by` overwritten to the newer actor (and its
- * `new_value`/`new_label` refreshed); `old_value`/`old_label` are only ever taken from the
- * FIRST time a field was touched, since that's the true baseline against the live document —
- * re-diffing against `effective` on a later amend would otherwise reset it to the
- * previous-amendment's value instead. A field untouched by this submission keeps its prior
- * entry, authorship included — this is what makes "multiple contributors" detectable at all;
- * without the merge, only the latest amender's fields would ever be visible.
- */
-function mergeFieldChanges(existingChanges: FieldChange[], newChanges: FieldChange[], actor: ActorRef): FieldChange[] {
-  const byField = new Map(existingChanges.map((change) => [change.field, change]))
-  for (const change of newChanges) {
-    const prior = byField.get(change.field)
-    byField.set(change.field, {
-      field: change.field,
-      old_value: prior ? prior.old_value : change.old_value,
-      old_label: prior ? prior.old_label : change.old_label,
-      new_value: change.new_value,
-      new_label: change.new_label,
-      changed_by: actor,
-    })
-  }
-  return Array.from(byField.values())
 }
 
 const LOG_ACTION_SUBMIT = 'submit'
@@ -118,6 +92,7 @@ export async function submitChangeRequest({
     editableFields: config.editableFields,
     labelResolvers: config.labelResolvers,
     fieldLabels: config.fieldLabels,
+    fieldGroups: config.fieldGroups,
   })
 
   if (changes.length === 0) {
@@ -202,6 +177,7 @@ export async function getPendingChangeRequests({
     requested_at: request.requested_at,
     changes: request.changes,
     action: request.action,
+    derived_status: request.derived_status,
   })))
 
   return { status: true, message }
@@ -233,6 +209,7 @@ export async function getPendingChangeRequestsAcrossEntities({
     requested_at: request.requested_at,
     changes: request.changes,
     action: request.action,
+    derived_status: request.derived_status,
     root_document_id: request.root_document_id,
   })))
 
@@ -258,7 +235,11 @@ export async function getRejectedChangeRequestsAcrossEntities({
   const message = await Promise.all(data.map(async (request) => ({
     change_request_id: request._id,
     section: request.section,
-    status: CHANGE_REQUEST_STATUS.REJECTED,
+    // request.status, not a hardcoded REJECTED - a field-level rejection leaves the request's
+    // own top-level status at PENDING while it's still awaiting a decision on its other fields
+    // (see findRejectedRequestsPaginated's own doc comment); only a genuine whole-request reject
+    // is REJECTED here.
+    status: request.status as typeof CHANGE_REQUEST_STATUS.REJECTED | typeof CHANGE_REQUEST_STATUS.PENDING,
     revision: request.revision,
     requested_by: await withActorName(request.requested_by),
     requested_at: request.requested_at,
@@ -267,6 +248,7 @@ export async function getRejectedChangeRequestsAcrossEntities({
     reason: request.reason,
     changes: request.changes,
     action: request.action,
+    derived_status: request.derived_status,
     root_document_id: request.root_document_id,
   })))
 

@@ -38,6 +38,21 @@ export interface FieldChange {
    * existed; callers fall back to the request's own `requested_by`.
    */
   changed_by?: ActorRef | null
+  /**
+   * Field-level approval (Basic Details/SEO/Social Media UPDATE requests only - see
+   * change-request.registry.ts's fieldGroups doc comment). Absent on every other request type
+   * and on data written before this shipped - always treat a missing status as 'pending'.
+   */
+  status?: 'pending' | 'approved' | 'rejected'
+  reviewed_by?: ActorRef | null
+  reviewed_at?: Date | null
+  rating?: number | null
+  reject_reason?: string | null
+  /** Group key from SectionConfig.fieldGroups (e.g. 'location') when this field belongs to one -
+   * approving/rejecting any member field-key targets every entry sharing this group value. */
+  group?: string | null
+  /** Set once this field's approved value has actually been written live by a publish. */
+  published?: boolean
 }
 
 /** Shape returned by getUpdateTrackerFields() in the shared library's auth category. */

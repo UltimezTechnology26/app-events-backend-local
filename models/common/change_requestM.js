@@ -46,6 +46,42 @@ const changeSchema = mongoose.Schema({
     changed_by: {
         type: actorRefSchema,
         default: null
+    },
+    // Field-level approval (status-audit.types.ts's FieldChange) - each change is independently
+    // approved/rejected rather than the whole request at once. See change-request.status.ts.
+    status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+    },
+    reviewed_by: {
+        type: actorRefSchema,
+        default: null
+    },
+    reviewed_at: {
+        type: Date,
+        default: null
+    },
+    rating: {
+        type: Number,
+        default: null
+    },
+    reject_reason: {
+        type: String,
+        default: null
+    },
+    // Linked-field group key (e.g. "location", "business_model") - see SectionConfig.fieldGroups.
+    // null for a field that isn't part of any group.
+    group: {
+        type: String,
+        default: null
+    },
+    // Set once an approved field's value has actually been written live by applyChangeRequest -
+    // lets an approved-but-unpublished field stay eligible for Publish while its siblings are
+    // still pending.
+    published: {
+        type: Boolean,
+        default: false
     }
 }, { _id: false })
 
@@ -148,6 +184,14 @@ const saveSchema = mongoose.Schema({
     }, // second layer beneath the transaction; detects an abandoned apply
     applied_at: {
         type: Date,
+        default: null
+    },
+    // Derived from changes[]'s own per-field statuses via deriveRequestStatus
+    // (change-request.status.ts) - not set directly by a reviewer. Absent/'pending' for requests
+    // that don't use field-level approval.
+    derived_status: {
+        type: String,
+        enum: ['pending', 'partially_completed', 'resolved'],
         default: null
     }
 }, { versionKey: false })

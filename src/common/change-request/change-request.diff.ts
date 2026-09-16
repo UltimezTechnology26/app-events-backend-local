@@ -1,4 +1,4 @@
-import { FieldChange } from '../status-audit/status-audit.types'
+import { ActorRef, FieldChange } from '../status-audit/status-audit.types'
 
 const MONGOOSE_INTERNAL_PREFIX = '$'
 const MONGOOSE_DOC_KEY = '_doc'
@@ -90,6 +90,71 @@ export function filterDisplayChanges(changes: FieldChange[], displayFields?: rea
   return filtered.length > 0 ? filtered : changes
 }
 
+/**
+ * Filters a pending request's `payload` down to the fields that should still preview as
+ * "proposed" on an edit form — every field EXCEPT one a reviewer has already rejected.
+ *
+ * CONFIRMED BUG FIX: `payload` is "what was ever proposed", not "what's still awaiting or
+ * already approved" — nothing removes a field's entry from it once that field is rejected (only
+ * its per-field `changes[].status` flips to 'rejected'; `submitChangeRequest`'s later amends only
+ * ever ADD to `payload`, via `payload[change.field] = change.new_value` for whatever this
+ * submission's diff touched). So the edit form's pending-overlay (getIndividualDetails's
+ * `overlayPendingSectionPayloads`, and the equivalent inline overlay for SEO) was spreading the
+ * REJECTED value back onto the form as if it were still a live proposal — reproduced live:
+ * reject a SEO field, reopen the edit form, and the rejected value is still shown instead of the
+ * genuinely live one. Called at each overlay site with that request's own `changes`, so only a
+ * field with no per-field status yet, or one still pending/approved, gets overlaid.
+ */
+export function buildOverlayPayload(payload: Record<string, unknown>, changes: FieldChange[]): Record<string, unknown> {
+  const rejectedFields = new Set(changes.filter((change) => change.status === 'rejected').map((change) => change.field))
+  return Object.fromEntries(Object.entries(payload).filter(([field]) => !rejectedFields.has(field)))
+}
+
+/**
+ * Merges this submission's field diffs into the request's cumulative change set, keyed by
+ * field. A field touched again gets its `changed_by` overwritten to the newer actor (and its
+ * `new_value`/`new_label` refreshed); `old_value`/`old_label` are only ever taken from the
+ * FIRST time a field was touched, since that's the true baseline against the live document —
+ * re-diffing against `effective` on a later amend would otherwise reset it to the
+ * previous-amendment's value instead. A field untouched by this submission keeps its prior
+ * entry, authorship included — this is what makes "multiple contributors" detectable at all;
+ * without the merge, only the latest amender's fields would ever be visible.
+ *
+ * Shared by both the document-scope amend path (change-request.service.ts) and the child/list-row
+ * amend path (change-request.child.service.ts) - CONFIRMED BUG FIX: the child path used to skip
+ * this merge entirely, passing its own fresh diff straight to amendPendingRequest as the request's
+ * ENTIRE `changes` array, discarding every other field's prior entry outright (not just its
+ * status/rating - the field vanished from the request altogether) the moment a second edit
+ * touched a Holding Crypto/Team Members/Jobs/Finance-tab row that already had one field decided.
+ *
+ * A re-touched field's review state resets to pending (its prior status/reviewed_by/rating/
+ * published no longer applies to a brand-new, never-reviewed value); field_label/group fall back
+ * to the prior entry only if this submission's own diff didn't supply them.
+ */
+export function mergeFieldChanges(existingChanges: FieldChange[], newChanges: FieldChange[], actor: ActorRef): FieldChange[] {
+  const byField = new Map(existingChanges.map((change) => [change.field, change]))
+  for (const change of newChanges) {
+    const prior = byField.get(change.field)
+    byField.set(change.field, {
+      field: change.field,
+      field_label: change.field_label ?? prior?.field_label ?? null,
+      old_value: prior ? prior.old_value : change.old_value,
+      old_label: prior ? prior.old_label : change.old_label,
+      new_value: change.new_value,
+      new_label: change.new_label,
+      changed_by: actor,
+      group: change.group ?? prior?.group ?? null,
+      status: 'pending',
+      reviewed_by: null,
+      reviewed_at: null,
+      rating: null,
+      reject_reason: null,
+      published: false,
+    })
+  }
+  return Array.from(byField.values())
+}
+
 export type SchemaPathLookup = (field: string) => { instance?: string } | undefined
 /**
  * `record` is the FULL side (before or submitted) the value came from, so a resolver can branch
@@ -112,6 +177,9 @@ export interface ComputeDiffParams {
   labelResolvers?: Record<string, LabelResolver>
   /** Human-readable name per field, copied onto each FieldChange as `field_label` - see SectionConfig.fieldLabels. */
   fieldLabels?: Record<string, string>
+  /** Field-level-approval groups - see SectionConfig.fieldGroups. Optional, absent for every
+   * section that doesn't use field-level approval. */
+  fieldGroups?: Record<string, string[]>
 }
 
 /**
@@ -127,8 +195,13 @@ export async function computeDiff({
   editableFields,
   labelResolvers = {},
   fieldLabels = {},
+  fieldGroups,
 }: ComputeDiffParams): Promise<FieldChange[]> {
   const changes: FieldChange[] = []
+  const fieldToGroup: Record<string, string> = {}
+  for (const [groupKey, members] of Object.entries(fieldGroups ?? {})) {
+    for (const member of members) fieldToGroup[member] = groupKey
+  }
 
   for (const field of Object.keys(submitted)) {
     if (!editableFields.includes(field)) {
@@ -150,6 +223,8 @@ export async function computeDiff({
       old_label: resolver ? await resolver(before[field], before) : null,
       new_value: submitted[field] ?? null,
       new_label: resolver ? await resolver(submitted[field], submitted) : null,
+      status: 'pending',
+      group: fieldToGroup[field] ?? null,
     })
   }
 
