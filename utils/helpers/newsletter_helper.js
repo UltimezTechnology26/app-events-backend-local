@@ -998,7 +998,33 @@ export const losersList = async ({ notification_type }) => {
     return loser_query
 }
 
-export const articlesList = async ({ news_cp_category_row_id }) => {
+// The newsletter emails were going out with a literal "undefined" title on
+// every article row (reported against the "Markets Price Prediction Weekly"
+// send). `run.title` matches how this same wp-json/custom-api/v1/categories
+// endpoint is consumed elsewhere in this codebase (frontend-markets-typescript's
+// News.tsx/PricePrediction.tsx both read `.title` as a plain string off the
+// same endpoint path successfully), so the mapping itself isn't obviously
+// wrong - but this helper hits a DIFFERENT host for that identical path
+// (MAIN_CP_API_BASE_URL = wordpress.coinpedia.org, vs the frontend's
+// NEXT_PUBLIC_COINPEDIA = coinpedia.org), and outbound requests to both are
+// Cloudflare-challenged from this dev sandbox, so the real response shape
+// couldn't be directly inspected to pin down the exact field name.
+// extractArticleTitle is a defensive, non-breaking fallback: still returns
+// `run.title` unchanged when it's already a plain string (the case every
+// other consumer of this endpoint relies on), but also covers the shapes a
+// custom WP REST plugin most commonly drifts to - the standard WP REST API
+// v2 `{ rendered: "..." }` wrapper, or a raw `post_title`/`name` field -
+// instead of letting a missing/renamed field print the literal string
+// "undefined" straight into a customer-facing email.
+function extractArticleTitle(run) {
+    if (typeof run.title === "string") return run.title;
+    if (run.title && typeof run.title.rendered === "string") return run.title.rendered;
+    if (typeof run.post_title === "string") return run.post_title;
+    if (typeof run.name === "string") return run.name;
+    return "";
+}
+
+export const articlesList = async ({ news_cp_category_row_id, per_page = 5 }) => {
     try {
         let articles = [];
         const post_response = await axios.get(
@@ -1006,7 +1032,10 @@ export const articlesList = async ({ news_cp_category_row_id }) => {
             {
                 params: {
                     page: 1,
-                    per_page: 5,
+                    // Was hardcoded to 5 regardless of what callers passed -
+                    // dailyNewsLetter's own price-prediction call asks for
+                    // per_page: 2 and silently got 5 back every time.
+                    per_page,
                     category: news_cp_category_row_id,
                 },
                 headers: {
@@ -1026,12 +1055,12 @@ export const articlesList = async ({ news_cp_category_row_id }) => {
                     for (let run of response.posts) {
                         const new_object = await Promise.resolve({
                             article_link: run.link,
-                            article_title: run.title,
+                            article_title: extractArticleTitle(run),
                             article_content: "",
                             article_image: run.featured_image,
                             article_date: run.published_date + " " + run.published_time,
-                            author_name: run.author.name,
-                            author_profile_link: run.author.link
+                            author_name: run.author?.name,
+                            author_profile_link: run.author?.link
                         })
                         articles.push(new_object)
                     }

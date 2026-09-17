@@ -625,6 +625,18 @@ const weeklyNewsletterEmail = async (pass_email_id, pass_subject, pass_message, 
    <head>
       <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
       </meta>
+      <!-- This template has no real dark palette (every section below is
+      hardcoded light: white cards, near-black #13002D text). Without a
+      color-scheme signal, dark-mode email clients (Gmail, Apple/iOS Mail,
+      Outlook.com) apply their own automatic color-inversion heuristic to
+      "light-only" markup, which routinely breaks contrast - e.g. dark text
+      landing on a dark inverted background. Declaring light-only here tells
+      those clients to render this exactly as authored instead of guessing,
+      which is the correct fix for a template not designed with a dark
+      palette (the alternative - claiming "light dark" support - would be
+      worse: it invites clients to trust colors we never actually adapted). -->
+      <meta name="color-scheme" content="light">
+      <meta name="supported-color-schemes" content="light">
       <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet" />
    </head>
    <body style="background: #F3F2F6 ;font-family:roboto;">
@@ -736,6 +748,13 @@ const dailyNewsletterEmail = async (pass_email_id, pass_subject, pass_message, n
         <meta name="viewport" content="width=device-width">
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
         <title>Price Prediction Newsletter</title>
+        <!-- Same reasoning as weeklyNewsletterEmail's own header comment:
+        every section this template renders (gainers/losers cards, price
+        prediction cards, tables) is hardcoded light with no dark palette,
+        so declaring light-only stops dark-mode clients from auto-inverting
+        colors we never actually adapted. -->
+        <meta name="color-scheme" content="light">
+        <meta name="supported-color-schemes" content="light">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
