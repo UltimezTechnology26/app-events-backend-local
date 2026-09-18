@@ -10,8 +10,8 @@ const { sendEventsEmail, sendEmail } = require('../../../config/email')
 const { DateFormatter, checkAttendee, deleteEvent, checkEventRowID, speakers_email, checkSubadminAccess, filterQuery, getEventsData, checkSpeaker, updateAttendeesCount, generateEventCard } = require('../../../utils/helpers/events_helper')
 const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { updateThreadNotification, updateNotification } = require('../../../utils/helpers/notification_helper')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the

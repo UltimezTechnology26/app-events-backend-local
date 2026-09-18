@@ -37,8 +37,10 @@ const saveSchema = mongoose.Schema({
         type: String
     },
     main_business_model_id: {
-        type: Number,
-        index: true
+        type: Number
+        // index removed: never queried on this model (this field IS indexed
+        // and used on the separate companyM/cln_company_lists collection,
+        // which is a different index) — confirmed dead here (Part 2 §2.7).
     },
     used_counts: {
         type: Number,
@@ -77,16 +79,19 @@ const saveSchema = mongoose.Schema({
         versionKey: false
     })
 
-saveSchema.index({ company_name: "text", company_id: "text" });
-
-saveSchema.index({ _id: 1, company_name: 1 });
-saveSchema.index({ company_name: 1 });
-saveSchema.index({ _id: 1, company_name: 1, approval_status: 1 });
-saveSchema.index({ main_business_model_id: 1, approval_status: 1 });
+// company_name already has field-level `index: true` above (lines 13-16) —
+// the explicit single-field declaration that used to be here was an exact
+// duplicate, confirmed via `getIndexes()` (Part 1 §3, Part 2 §2.4).
+//
+// Removed (all confirmed dead via full-codebase query-site search, no query
+// anywhere uses these exact field combinations on this model — Part 2 §2.7):
+//   saveSchema.index({ company_name: "text", company_id: "text" })        — zero $text usage anywhere in repo
+//   saveSchema.index({ _id: 1, company_name: 1 })                        — no query combines these two without approval_status
+//   saveSchema.index({ _id: 1, company_name: 1, approval_status: 1 })    — no 3-field match found
+//   saveSchema.index({ main_business_model_id: 1, approval_status: 1 })  — main_business_model_id never queried on this model
+//   saveSchema.index({ _id: 1, company_name: 1, approval_status: 1, created_from_type: 1 })
+//   saveSchema.index({ _id: 1, approval_status: 1, created_from_type: 1 })
 saveSchema.index({ company_name: 1, approval_status: 1 });
-
-saveSchema.index({ _id: 1, company_name: 1, approval_status: 1, created_from_type: 1 });
-saveSchema.index({ _id: 1, approval_status: 1, created_from_type: 1 });
 
 saveSchema.pre('save', async function (next) {
     if (!this._id) {

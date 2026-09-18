@@ -214,6 +214,48 @@ cron.schedule('*/30 * * * *', async () => {
 })
 
 
+// cron.schedule('*/30 * * * *', async () => {
+//     try {
+//         const update_array = []
+//         const get_query = await markets_company_holdingM.find()
+//         if (get_query) {
+//             for (let run of get_query) {
+//                 const check_inserted_data = await company_holdingM.findOne({ company_type: run.company_type, company_row_id: run.company_row_id, token_type: run.token_type, product_type: run.product_type, token_row_id: run.token_row_id }, { _id: 1 })
+//                 if (!check_inserted_data) {
+//                     try {
+//                         const insert_data = await company_holdingM({
+//                             _id: run._id,
+//                             company_type: run.company_type,
+//                             company_row_id: run.company_row_id,
+//                             token_type: run.token_type,
+//                             token_row_id: run.token_row_id,
+//                             register_type: run.register_type,
+//                             purchased_date: run.purchased_date,
+//                             purchased_value: run.purchased_value,
+//                             purchased_value_in_usd: run.purchased_value_in_usd,
+//                             date_n_time: run.date_n_time
+//                         }).save()
+//                         await update_array.push(insert_data._id)
+//                     }
+//                     catch (e) {
+//                         console.log('update products data shift', e.message)
+//                     }
+//                 }
+//                 else {
+//                     await update_array.push(check_inserted_data._id)
+//                 }
+//             }
+//         }
+
+//         await company_holdingM.deleteMany({ _id: { $nin: update_array } })
+//         console.log('data shifting of company holding is completed')
+//     }
+//     catch (err) {
+//         console.log("company holding", err.message)
+//     }
+// })
+
+
 //At every 30th minute.
 cron.schedule('*/30 * * * *', async () => {
     try {
@@ -553,7 +595,7 @@ async function safeCrawl(url) {
 //Event Structure:
 
 
-cron.schedule("08 13 * * *", async () => {
+cron.schedule("35 12 * * *", async () => {
     console.log("📅 Event Header Structure Update Cron Running:", new Date());
 
     try {
@@ -809,4 +851,119 @@ const crawlPage = async (url, base, module) => {
 //     console.log("🎉 MARKETS SEO Weekly Complete.\n");
 // });
 
+//One time Header Structure
 
+cron.schedule("20 10 * * *", async () => {
+    console.log("📅 Event Header Structure Update Cron Running:", new Date());
+
+    try {
+        const events = await eventM.find(
+            { approval_status: 1, active_status: 1 },
+            { _id: 1, event_url: 1 }
+        )
+
+        if (!events.length) return console.log("⚠️ No events found to update!");
+
+        for (const event of events) {
+            try {
+                const url = `https://events.coinpedia.org/${event.event_url}`;
+                const header_structure = await safeCrawl(url);
+
+                await event_seo_detailsM.updateOne(
+                    { event_row_id: event._id },
+                    { $set: { header_structure } },
+                    { upsert: true }
+                );
+
+                console.log(`🟠 Event Updated: ${event._id} | ${event.event_url} | Count: ${header_structure.length}`);
+
+            } catch (err) {
+                console.error(`❌ Error processing event ${event._id}:`, err.message);
+            }
+        }
+
+        console.log("🏁 Completed Event Header Structure Cron");
+
+    } catch (err) {
+        console.error("🚨 Event Cron Fatal Error:", err.message);
+    }
+});
+// User Structure:
+
+
+/* ----------------------------------------------------
+ 1️⃣ USER HEADER STRUCTURE CRON
+ Runs everyday at 1:30 AM
+-----------------------------------------------------*/
+cron.schedule("18 10 * * *", async () => {
+    console.log("🔁 User Header Structure Update Cron Running:", new Date());
+
+    try {
+        const users = await professionalsM.find(
+            { user_name: { $exists: true, $ne: "" }, approval_status: 1 },
+            { _id: 1, user_name: 1 }
+        )
+
+        if (!users.length) return console.log("⚠️ No users found to update!");
+
+        for (const user of users) {
+            try {
+                const url = `https://app.coinpedia.org/${user.user_name}`;
+                const header_structure = await safeCrawl(url);
+
+                await professionals_seo_detailsM.updateOne(
+                    { user_row_id: user._id },
+                    { $set: { header_structure } }
+                );
+
+                console.log(`🟢 User Updated: ${user._id} | ${user.user_name} | Count: ${header_structure.length}`);
+
+            } catch (err) {
+                console.error(`❌ Error processing user ${user._id}:`, err.message);
+            }
+        }
+
+        console.log("🎉 Completed User Header Structure Cron");
+
+    } catch (err) {
+        console.error("🚨 User Cron Fatal Error:", err.message);
+    }
+});
+
+
+// //Company Structure:
+
+cron.schedule("15 10 * * *", async () => {
+    console.log("🏢 Company Header Structure Update Cron Running:", new Date());
+
+    try {
+        const companies = await companyM.find(
+            { approval_status: 1 },
+            { _id: 1, company_name: 1 }
+        )
+
+        if (!companies.length) return console.log("⚠️ No companies found to update!");
+
+        for (const company of companies) {
+            try {
+                const url = `https://app.coinpedia.org/company/${company.company_name}`;
+                const header_structure = await safeCrawl(url);
+
+                await company_seo_detailsM.updateOne(
+                    { company_row_id: company._id },
+                    { $set: { header_structure } }
+                );
+
+                console.log(`🟣 Company Updated: ${company._id} | ${company.company_name} | Count: ${header_structure.length}`);
+
+            } catch (err) {
+                console.error(`❌ Error processing company ${company._id}:`, err.message);
+            }
+        }
+
+        console.log("🎯 Completed Company Header Structure Cron");
+
+    } catch (err) {
+        console.error("🚨 Company Cron Fatal Error:", err.message);
+    }
+});

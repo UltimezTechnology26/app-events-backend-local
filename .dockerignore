@@ -1,0 +1,12 @@
+node_modules
+/node_modules
+/app/node_modules/
+
+# Never bake local env values into the image - COPY . . was shipping the
+# local PORT=3500 straight into the container, which silently overrode
+# whatever PORT the deploy platform's own default/health-check expects
+# (e.g. 8080), since the platform has no real env var left to inject over
+# a value already baked into a committed file. Env vars must come from the
+# platform's own configuration for every deployed environment.
+.env
+.env.*

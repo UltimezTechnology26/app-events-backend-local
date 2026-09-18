@@ -4,8 +4,8 @@ const router = express.Router()
 const { daysMinusFromPresentTime } = require('../../../../utils/helpers/helper')
 const { checkAdminLoginToken } = require('../../../../middleware/authorization')
 const subscribe_categoryM = require('../../../../models/app/newsletter/subscribe_categoryM')
-const { getPositionResolutionStages } = require('../../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../../src/modules/funding/funding.queries')
 
 
 router.get('/overview', async (req, res) => {

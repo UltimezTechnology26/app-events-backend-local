@@ -11,8 +11,9 @@ const saveSchema = mongoose.Schema({
         index: true
     },
     user_row_id: {
-        type: Number,
-        index: true
+        type: Number
+        // index removed: subsumed by the compound {user_row_id:1, company_row_id:1} index
+        // below (Part 2 §2.7) — every query on this model filters by both fields together.
     },
     // email_send_status: {
     //     type: Boolean,
@@ -25,9 +26,10 @@ const saveSchema = mongoose.Schema({
     }
 })
 
-// Additional indexes for companyList function optimization
+// company_row_id already has field-level `index: true` above — the standalone
+// `saveSchema.index({company_row_id:1})` that used to be here was an exact duplicate
+// (Part 2 §2.7).
 saveSchema.index({ user_row_id: 1, company_row_id: 1 });
-saveSchema.index({ company_row_id: 1 });
 
 saveSchema.pre('save', async function (next) {
     if (!this._id) {

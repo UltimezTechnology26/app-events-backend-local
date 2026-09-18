@@ -45,118 +45,120 @@ router.get('/twitter_list/:skip/:limit', async (req, res) => {
         const skip = !Number.isNaN(Number.parseInt(req.params.skip)) ? Number.parseInt(req.params.skip) : 0
         const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
 
-        const get_query = await professionals_social_linksM.aggregate([
-            {
-                $match: {
-                    $or: [
-                        { twitter: { $exists: true, $ne: "" } },
-                        { facebook: { $exists: true, $ne: "" } },
-                        { linkedin: { $exists: true, $ne: "" } },
-                        { instagram: { $exists: true, $ne: "" } },
-                        { telegram: { $exists: true, $ne: "" } },
-                        { medium: { $exists: true, $ne: "" } },
-                        { reddit: { $exists: true, $ne: "" } },
-                        { feed_url: { $exists: true, $ne: "" } }
-                    ]
-                }
-            },
-            {
-                $lookup:
+        // PERF FIX: list and count used to run as two sequential awaits — they're
+        // independent of each other, so run them concurrently instead.
+        const [get_query, count_query] = await Promise.all([
+            professionals_social_linksM.aggregate([
                 {
-                    from: "cln_professionals",
-                    localField: "user_row_id",
-                    foreignField: "_id",
-                    as: "info_user",
-                    pipeline: [
-                        {
-                            $match: { login_status: 1, approval_status: 1, user_name: { $exists: true, $ne: "" } }
-                        },
-                        {
-                            $lookup:
+                    $match: {
+                        $or: [
+                            { twitter: { $exists: true, $ne: "" } },
+                            { facebook: { $exists: true, $ne: "" } },
+                            { linkedin: { $exists: true, $ne: "" } },
+                            { instagram: { $exists: true, $ne: "" } },
+                            { telegram: { $exists: true, $ne: "" } },
+                            { medium: { $exists: true, $ne: "" } },
+                            { reddit: { $exists: true, $ne: "" } },
+                            { feed_url: { $exists: true, $ne: "" } }
+                        ]
+                    }
+                },
+                {
+                    $lookup:
+                    {
+                        from: "cln_professionals",
+                        localField: "user_row_id",
+                        foreignField: "_id",
+                        as: "info_user",
+                        pipeline: [
                             {
-                                from: "cln_professionals_profile_images",
-                                localField: "_id",
-                                foreignField: "user_row_id",
-                                as: "img_info"
+                                $match: { login_status: 1, approval_status: 1, user_name: { $exists: true, $ne: "" } }
+                            },
+                            {
+                                $lookup:
+                                {
+                                    from: "cln_professionals_profile_images",
+                                    localField: "_id",
+                                    foreignField: "user_row_id",
+                                    as: "img_info"
+                                }
+                            },
+                            { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
+                            {
+                                $project: {
+                                    _id: 0,
+                                    user_name: 1,
+                                    profile_image: "$img_info.profile_image",
+                                    full_name: 1
+                                }
                             }
-                        },
-                        { $unwind: { path: "$img_info", preserveNullAndEmptyArrays: true } },
-                        {
-                            $project: {
-                                _id: 0,
-                                user_name: 1,
-                                profile_image: "$img_info.profile_image",
-                                full_name: 1
-                            }
-                        }
-                    ]
-                }
-            },
-            { $unwind: { path: "$info_user" } },
-            {
-                $project: {
-                    _id: 0,
-                    user_name: "$info_user.user_name",
-                    profile_image: "$info_user.profile_image",
-                    full_name: "$info_user.full_name",
-                    user_row_id: 1,
-                    twitter: 1,
-                    facebook: 1,
-                    linkedin: 1,
-                    instagram: 1,
-                    telegram: 1,
-                    medium: 1,
-                    reddit: 1,
-                    feed_url: 1,
-                }
-            }
-        ]).skip(skip).limit(limit)
-
-        const count_query = await professionals_social_linksM.aggregate([
-            {
-                $match: {
-                    $or: [
-                        { twitter: { $exists: true, $ne: "" } },
-                        { facebook: { $exists: true, $ne: "" } },
-                        { linkedin: { $exists: true, $ne: "" } },
-                        { instagram: { $exists: true, $ne: "" } },
-                        { telegram: { $exists: true, $ne: "" } },
-                        { medium: { $exists: true, $ne: "" } },
-                        { reddit: { $exists: true, $ne: "" } },
-                        { feed_url: { $exists: true, $ne: "" } }
-                    ]
-                }
-            },
-            {
-                $lookup:
+                        ]
+                    }
+                },
+                { $unwind: { path: "$info_user" } },
                 {
-                    from: "cln_professionals",
-                    localField: "user_row_id",
-                    foreignField: "_id",
-                    as: "info_user",
-                    pipeline: [
-                        {
-                            $match: { login_status: 1, approval_status: 1, user_name: { $exists: true, $ne: "" } }
-                        },
-                        {
-                            $project: {
-                                _id: 1
-                            }
-                        }
-                    ]
+                    $project: {
+                        _id: 0,
+                        user_name: "$info_user.user_name",
+                        profile_image: "$info_user.profile_image",
+                        full_name: "$info_user.full_name",
+                        user_row_id: 1,
+                        twitter: 1,
+                        facebook: 1,
+                        linkedin: 1,
+                        instagram: 1,
+                        telegram: 1,
+                        medium: 1,
+                        reddit: 1,
+                        feed_url: 1,
+                    }
                 }
-            },
-            { $unwind: { path: "$info_user" } },
-            {
-                $count: 'count'
-            }
+            ]).skip(skip).limit(limit),
+            professionals_social_linksM.aggregate([
+                {
+                    $match: {
+                        $or: [
+                            { twitter: { $exists: true, $ne: "" } },
+                            { facebook: { $exists: true, $ne: "" } },
+                            { linkedin: { $exists: true, $ne: "" } },
+                            { instagram: { $exists: true, $ne: "" } },
+                            { telegram: { $exists: true, $ne: "" } },
+                            { medium: { $exists: true, $ne: "" } },
+                            { reddit: { $exists: true, $ne: "" } },
+                            { feed_url: { $exists: true, $ne: "" } }
+                        ]
+                    }
+                },
+                {
+                    $lookup:
+                    {
+                        from: "cln_professionals",
+                        localField: "user_row_id",
+                        foreignField: "_id",
+                        as: "info_user",
+                        pipeline: [
+                            {
+                                $match: { login_status: 1, approval_status: 1, user_name: { $exists: true, $ne: "" } }
+                            },
+                            {
+                                $project: {
+                                    _id: 1
+                                }
+                            }
+                        ]
+                    }
+                },
+                { $unwind: { path: "$info_user" } },
+                {
+                    $count: 'count'
+                }
+            ])
         ])
 
         let total_counts = 0
         if (count_query[0]) {
             total_counts = count_query[0].count
         }
-
 
         res.json({ status: true, message: get_query, count: total_counts })
     }

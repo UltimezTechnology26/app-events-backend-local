@@ -9,8 +9,8 @@ const { checkAdminLoginToken, generateUserLoginToken, checkApiKey } = require('.
 const { sendEmail } = require('../../../config/email')
 const { shiftUserFromManualToRegister } = require('../../../utils/helpers/events_helper')
 const { deleteUserDetais, deleteProfessionalDetails, calculateUserProfileScore, getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 const MARKET_API_BASE_URL = process.env.MARKET_API_BASE_URL
 const MARKET_API_KEY = process.env.MARKET_API_KEY
 
@@ -37,7 +37,6 @@ const company_nft_wallet_statusM = require('../../../models/app/company/company_
 const company_podcast_statusM = require('../../../models/app/company/company_podcast_statusM')
 const employees_requestsM = require('../../../models/app/company/employees_requestsM')
 const company_followersM = require('../../../models/app/company/followersM')
-const company_watchlistM = require('../../../models/app/watchlist/companyM')
 
 const eventM = require('../../../models/app/events/eventM')
 const event_guestsM = require('../../../models/app/events/event_guestsM')
@@ -4559,6 +4558,10 @@ router.get('/delete_professional_details/:user_row_id/:professional_details_id',
                         await calculateUserProfileScore(user_row_id, ['professional_detail'])
                         await deleteKeysByPattern('professional_detail_list_*')
                         await deleteKeysByPattern('app_user_other_details_*')
+                        if (query.company_type === 1 && query.company_row_id) {
+                            await deleteKeysByPattern('employee_list_*')
+                            await deleteKeysByPattern('app_company_individual_other_details_*')
+                        }
 
                         res.json({ status: true, message: { alert_message: ' Your details have been deleted Successfully' } })
 

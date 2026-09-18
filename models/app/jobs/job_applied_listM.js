@@ -25,6 +25,10 @@ saveSchema.pre('save', async function (next) {
 });
 
 saveSchema.index({ user_row_id: 1, job_id: 1, status: 1 });
+// job.js's own job-list $lookup matches purely on job_id (no user_row_id in the filter) -
+// the compound index above can't serve that (job_id isn't its prefix field), so this was an
+// uncovered collection scan on every job-list fetch until now.
+saveSchema.index({ job_id: 1 });
 saveSchema.index({ key_skills: 1 });
 saveSchema.index({ salary_expectations: 1 });
 saveSchema.index({ highest_education: 1 });

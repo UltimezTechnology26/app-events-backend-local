@@ -22,8 +22,8 @@ const streaksM = require('../../models/main/academy/streaksM')
 const professionals_pointsM = require('../../models/app/users/professionals_pointsM')
 const community_postsM = require('../../models/main/community/community_postsM')
 const { deleteKeysByPattern } = require('../../config/cache_helper')
-const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../src/modules/funding/funding.queries')
 
 /**
  * Extracted pipeline for GET /user_details/:type/:user_name (person branch).

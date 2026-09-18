@@ -10,7 +10,10 @@ const funding_investor_typesM = require('../../../models/app/static/funding_inve
 const { deleteKeysByPattern } = require('../../../config/cache_helper')
 router.get('/list', async (req, res) => {
     try {
-        const checkToken = checkAdminLoginToken(req.headers, [0]);
+        // [0] = System Settings; [1, 7] = the Funding module itself, which also uses this
+        // list as its "Funding Round" dropdown source - see funding.rounds.controller.ts
+        // (the /funding_rounds_v2 twin of this route) for the full explanation.
+        const checkToken = checkAdminLoginToken(req.headers, [0, 1, 7]);
         if (!checkToken.status) {
             return res.json(checkToken);
         }

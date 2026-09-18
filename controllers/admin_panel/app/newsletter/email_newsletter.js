@@ -10,8 +10,8 @@ const email_newslettersM = require('../../../../models/app/newsletter/email_news
 const email_newsletters_sent_usersM = require('../../../../models/app/newsletter/email_newsletters_sent_usersM')
 const email_newsletters_sent_reportsM = require('../../../../models/app/newsletter/email_newsletters_sent_reportsM')
 const { sendAcademyEmail } = require('../../../../config/email')
-const { getPositionResolutionStages } = require('../../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../../src/modules/funding/funding.queries')
 
 
 router.post('/update_save_details', [

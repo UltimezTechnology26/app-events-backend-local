@@ -34,7 +34,8 @@ const saveSchema = mongoose.Schema({
     },
     date_n_time: {
         type: Date,
-        required: true
+        required: true,
+        default: Date.now
     }
 })
 

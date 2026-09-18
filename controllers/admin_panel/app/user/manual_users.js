@@ -14,8 +14,8 @@ const professionals_work_experienceM = require('../../../../models/app/professio
 const event_sponsors_partner_detailsM = require('../../../../models/app/events/event_sponsors_partner_detailsM')
 const { deleteProfessionalDetails, deleteUserFunding } = require('../../../../utils/helpers/app_helper')
 const { deleteSponsorsPartners } = require('../../../../utils/helpers/events_helper')
-const { getPositionResolutionStages } = require('../../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted `cln_professionals_work_experiences` nested pipeline (`info_work`) for

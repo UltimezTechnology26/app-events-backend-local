@@ -17,8 +17,8 @@ import professionals_awardsM from '../../models/app/users/professionals_awardsM'
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
 import app_exchangeM from '../../models/markets/app_exchangeM';
-import { resolveFundsRaisedCompanyStages, syndicateDetectionStages, joinPositionNamesExpr } from '../../modules/funding/funding.queries';
-import { getPositionResolutionStages } from '../../modules/work-experience/work-experience.queries';
+import { resolveFundsRaisedCompanyStages, syndicateDetectionStages, joinPositionNamesExpr } from '../../src/modules/funding/funding.queries';
+import { getPositionResolutionStages } from '../../src/modules/work-experience/work-experience.queries';
 
 interface UserDetailsResponse {
     status: boolean;

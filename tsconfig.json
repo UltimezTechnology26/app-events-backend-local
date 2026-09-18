@@ -23,7 +23,7 @@
     "controllers/**/*",
     "routes/**/*",
     "jobs/**/*",
-    "modules/**/*",
+    "src/modules/**/*",
     "index.js"
   ],
   "exclude": [

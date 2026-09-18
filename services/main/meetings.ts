@@ -1,7 +1,7 @@
 import meetingM from "../../models/app/meetings/meetingM";
 import redisCache, { CacheDuration } from "../../config/redis";
-import { getPositionResolutionStages } from "../../modules/work-experience/work-experience.queries";
-import { joinPositionNamesExpr } from "../../modules/funding/funding.queries";
+import { getPositionResolutionStages } from "../../src/modules/work-experience/work-experience.queries";
+import { joinPositionNamesExpr } from "../../src/modules/funding/funding.queries";
 
 export const getMeetingList = async (req: any, company_row_id: number, user_row_id: string) => {
     try {

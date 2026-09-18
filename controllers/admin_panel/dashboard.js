@@ -15,7 +15,14 @@ router.get('/total_counting_detail', async (req, res) => {
             const result = {}
 
             const admin_row_id = checkToken.message.admin_row_id
-            const admin_manager_type = checkToken.message.admin_manager_type
+            // BUG FIX: checkAdminLoginToken returns the raw JWT payload, where
+            // admin_manager_type is a STRING (see middleware/authorization.js's own
+            // Number.parseInt(...) === 1/2 checks — it wouldn't need to parse it if it
+            // were already a number). The strict === 1 check below always failed as a
+            // result, for every admin regardless of type, so this whole block never ran —
+            // `result` stayed {} and the dashboard's total_company_enabled +
+            // total_company_disabled (etc.) arithmetic on undefined fields rendered NaN.
+            const admin_manager_type = Number.parseInt(checkToken.message.admin_manager_type)
             let admin_access_types = (admin_manager_type === 2) ? (checkToken.message.admin_access_types) : 0
 
             if (admin_manager_type === 1) {

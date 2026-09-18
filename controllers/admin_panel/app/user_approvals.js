@@ -8,8 +8,8 @@ const { checkAdminLoginToken } = require('../../../middleware/authorization')
 const { sendEmail } = require('../../../config/email')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 const professionalsM = require('../../../models/app/professionalsM')
-const { getPositionResolutionStages } = require('../../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
 /**
  * Extracted `cln_professionals_work_experiences` nested pipeline (`info_work`) for
@@ -218,9 +218,14 @@ router.get('/list/:approval_status/:login_status/:skip/:limit', async (req, res)
                     }
                 }
 
-                const queryRun = await professionalsM.aggregate([
-                    { $sort: { _id: -1 } },
+                // PERF FIX: $match now runs before $sort so Mongo can use the
+                // { approval_status, login_status, _id } compound index (professionalsM.js)
+                // to serve the filter and the sort in one index scan, instead of sorting the
+                // entire collection by _id first and only filtering afterward. Output order is
+                // unchanged — filtering doesn't reorder surviving documents either way.
+                const queryRunPromise = professionalsM.aggregate([
                     { $match: { $and: query } },
+                    { $sort: { _id: -1 } },
                     {
                         $lookup:
                         {
@@ -482,9 +487,13 @@ router.get('/list/:approval_status/:login_status/:skip/:limit', async (req, res)
                 ];
 
 
-                const countResult = await professionalsM.aggregate(countPipeline);
+                // PERF FIX: list and count used to run as two sequential awaits — they're
+                // independent of each other, so run them concurrently instead.
+                const [queryRun, countResult] = await Promise.all([
+                    queryRunPromise,
+                    professionalsM.aggregate(countPipeline)
+                ]);
                 const countQueryRun = countResult[0]?.count || 0;
-
 
                 res.json({ status: true, message: queryRun, count: countQueryRun })
             }

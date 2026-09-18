@@ -7,7 +7,7 @@ const { checkAdminLoginToken } = require('../../../middleware/authorization')
 
 const professional_positionsM = require('../../../models/app/static/professional_positionsM')
 const { deleteKeysByPattern } = require('../../../config/cache_helper')
-const { invalidateStaticPositionsListCache } = require('../../../modules/work-experience/work-experience.cache')
+const { invalidateStaticPositionsListCache } = require('../../../src/modules/work-experience/work-experience.cache')
 
 router.get('/list', async (req, res) => {
     try {

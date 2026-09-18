@@ -39,7 +39,6 @@ async function uploadToS3(key, buffer, contentType) {
 async function generateCertificateFile({ data, certificate_row_id }) {
     // Load template
     const templatePath = path.join(__dirname, '..', 'controllers','main','academy','templates', 'certificate.html');
-    console.log(templatePath, 'templatePath');
 
     const rawHtml = fs.readFileSync(templatePath, 'utf8');
     const filledHtml = fillTemplate(rawHtml, data);
@@ -49,7 +48,6 @@ async function generateCertificateFile({ data, certificate_row_id }) {
         headless: 'new',
         args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
-    console.log(browser, 'browser');
 
     const page = await browser.newPage();
     await page.setContent(filledHtml, { waitUntil: 'networkidle0' });

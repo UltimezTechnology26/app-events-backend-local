@@ -17,8 +17,8 @@ const company_manual_retrievalsM = require('../../models/app/company/company_man
 const eventM = require('../../models/app/events/eventM')
 const { setCache, getCache, deleteKeysByPattern } = require('../../config/cache_helper')
 const { calculateEventScore } = require('../../utils/helpers/app_helper')
-const { getPositionResolutionStages } = require('../../modules/work-experience/work-experience.queries')
-const { joinPositionNamesExpr } = require('../../modules/funding/funding.queries')
+const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries')
+const { joinPositionNamesExpr } = require('../../src/modules/funding/funding.queries')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
@@ -469,7 +469,17 @@ router.post('/update_sponsors_partners', [
 
                 const insert_array = {}
                 insert_array['sponsor_partner_type'] = sponsor_partner_type
-                insert_array['sponsorship_type_title'] = sponsor_partner_type == 1 ? req.body.sponsorship_type_title : ""
+                // CONFIRMED BUG FIX: this used to be `sponsor_partner_type == 1 ? req.body.sponsorship_type_title : ""`,
+                // which unconditionally discarded the title for every Partner row (sponsor_partner_type == 2),
+                // regardless of what the client sent - "Partnership Type" showed blank for every partner ever
+                // created. Both sponsor and partner rows send the same field; there's no reason to gate it.
+                insert_array['sponsorship_type_title'] = req.body.sponsorship_type_title || ""
+                // CONFIRMED BUG FIX: requested_status was never set on insert, so new rows fell through to the
+                // schema's `default: 3` - a value outside the documented 0 (Pending) / 1 (Approved) / 2 (Rejected)
+                // enum, so every list/detail view rendering that field showed a blank/dash "Status". Approve/reject
+                // already explicitly set 1/2 later in this file; setting 0 here makes new rows start "Pending"
+                // instead of an undocumented sentinel.
+                insert_array['requested_status'] = 0
 
                 if (!Number.isNaN(Number.parseInt(req.body.category_row_id))) {
                     insert_array['category_row_id'] = req.body.category_row_id
@@ -484,6 +494,14 @@ router.post('/update_sponsors_partners', [
                     insert_array['created_date_n_time'] = getPresentDateTime()
 
                     const insert_query = await event_sponsors_partner_detailsM(insert_array).save()
+
+                    // CONFIRMED BUG FIX: a manual company selected as an event sponsor/partner
+                    // never incremented its used_counts — see the identical fix/rationale in
+                    // modules/funding/funding.service.ts and modules/work-experience/work-experience.service.ts.
+                    if (account_type == 2 && registered_type == 2) {
+                        await company_manual_retrievalsM.updateOne({ _id: user_company_row_id }, { $inc: { used_counts: 1 } })
+                    }
+
                     await deleteKeysByPattern('event_sponsor_list_*')
                     await deleteKeysByPattern('individual_event_*')
                     await deleteKeysByPattern('all_events_*')
