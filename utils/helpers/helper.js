@@ -1740,76 +1740,51 @@ export const getSocialURL = async function (social_link, type) {
 }
 
 
+// Compact "leading zero count" notation for sub-cent values - mirrors
+// frontend-markets-typescript's own established price-display convention
+// (src/utils/convertCurrency.tsx's useConvertCurrency): 4 significant
+// digits after the decimal's leading zeros, collapsed into a <sub> zero
+// count once there are 4 or more of them instead of printing them all out
+// (e.g. 0.0000050680 -> "0.0<sub>5</sub>5068"). Below that threshold (0-3
+// leading zeros) there's nothing worth compressing, so they print plainly.
+// Replaces roundNumericValue's old cascade of ever-longer .toFixed() calls
+// for tiny values (up to .toFixed(13)), which printed raw, un-compacted
+// decimals far past 4 significant digits.
+const SMALL_VALUE_ZERO_COUNT_SUBSCRIPT_THRESHOLD = 4
+const SMALL_VALUE_SIGNIFICANT_DIGITS = 4
+
+function formatCompactSmallValue(absValue, isNegative) {
+    const sign = isNegative ? '-' : ''
+    const fraction = absValue.toFixed(20).split('.')[1] || ''
+    const zeroMatch = fraction.match(/^0+/)
+    const zeroCount = zeroMatch ? zeroMatch[0].length : 0
+    const significantDigits = fraction.slice(zeroCount, zeroCount + SMALL_VALUE_SIGNIFICANT_DIGITS)
+
+    if (zeroCount >= SMALL_VALUE_ZERO_COUNT_SUBSCRIPT_THRESHOLD) {
+        return `${sign}0.0<sub>${zeroCount}</sub>${significantDigits}`
+    }
+    return `${sign}0.${'0'.repeat(zeroCount)}${significantDigits}`
+}
+
 // Round off numeric value
 export const roundNumericValue = (value) => {
     try {
         if (value) {
-            if (value > 0) {
-                if (parseFloat(value) >= 1000000) {
-                    return separator((parseFloat(value)).toFixed(0))
-                }
-                else if (parseFloat(value) >= 0.1) {
-                    return separator((parseFloat(value)).toFixed(2))
-                }
-                else if ((parseFloat(value) < 0.1) && (parseFloat(value) >= 0.01)) {
-                    return (parseFloat(value)).toFixed(2)
-                }
-                else if ((parseFloat(value) < 0.01) && (parseFloat(value) >= 0.001)) {
-                    return (parseFloat(value)).toFixed(3)
-                }
-                else if ((parseFloat(value) < 0.001) && (parseFloat(value) > 0.0001)) {
-                    return (parseFloat(value)).toFixed(4)
-                }
-                else if ((parseFloat(value) < 0.0001) && (parseFloat(value) > 0.00001)) {
-                    return (parseFloat(value)).toFixed(8)
-                }
-                else if ((parseFloat(value) < 0.00001) && (parseFloat(value) > 0.000001)) {
-                    return (parseFloat(value)).toFixed(9)
-                }
-                else if ((parseFloat(value) < 0.000001) && (parseFloat(value) > 0.0000001)) {
-                    return ((parseFloat(value)).toFixed(10))
-                }
-                else if ((parseFloat(value) < 0.0000001) && (parseFloat(value) > 0.00000001)) {
-                    return (parseFloat(value)).toFixed(11)
-                }
-                else if ((parseFloat(value) < 0.00000001) && (parseFloat(value) > 0.000000001)) {
-                    return (parseFloat(value)).toFixed(12)
-                }
-                else if ((parseFloat(value) < 0.000000001) && (parseFloat(value) > 0.0000000001)) {
-                    return (parseFloat(value)).toFixed(12)
-                }
-                else {
-                    return ((parseFloat(value)).toFixed(13))
-                }
+            const numericValue = parseFloat(value)
+            const isNegative = numericValue < 0
+            const absValue = Math.abs(numericValue)
+
+            if (absValue >= 1000000) {
+                return separator(numericValue.toFixed(0))
             }
-            else if (value < 0) {
-                if (parseFloat(value) <= -0.1) {
-                    return ((parseFloat(value)).toFixed(2))
-                }
-                else if ((parseFloat(value) > -0.1) && (parseFloat(value) <= -0.01)) {
-                    return (parseFloat(value)).toFixed(3)
-                }
-                else if ((parseFloat(value) > -0.01) && (parseFloat(value) <= -0.001)) {
-                    return (parseFloat(value)).toFixed(6)
-                }
-                else if ((parseFloat(value) > -0.001) && (parseFloat(value) <= -0.0001)) {
-                    return (parseFloat(value)).toFixed(6)
-                }
-                else if ((parseFloat(value) > -0.0001) && (parseFloat(value) <= -0.00001)) {
-                    return (parseFloat(value)).toFixed(6)
-                }
-                else if ((parseFloat(value) > -0.00001) && (parseFloat(value) <= -0.000001)) {
-                    return (parseFloat(value)).toFixed(7)
-                }
-                else if ((parseFloat(value) > -0.000001) && (parseFloat(value) <= -0.0000001)) {
-                    return (parseFloat(value)).toFixed(8)
-                }
-                else if ((parseFloat(value) > -0.0000001) && (parseFloat(value) <= -0.00000001)) {
-                    return (parseFloat(value)).toFixed(9)
-                }
-                else {
-                    return ((parseFloat(value)).toFixed(13))
-                }
+            else if (absValue >= 0.1) {
+                return separator(numericValue.toFixed(2))
+            }
+            else if (absValue >= 0.01) {
+                return numericValue.toFixed(2)
+            }
+            else {
+                return formatCompactSmallValue(absValue, isNegative)
             }
         }
         else {
