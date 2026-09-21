@@ -16,6 +16,7 @@ export interface GetCompanyListParams {
   createdEndDateRaw?: string
   claimStatusRaw?: string
   categoryStatusRaw?: string
+  partnerStatusRaw?: string
   sortBy?: string
 }
 
@@ -40,6 +41,7 @@ export async function getCompanyList({
   createdEndDateRaw,
   claimStatusRaw,
   categoryStatusRaw,
+  partnerStatusRaw,
   sortBy,
 }: GetCompanyListParams) {
   const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
@@ -74,9 +76,10 @@ export async function getCompanyList({
   const subAdminRowId = subAdminRowIdRaw !== undefined ? Number.parseInt(subAdminRowIdRaw) : undefined
   const claimStatus = claimStatusRaw !== undefined ? Number.parseInt(claimStatusRaw) : undefined
   const categoryStatus = categoryStatusRaw !== undefined ? Number.parseInt(categoryStatusRaw) : undefined
+  const partnerStatus = partnerStatusRaw !== undefined ? Number.parseInt(partnerStatusRaw) : undefined
 
   const matchQuery = buildCompanyListMatchQuery({ activeStatus, search, mainBusinessModelId, subAdminRowId, profileScoreRange, createdDateRange, claimStatus })
-  const aggregateOutput = await companyM.aggregate(buildCompanyListPipeline({ matchQuery, categoryStatus, skip, limit, sortBy }))
+  const aggregateOutput = await companyM.aggregate(buildCompanyListPipeline({ matchQuery, categoryStatus, partnerStatus, skip, limit, sortBy }))
   const { data, count } = extractCompanyListResult(aggregateOutput)
 
   return { status: true, message: data, count, start_date, end_date }

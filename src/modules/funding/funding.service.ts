@@ -32,11 +32,11 @@ const professionals_manual_retrievalsM = require('../../../models/app/users/prof
 const funding_investor_typesM = require('../../../models/app/static/funding_investor_typesM')
 const funding_roundsM = require('../../../models/app/static/funding_roundsM')
 
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { SECTION_INVESTMENT, SECTION_FUNDING_ROUND } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { SECTION_INVESTMENT, SECTION_PROFESSIONAL_INVESTMENT, SECTION_FUNDING_ROUND } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
-import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
-import { ChangeRequestDoc } from '../../common/change-request/change-request.types'
+import { AUDIT_MODULE_COMPANY, AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-audit.registry'
+import { ChangeRequestDoc } from '../../modules/change-request/change-request.types'
 
 const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
@@ -568,16 +568,19 @@ export async function deleteRound(params: { actor: FundingActor; round_id: numbe
   // investor-created row's round_id is always freshly minted just for that one row (see
   // createInvestorUpdateAdmin above), never shared with another investor's row, so isSyndicate
   // is already guaranteed false here (the check above already refuses a syndicate delete from
-  // this scope) and a single-row submitChildDeleteRequest is safe.
-  if (params.actor.user_type !== 1 && params.scopeType === 2) {
+  // this scope) and a single-row submitChildDeleteRequest is safe. Covers BOTH investor scopes —
+  // scopeType 1 (professional, SECTION_PROFESSIONAL_INVESTMENT) and scopeType 2 (company,
+  // SECTION_INVESTMENT) — matching createInvestorUpdateAdmin's own now-unconditional gate above
+  // (CONFIRMED BUG FIX: scopeType 1 used to fall through to the direct deleteMany below, ungated).
+  if (params.actor.user_type !== 1 && (params.scopeType === 1 || params.scopeType === 2)) {
     const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
     // first_row is a hydrated Mongoose document (fundingInvestmentM.find() above, no .lean()) —
     // toObject() gives a plain snapshot object, same intent as every other section's row-
     // snapshot fetch (e.g. company_revenue.queries.ts's findRevenueByIdLean).
     const rowSnapshot = typeof first_row.toObject === 'function' ? first_row.toObject() : { ...first_row }
     return submitChildDeleteRequest({
-      module: AUDIT_MODULE_COMPANY,
-      section: SECTION_INVESTMENT,
+      module: params.scopeType === 1 ? AUDIT_MODULE_PROFESSIONALS : AUDIT_MODULE_COMPANY,
+      section: params.scopeType === 1 ? SECTION_PROFESSIONAL_INVESTMENT : SECTION_INVESTMENT,
       rootDocumentId: first_row.investor_row_id,
       targetRowId: first_row._id,
       rowSnapshot,
@@ -1136,13 +1139,11 @@ export async function createInvestorUpdateAdmin(params: {
     }
   }
 
-  let funds_raised_user_row_id = 0
   if (params.funds_raised_registered_type === 1) {
     const company_reg_query = await companyM.findOne({ _id: params.funds_raised_company_row_id, active_status: 1 }, { _id: 1, user_row_id: 1 })
     if (!company_reg_query) {
       return { status: false, message: { investor_row_id: 'Sorry, Invalid registered company row id' } }
     }
-    if (company_reg_query.user_row_id) funds_raised_user_row_id = company_reg_query.user_row_id
   } else {
     const company_manual_query = await company_manual_retrievalsM.findOne({ _id: params.funds_raised_company_row_id }, { _id: 1 })
     if (!company_manual_query) {
@@ -1176,56 +1177,34 @@ export async function createInvestorUpdateAdmin(params: {
     insertArray.date_n_time = date_n_time
     insertArray.round_id = await getCollectionID('funding_round_id')
 
-    // Publish gate applies to admin-panel edits when the investor is itself a company (design
-    // §2, same shape as every other section) — a person investing (investor_type 1) has no
-    // company to scope a change request to, so that path stays a direct write, unchanged below.
-    if (params.investor_type === 2) {
-      const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
-      return submitChildChangeRequest({
-        module: AUDIT_MODULE_COMPANY,
-        section: SECTION_INVESTMENT,
-        rootDocumentId: params.investor_row_id,
-        targetRowId: null,
-        liveValues: {},
-        submitted: insertArray,
-        actor: toActorRefWithId(
-          {
-            updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
-            updated_by_row_id: adminRowId,
-          },
-          adminRowId,
-        ),
-      })
-    }
-
-    const save_query = await new fundingInvestmentM(insertArray).save()
-    await invalidateFundingCaches()
-
-    // CONFIRMED BUG FIX: recording an investment into a manual company never incremented its
-    // used_counts — see the identical fix/rationale in createOrUpdateRound above.
-    if (params.funds_raised_registered_type === 2) {
-      await company_manual_retrievalsM.updateOne({ _id: params.funds_raised_company_row_id }, { $inc: { used_counts: 1 } })
-    }
-
-    if (params.funds_raised_registered_type === 1 && funds_raised_user_row_id) {
-      await updateNotification({ user_row_id: funds_raised_user_row_id, notify_type: params.investor_type, notify_type_row_id: params.investor_row_id, message_row_id: 20, action_row_id: save_query._id })
-    }
-    if (params.investor_type === 1) {
-      await calculateUserProfileScore(params.investor_row_id, ['investment', 'funding'])
-    } else {
-      await calculateCompanyProfileScore(params.investor_row_id, ['investment', 'funding'])
-    }
-    await calculateCompanyProfileScore(params.funds_raised_company_row_id, ['funding', 'investment'])
-
-    return { status: true, message: { alert_message: 'Congratulations! Your investment details have been successfully added', save_query } }
+    // Publish gate applies to admin-panel edits (design §2, same shape as every other section) —
+    // scoped to the investing party's own module/section, company (SECTION_INVESTMENT) or
+    // professional (SECTION_PROFESSIONAL_INVESTMENT); no extraMatch/investor_type guard needed
+    // (see that section's own registry doc comment).
+    const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
+    return submitChildChangeRequest({
+      module: params.investor_type === 1 ? AUDIT_MODULE_PROFESSIONALS : AUDIT_MODULE_COMPANY,
+      section: params.investor_type === 1 ? SECTION_PROFESSIONAL_INVESTMENT : SECTION_INVESTMENT,
+      rootDocumentId: params.investor_row_id,
+      targetRowId: null,
+      liveValues: {},
+      submitted: insertArray,
+      actor: toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      ),
+    })
   }
 
-  if (params.investor_type === 2) {
+  {
     const liveValues = (await fundingInvestmentM.findOne({ _id: params.funding_row_id }).lean()) ?? {}
     const adminRowId = Number.parseInt(params.actor.token_message.admin_row_id)
     return submitChildChangeRequest({
-      module: AUDIT_MODULE_COMPANY,
-      section: SECTION_INVESTMENT,
+      module: params.investor_type === 1 ? AUDIT_MODULE_PROFESSIONALS : AUDIT_MODULE_COMPANY,
+      section: params.investor_type === 1 ? SECTION_PROFESSIONAL_INVESTMENT : SECTION_INVESTMENT,
       rootDocumentId: params.investor_row_id,
       targetRowId: params.funding_row_id,
       liveValues,
@@ -1239,11 +1218,6 @@ export async function createInvestorUpdateAdmin(params: {
       ),
     })
   }
-
-  await fundingInvestmentM.updateOne({ _id: params.funding_row_id }, { $set: insertArray })
-  await invalidateFundingCaches()
-
-  return { status: true, message: { alert_message: 'Great job! Your investment details have been successfully updated.' } }
 }
 
 /**

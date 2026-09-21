@@ -3,7 +3,7 @@ import express, { Router, Request, Response } from 'express'
 const { check, validationResult } = require('express-validator')
 const { checkUserLoginToken, checkAdminLoginToken } = require('../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
-import { createOrUpdateWorkExperience, adminCreateOrUpdateWorkExperience } from './work-experience.service'
+import { createOrUpdateWorkExperience, adminCreateOrUpdateWorkExperience, adminDeleteProfessionalDetail, deleteProfessionalDetail, getManualProfessionalDetailList } from './work-experience.service'
 import {
   getIndividualProfessionalDetails,
   getProfessionalDetailList,
@@ -158,6 +158,22 @@ appWorkExperienceRouter.get('/individual_professional_details/:professional_deta
 }))
 
 /**
+ * Phase B (work-experience reconciliation, 2026-09-10). Ports controllers/app/users/setting.js's
+ * GET /delete_professional_details/:professional_details_id (~2313-2352) — the last remaining
+ * professionals-work-experience route not yet in this module. Mounted at a temporary `_v2` suffix
+ * (`/delete_professional_details_v2/:id`) since the legacy route at the real path still exists and
+ * this module's sibling routes were already cut over to the real path at some point before this
+ * migration's involvement — adding a same-path route now would be silently unreachable (legacy's
+ * router is registered first) and deleting the legacy route is a separate, explicitly-confirmed
+ * cutover step, not bundled into this addition.
+ */
+appWorkExperienceRouter.get('/delete_professional_details_v2/:professional_details_id', asyncRoute('Delete professional details.', async (req, res) => {
+  const checkToken = checkUserLoginToken(req.headers)
+  if (!checkToken.status) return res.json(checkToken)
+  res.json(await deleteProfessionalDetail(checkToken.message, req.params.professional_details_id as string))
+}))
+
+/**
  * Ports controllers/app/users/setting.js's GET /professional_detail_list/:skip/:limit
  * (lines ~2662-2930). Matches the real source's write-only caching (cache read stays unused,
  * a pre-existing quirk — see work-experience.queries.ts's own note on this endpoint).
@@ -176,6 +192,30 @@ appWorkExperienceRouter.get('/professional_detail_list/:skip/:limit', asyncRoute
   } else {
     res.json(checkToken)
   }
+}))
+
+/**
+ * CONFIRMED BUG FIX: the admin panel's Delete action for Professional Details used to call the
+ * legacy, ungated `GET admin_panel/users/delete_professional_details/:user_row_id/:professional_details_id`
+ * (controllers/admin_panel/app/user.js:4538) directly — an immediate delete with no change-request
+ * review, unlike this same section's already-gated Add/Edit. Mounted at a new, differently-shaped
+ * path (`_v2` suffix plus a `:professional_row_id` param, matching this module's own
+ * `/update_professional_details` body-param convention rather than the legacy route's two
+ * positional params) so it can't collide with or shadow the still-live legacy route — deleting
+ * that legacy route, once the frontend is confirmed cut over to this one, is a separate,
+ * explicitly-confirmed step, not bundled into this addition.
+ */
+adminWorkExperienceRouter.get('/delete_professional_details_v2/:user_row_id/:professional_row_id', asyncRoute('Delete professional details.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [1])
+  if (!checkToken.status) return res.json(checkToken)
+
+  const target_user_row_id = Number.parseInt(req.params.user_row_id as string)
+  const professional_row_id = Number.parseInt(req.params.professional_row_id as string)
+  if (Number.isNaN(target_user_row_id) || Number.isNaN(professional_row_id)) {
+    return res.json({ status: false, message: { alert_message: 'Sorry, Invalid Professional row id' } })
+  }
+
+  res.json(await adminDeleteProfessionalDetail({ admin_context: checkToken, target_user_row_id, professional_row_id }))
 }))
 
 /**
@@ -218,4 +258,42 @@ adminWorkExperienceRouter.get('/professional_detail_list/:user_row_id/:skip/:lim
   } else {
     res.json(checkToken)
   }
+}))
+
+/**
+ * Phase B (work-experience reconciliation, 2026-09-10). Ports controllers/admin_panel/app/user/
+ * work_experiences.js's GET /manual_professional_detail_list/:user_row_id/:skip/:limit (~8-178) —
+ * a company-grouped view scoped to manual-retrieval professionals, genuinely distinct from the
+ * `/professional_detail_list` route above (see work-experience.service.ts's
+ * getManualProfessionalDetailList doc comment for why this stays a separate function).
+ *
+ * Mounted directly (no `_v2` suffix needed): this module's adminWorkExperienceRouter lives at
+ * `/admin_panel/users`, a completely different URL prefix than legacy's
+ * `/admin_panel/work_experiences` — no path collision, so nothing here is silently shadowed or
+ * shadows anything. Legacy's `work_experiences.js` stays live and untouched until the frontend is
+ * confirmed to call this new path, at which point deleting the legacy file is a separate,
+ * explicitly-confirmed cutover step.
+ */
+adminWorkExperienceRouter.get('/manual_professional_detail_list/:user_row_id/:skip/:limit', asyncRoute('Manual user professional details list.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [1])
+  if (!checkToken.status) return res.json(checkToken)
+
+  const errObj: Record<string, string> = {}
+  if (Number.isNaN(Number.parseInt(req.params.user_row_id as string))) {
+    errObj['user_row_id'] = 'The User row id field must be contain valid number.'
+  }
+  if (Number.isNaN(Number.parseInt(req.params.skip as string))) {
+    errObj['skip'] = 'The parameter skip field must be contain valid number'
+  }
+  if (Number.isNaN(Number.parseInt(req.params.limit as string))) {
+    errObj['limit'] = 'The parameter limit field must be contain valid number.'
+  }
+  if (Object.keys(errObj).length) {
+    return res.json({ status: false, message: errObj })
+  }
+
+  const user_row_id = Number.parseInt(req.params.user_row_id as string)
+  const skip = Number.parseInt(req.params.skip as string)
+  const limit = Number.parseInt(req.params.limit as string)
+  res.json(await getManualProfessionalDetailList(user_row_id, skip, limit))
 }))

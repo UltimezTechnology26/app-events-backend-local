@@ -18,6 +18,7 @@ export const isAuditModule = (value: string): value is AuditModule =>
 
 /** Which lifecycle stamp field each action writes on cln_entity_lifecycle. */
 export const ACTION_TO_LIFECYCLE_FIELD: Record<LifecycleAction, string> = {
+  create: 'last_created',
   approve: 'last_approved',
   reject: 'last_rejected',
   enable: 'last_enabled',
@@ -34,6 +35,7 @@ export const ACTION_TO_LIFECYCLE_FIELD: Record<LifecycleAction, string> = {
  * cln_company_deleted_history_lists rather than destroying it outright.
  */
 export const ACTION_TO_LOG_ACTION: Record<LifecycleAction, string> = {
+  create: 'create',
   approve: 'approve',
   reject: 'reject',
   enable: 'enable',
@@ -52,6 +54,9 @@ export const LIFECYCLE_COUNTER_NAME = 'cln_entity_lifecycle'
  * (CLAUDE.md: no string literal duplicated 3+ times).
  */
 export const AUDIT_MODULE_COMPANY: AuditModule = 'company'
+
+/** Exported so the professionals change-request call sites never repeat the literal 'professional'. */
+export const AUDIT_MODULE_PROFESSIONALS: AuditModule = 'professional'
 
 export const DEFAULT_AUDIT_SKIP = 0
 export const DEFAULT_AUDIT_LIMIT = 25

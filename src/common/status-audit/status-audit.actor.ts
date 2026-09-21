@@ -1,4 +1,4 @@
-import { ActorRef, ActorType, UpdateTracker } from './status-audit.types'
+import { ActorRef, ActorType, FieldChange, UpdateTracker } from './status-audit.types'
 
 const KNOWN_ACTOR_TYPES: readonly string[] = ['admin', 'subadmin', 'user', 'system']
 
@@ -35,6 +35,27 @@ export async function resolveActorName(actor: ActorRef | null | undefined): Prom
     return doc?.full_name ?? null
   }
   return null
+}
+
+/**
+ * CONFIRMED GAP FIX (user-requested, 2026-09-20, "check all the pages in companies and
+ * professionals where we have displayed subadmin and admin names it should not show #number
+ * rather fetch the data from backend"): every Pending/Rejected Changes list response (and the
+ * per-entity approvals dialog) only ever resolved the REQUEST-level `requested_by`/`reviewed_by`
+ * (via `resolveActorName` in change-request.service.ts's `withActorName`/`withReviewerName`) -
+ * each individual `FieldChange`'s own `changed_by` (who last touched THIS field, shown as "Edited
+ * by X" in `ChangeFieldDiffRows.tsx`) and `reviewed_by` (who approved/rejected THIS field) were
+ * passed straight through from storage, still carrying whatever `name` (usually none) was
+ * attached at write time - falling back to the frontend's own `#<id>` display. This resolves both
+ * for every field in one pass, reused by every function in change-request.service.ts and
+ * status-audit.service.ts that returns raw `changes[]` to a reviewer-facing surface.
+ */
+export async function withFieldChangeActorNames(changes: FieldChange[]): Promise<FieldChange[]> {
+  return Promise.all(changes.map(async (change) => ({
+    ...change,
+    changed_by: change.changed_by ? { ...change.changed_by, name: await resolveActorName(change.changed_by) } : change.changed_by,
+    reviewed_by: change.reviewed_by ? { ...change.reviewed_by, name: await resolveActorName(change.reviewed_by) } : change.reviewed_by,
+  })))
 }
 
 /**

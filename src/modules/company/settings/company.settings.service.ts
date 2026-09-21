@@ -46,15 +46,16 @@ import {
   runGetCompanySeoAggregate,
   runCompanyFollowersAggregate
 } from './company.settings.queries'
-import { submitChangeRequest } from '../../../common/change-request/change-request.service'
-import { findPendingRequest } from '../../../common/change-request/change-request.queries'
-import { computeDiff, buildOverlayPayload } from '../../../common/change-request/change-request.diff'
-import { SECTION_SEO, SECTION_SOCIAL_MEDIA, SECTION_BASIC_DETAILS } from '../../../common/change-request/change-request.registry'
-import { CHANGE_REQUEST_ACTION } from '../../../common/change-request/change-request.types'
+import { submitChangeRequest } from '../../../modules/change-request/change-request.service'
+import { findPendingRequest } from '../../../modules/change-request/change-request.queries'
+import { computeDiff, buildOverlayPayload } from '../../../modules/change-request/change-request.diff'
+import { SECTION_SEO, SECTION_SOCIAL_MEDIA, SECTION_BASIC_DETAILS } from '../../../modules/change-request/change-request.registry'
+import { CHANGE_REQUEST_ACTION } from '../../../modules/change-request/change-request.types'
 import { toActorRefWithId } from '../../../common/status-audit/status-audit.actor'
 import { ActorRef } from '../../../common/status-audit/status-audit.types'
 import { AUDIT_MODULE_COMPANY } from '../../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../../common/status-audit/status-audit.queries'
+import { recordCompanyStatusChange } from '../../company_admin/company_admin.audit'
 import logger from '../../../../config/logger'
 const { getCollectionID } = require('../../../../utils/helpers/database_helper')
 import {
@@ -73,7 +74,7 @@ import {
 const USER_TYPE_COMPANY_OWNER = 1
 const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
-// Same ten fields as COMPANY_SECTION_REGISTRY[SECTION_SEO].editableFields. Kept as a local
+// Same ten fields as SECTION_REGISTRY[SECTION_SEO].editableFields. Kept as a local
 // constant rather than importing the registry entry: the registry is built around admin-panel
 // change requests, and this owner-path log write is a separate, ungated concern that happens
 // to reuse the same diff engine.
@@ -82,7 +83,7 @@ const OWNER_SEO_EDITABLE_FIELDS = [
   'twitter_creator', 'og_title', 'og_description', 'twitter_title', 'twitter_description',
 ] as const
 
-// Same eleven fields as COMPANY_SECTION_REGISTRY[SECTION_SOCIAL_MEDIA].editableFields — see
+// Same eleven fields as SECTION_REGISTRY[SECTION_SOCIAL_MEDIA].editableFields — see
 // OWNER_SEO_EDITABLE_FIELDS for why this is a local constant rather than a registry import.
 const OWNER_SOCIAL_MEDIA_EDITABLE_FIELDS = [
   'facebook', 'twitter', 'linkedin', 'instagram', 'video_link', 'telegram',
@@ -448,6 +449,19 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
     // owner alike) now always saves directly, live immediately; only EDITS to an already-existing
     // company go through the change-request/approval flow.
     const saveCompanyDetails = await companyM(insertArray).save()
+
+    // CONFIRMED GAP FIX (user-requested, 2026-09-20, "creation of professionals and company
+    // profile must be registered in the change log/history"): company creation was never audited
+    // at all - `create` didn't even exist in `LifecycleAction` until this fix. Recorded AFTER the
+    // save succeeds, same "never throw on the audit write" contract as every other lifecycle
+    // action (see `recordStatusChange`'s own doc comment).
+    await recordCompanyStatusChange({
+      documentId: saveCompanyDetails._id,
+      action: 'create',
+      tracker: getUpdateTrackerFields(actor),
+      adminRowId: sub_admin_row_id,
+      companyName: insertArray.company_name,
+    })
 
     seoArray['company_row_id'] = saveCompanyDetails._id
     socialArray['company_row_id'] = saveCompanyDetails._id
@@ -1283,7 +1297,10 @@ async function getAdminTeamMembersListForPopup(companyRowId: number) {
  * `updated_date_n_time` to the popup's expected `date_n_time` key.
  */
 async function getRevenueDetailsForPopup(companyRowId: number) {
-  const { list } = await getRevenueListAdmin({ companyRowId })
+  // CONFIRMED BUG FIX (found live, 2026-09-21): getFundsRaisedListAdmin below returns null
+  // (not an empty list) for a disabled company - a genuinely null-safe default here, matching
+  // that one, in case a sibling admin-list helper is ever changed to the same shape.
+  const { list } = (await getRevenueListAdmin({ companyRowId })) ?? { list: [] }
   return list.map((r: any) => ({ date_n_time: r.updated_date_n_time, year: r.year, quarter: r.quarter, revenue: r.revenue }))
 }
 
@@ -1302,7 +1319,13 @@ async function getRevenueDetailsForPopup(companyRowId: number) {
  * category, date) are populated correctly.
  */
 async function getFundingListForPopup(companyRowId: number) {
-  const { list } = await getFundsRaisedListAdmin({ funds_raised_company_row_id: companyRowId, skip: 0, limit: 1000, query: {} })
+  // CONFIRMED BUG FIX (found live, 2026-09-21, "the admin view page must show a disabled
+  // company"): getFundsRaisedListAdmin's own `active_status: 1` existence check returns a bare
+  // `null` (not `{list: []}`) for a disabled company, so this crashed with "Cannot destructure
+  // property 'list' of null" the moment the new lifecycle-approval gate made disabling a company
+  // through the admin panel actually possible end-to-end - the admin View page had never been
+  // opened for a just-disabled company before. Reproduced live via the real dev server.
+  const { list } = (await getFundsRaisedListAdmin({ funds_raised_company_row_id: companyRowId, skip: 0, limit: 1000, query: {} })) ?? { list: [] }
   const rows: any[] = []
   for (const round of list) {
     for (const inv of round.investors ?? []) {
@@ -1330,7 +1353,7 @@ async function getFundingListForPopup(companyRowId: number) {
  * defaulted to 1 ("Self-listed").
  */
 async function getInvestingListForPopup(companyRowId: number) {
-  const { list } = await getInvestorList({ investor_type: 2, investor_row_id: companyRowId, skip: 0, limit: 1000, query: {} })
+  const { list } = (await getInvestorList({ investor_type: 2, investor_row_id: companyRowId, skip: 0, limit: 1000, query: {} })) ?? { list: [] }
   return list.map((item: any) => ({
     announcement_date: item.announcement_date,
     added_by_type: 1,
@@ -1537,24 +1560,22 @@ export async function getIndividualDetails({ actor, queryCompanyRowId, includePe
   }
 
   const resolvedCompanyRowId = check_company.message.company_row_id as number
+  return buildIndividualDetailsResponse(resolvedCompanyRowId, actor, includePendingOverlay)
+}
+
+/**
+ * Shared tail of getIndividualDetails/getIndividualDetailsBySlug - given an already-resolved row
+ * id, builds the response and applies the same includePendingOverlay behavior. Extracted so the
+ * slug-based lookup below doesn't duplicate this logic (see getIndividualDetails's own comment
+ * for why the overlay is opt-in).
+ */
+async function buildIndividualDetailsResponse(resolvedCompanyRowId: number, actor: Actor, includePendingOverlay?: boolean) {
   const result = await getCompanyIndividualDetailsData({
     company_row_id: resolvedCompanyRowId,
-    includeAdminExtras: actor.message.user_type === 2,
+    includeAdminExtras: actor.status && actor.message.user_type === 2,
   })
 
-  // Admin edit-context only (includePendingOverlay, opt-in - see this param's own doc comment):
-  // overlay any already-pending basic_details/social_media change request's payload onto the live
-  // values this endpoint otherwise returns unconditionally. Without this, the admin editor's forms
-  // (BasicDetailsForm, SocialMediaForm) hydrate purely from live data even when a field is already
-  // pending review - and since both forms resubmit their ENTIRE current state on every save (not
-  // just the touched fields), the next unrelated edit on the same section would silently resend
-  // the stale live value for every OTHER field too, reverting an already-pending edit back toward
-  // live the moment that request is approved. Gated behind the opt-in flag (not just user_type===2)
-  // because the read-only company VIEW page uses this SAME endpoint and must never show an
-  // approved-but-unpublished change as if it were already live - that would mislead a reviewer into
-  // thinking publish already happened (confirmed report: approving a change made it "look live" on
-  // the view page despite publish being a deliberate separate action).
-  if (includePendingOverlay && actor.message.user_type === 2 && result.status) {
+  if (includePendingOverlay && actor.status && actor.message.user_type === 2 && result.status) {
     await overlayPendingSectionPayloads(result.message as Record<string, unknown>, resolvedCompanyRowId)
   }
 
@@ -1569,6 +1590,41 @@ async function overlayPendingSectionPayloads(details: Record<string, unknown>, c
   ])
   if (pendingBasicDetails?.payload) Object.assign(details, buildOverlayPayload(pendingBasicDetails.payload, pendingBasicDetails.changes))
   if (pendingSocialMedia?.payload) Object.assign(details, buildOverlayPayload(pendingSocialMedia.payload, pendingSocialMedia.changes))
+}
+
+export interface GetIndividualDetailsBySlugParams {
+  actor: Actor
+  companySlug: string
+  includePendingOverlay?: boolean
+}
+
+/**
+ * CONFIRMED NEW ROUTE (user-requested, 2026-09-19): the admin panel's Company View page should
+ * open at `/admin/companies/view/<company_id-slug>/`, the same slug the public company page uses
+ * in its own URL, instead of the numeric row id. Deliberately NOT built by bolting an optional
+ * `company_id` query param onto the existing `getIndividualDetails` (row-id) lookup above - a
+ * separate, dedicated slug-based lookup, admin-only. Also deliberately does NOT reuse the public
+ * page's own slug lookup (`company.individual.ts`'s `companyIndividualDetails`), which filters to
+ * `approval_status:1, active_status:1` only - an admin must be able to view a pending or disabled
+ * company by its slug too, so this does a plain unrestricted `findOne`.
+ */
+export async function getIndividualDetailsBySlug({ actor, companySlug, includePendingOverlay }: GetIndividualDetailsBySlugParams) {
+  if (!actor.status) {
+    return actor
+  }
+  if (actor.message.user_type !== 2) {
+    return { status: false, message: { alert_message: 'This lookup is admin-only.' } }
+  }
+  if (!companySlug) {
+    return { status: false, message: { alert_message: 'The company id field is required.' } }
+  }
+
+  const company = await companyM.findOne({ company_id: companySlug }).select('_id').lean()
+  if (!company) {
+    return { status: false, message: { alert_message: 'Company not found.' } }
+  }
+
+  return buildIndividualDetailsResponse(company._id, actor, includePendingOverlay)
 }
 
 /** Ports setting.js's GET /individual_company_details/:user_row_id (lines 1089-1131) — API-key-only team panel. */

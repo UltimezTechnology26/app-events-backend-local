@@ -1,4 +1,4 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
 
 /**
  * `revenue_streams` is submitted as one opaque array of `{category_row_id, stream_amount}` (see

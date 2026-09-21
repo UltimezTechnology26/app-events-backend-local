@@ -64,3 +64,11 @@ yarn-error.log*
 
 # local indexing script (Pinecone namespace etc. vary per machine)
 /ingest-code.js
+
+# planning/session scratch docs — local working notes, never pushed
+/CLAUDE.local.md
+/api-performance-optimization-project-info.md
+/frontend-components-files-session.md
+/project-requirement.md
+/session-build-summary.md
+/session-review-summary.md

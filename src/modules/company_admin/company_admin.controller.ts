@@ -11,12 +11,13 @@ import {
   getYearsOverview,
   getNewCompanyYearsOverview,
   getSubadminOverview,
-  enableCompany,
-  disableCompany,
   bulkImportCompanies,
   updateCompanyPageDetails,
   checkUserOrCompanyIdAvailability,
 } from './company_admin.service'
+// Enable/Disable now route through the pending -> approve -> publish gate (user-requested
+// 2026-09-20) instead of writing live immediately — see company_admin.lifecycle-request.service.ts.
+import { submitEnableCompanyRequest, submitDisableCompanyRequest } from './company_admin.lifecycle-request.service'
 import { getCompanyOverview } from './company_admin.overview.service'
 import { getCompanyIndividualOverview } from './company_admin.individual_overview.service'
 import { getSeoOverview } from './company_admin.seo_overview.service'
@@ -110,6 +111,7 @@ companyAdminRouter.get('/list/:skip/:limit', asyncRoute('Companies list.', async
     createdEndDateRaw: req.query.created_end_date as string,
     claimStatusRaw: req.query.claim_status as string,
     categoryStatusRaw: req.query.category_status as string,
+    partnerStatusRaw: req.query.partner_status as string,
     sortBy: req.query.sort_by as string
   })
   res.json(result)
@@ -231,7 +233,7 @@ companyAdminRouter.get('/enable_company/:company_row_id', writeEndpointRateLimit
     return
   }
 
-  const result = await enableCompany({ admin: checkToken, companyRowIdRaw: req.params.company_row_id as string })
+  const result = await submitEnableCompanyRequest(checkToken, req.params.company_row_id as string)
   res.json(result)
 }))
 
@@ -260,7 +262,7 @@ companyAdminRouter.post(
       return
     }
 
-    const result = await disableCompany({ admin: checkToken, companyRowIdRaw: req.params.company_row_id as string, disableReason: req.body.disable_reason })
+    const result = await submitDisableCompanyRequest(checkToken, req.params.company_row_id as string, req.body.disable_reason)
     res.json(result)
   }),
 )

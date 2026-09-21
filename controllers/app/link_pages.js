@@ -10,7 +10,7 @@ import logger from '../../config/logger';
 const { check, validationResult } = require('express-validator')
 const { getMinusDates, arrangeValidation, user_profile_completed_percentage, getPresentDateTime, getSocialURL, array_column, getIntIdFromArray, createDateTime, createEndDateOnly, getIntValues, getDistanceFromLatLon } = require('../../utils/helpers/helper')
 const { getUpdateTrackerFields } = require('../../utils/helpers/app_helper')
-const { checkUserLoginToken } = require('../../middleware/authorization')
+const { checkUserLoginToken, checkAdminLoginToken } = require('../../middleware/authorization')
 const { sendEmail } = require('../../config/email')
 const { updateThreadNotification } = require('../../utils/helpers/notification_helper')
 const { getEventsData, filterQuery, professionalfilterQuery } = require('../../utils/helpers/events_helper')
@@ -972,7 +972,13 @@ router.get('/user_detail/:username', async (req, res) => {
             user_row_id = checkUserToken.message
         }
 
-        const result = await getUserDetails({ username, user_row_id });
+        // Admin-only bypass of the login/approval-status gate below (user-requested 2026-09-21,
+        // "it must be only for admin") - lets the admin panel's own View page keep showing a
+        // professional's details after Disable/Delete, without opening this up to the public.
+        const checkAdminToken = checkAdminLoginToken(req.headers, [-1])
+        const isAdminCaller = checkAdminToken.status
+
+        const result = await getUserDetails({ username, user_row_id, isAdminCaller });
 
         if (result.status) {
             res.json({

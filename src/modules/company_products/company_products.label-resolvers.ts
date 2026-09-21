@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildEnumLabelResolver } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildEnumLabelResolver } from '../../modules/change-request/change-request.common-resolvers'
 
 const resolveProductTypeLabel = buildEnumLabelResolver({ 1: 'Token', 2: 'Chain', 3: 'Exchange' })
 const resolveRegisterTypeLabel = buildEnumLabelResolver({ 1: 'Registered', 2: 'Manually Added' })

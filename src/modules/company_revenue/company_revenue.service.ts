@@ -17,9 +17,9 @@ import {
   findRevenueByIdAndCompanyLean,
   findRevenueByIdLean
 } from './company_revenue.queries'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { computeDiff } from '../../common/change-request/change-request.diff'
-import { COMPANY_SECTION_REGISTRY, SECTION_REVENUE } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { computeDiff } from '../../modules/change-request/change-request.diff'
+import { SECTION_REGISTRY, SECTION_REVENUE } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
@@ -245,13 +245,13 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
     const ownerRevenueCreateChanges = await computeDiff({
       before: {},
       submitted: revenueFields,
-      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
-      editableFields: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].editableFields
+      schemaPaths: SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
+      editableFields: SECTION_REGISTRY[SECTION_REVENUE].editableFields
     })
     try {
       await insertChangeLog({
         module: AUDIT_MODULE_COMPANY,
-        target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+        target_collection: SECTION_REGISTRY[SECTION_REVENUE].collection,
         target_row_id: company_row_id,
         root_document_id: company_row_id,
         section: SECTION_REVENUE,
@@ -280,14 +280,14 @@ export async function saveOrUpdateRevenue({ user_row_id, user_type, body, preVal
   const ownerRevenueChanges = await computeDiff({
     before: preWriteRevenueValues,
     submitted: revenueFields,
-    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
-    editableFields: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].editableFields
+    schemaPaths: SECTION_REGISTRY[SECTION_REVENUE].schemaPaths,
+    editableFields: SECTION_REGISTRY[SECTION_REVENUE].editableFields
   })
   if (ownerRevenueChanges.length > 0) {
     try {
       await insertChangeLog({
         module: AUDIT_MODULE_COMPANY,
-        target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+        target_collection: SECTION_REGISTRY[SECTION_REVENUE].collection,
         target_row_id: revenue_row_id,
         root_document_id: company_row_id,
         section: SECTION_REVENUE,
@@ -400,7 +400,7 @@ export async function deleteRevenueDetails({ user_row_id, user_type, revenue_row
   try {
     await insertChangeLog({
       module: AUDIT_MODULE_COMPANY,
-      target_collection: COMPANY_SECTION_REGISTRY[SECTION_REVENUE].collection,
+      target_collection: SECTION_REGISTRY[SECTION_REVENUE].collection,
       target_row_id: revenue_row_id,
       root_document_id: checkCompanyData.company_row_id,
       section: SECTION_REVENUE,

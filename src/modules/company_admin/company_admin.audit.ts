@@ -19,13 +19,22 @@ const LABEL_REJECTED = 'Rejected'
 const LABEL_ENABLED = 'Enabled'
 const LABEL_DISABLED = 'Disabled'
 
+const COMPANY_NAME_FIELD = 'company_name'
+const COMPANY_NAME_LABEL = 'Company Name'
+
 /**
  * The status transition each company lifecycle action represents.
  * `delete` and `restore` carry a row snapshot rather than a field diff, so they
- * produce no changes — hence the empty default.
+ * produce no changes — hence the empty default. `create` has no "before" (there is no prior
+ * document to diff against), so it carries a single synthetic field instead - the company's own
+ * name - purely so a reviewer opening this entry's "View" dialog can tell which company it's
+ * about without cross-referencing the row id, matching markets' own creation-approval entries
+ * (see this app's `HistoryFeed`/`HistoryEntryCard`, which already special-case this).
  */
-function statusChangeFor(action: LifecycleAction): FieldChange[] {
+function statusChangeFor(action: LifecycleAction, companyName?: string | null): FieldChange[] {
   switch (action) {
+    case 'create':
+      return companyName ? [{ field: COMPANY_NAME_FIELD, field_label: COMPANY_NAME_LABEL, old_value: null, old_label: null, new_value: companyName, new_label: null }] : []
     case 'approve':
       return [buildStatusFieldChange(APPROVAL_STATUS_FIELD, APPROVAL_STATUS_PENDING, APPROVAL_STATUS_APPROVED, LABEL_PENDING, LABEL_APPROVED)]
     case 'reject':
@@ -53,6 +62,8 @@ export interface RecordCompanyStatusChangeParams {
   adminRowId?: number | string | null
   reason?: string | null
   snapshot?: unknown
+  /** `create` only - see `statusChangeFor`'s own doc comment. Ignored by every other action. */
+  companyName?: string | null
 }
 
 /**
@@ -67,13 +78,14 @@ export async function recordCompanyStatusChange({
   adminRowId = null,
   reason = null,
   snapshot = null,
+  companyName = null,
 }: RecordCompanyStatusChangeParams): Promise<void> {
   await recordStatusChange({
     module: AUDIT_MODULE_COMPANY,
     documentId,
     action,
     actor: toActorRefWithId(tracker, adminRowId),
-    changes: statusChangeFor(action),
+    changes: statusChangeFor(action, companyName),
     reason,
     snapshot,
   })

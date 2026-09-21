@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildEnumLabelResolver, resolveDateLabel } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildEnumLabelResolver, resolveDateLabel } from '../../modules/change-request/change-request.common-resolvers'
 
 /** 1 = registered company (companyM), 2 = manually-added/unregistered (company_manual_retrievalsM) - see isPartyToAcquisition. */
 const resolveRegisteredTypeLabel = buildEnumLabelResolver({ 1: 'Registered', 2: 'Manually Added' })

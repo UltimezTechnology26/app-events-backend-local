@@ -1,0 +1,13 @@
+// modules/professionals-audit/professionals-audit.types.ts
+
+export interface AdminAuthFailure {
+  status: false
+  message: unknown
+}
+
+export interface AdminAuthSuccess {
+  status: true
+  message: unknown
+}
+
+export type AdminAuthResult = AdminAuthSuccess | AdminAuthFailure

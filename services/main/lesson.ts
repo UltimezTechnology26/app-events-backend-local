@@ -306,7 +306,13 @@ export const getLessonsList = async (course_slug: string, skip: number, limit: n
 };
 
 
-const setRemainderEmail = async (user_row_id: string, course_row_id: number, lesson_row_id: string) => {
+// Type-only fix (2026-09-17, no runtime change): `lesson_row_id` was annotated `string`, but every
+// call site (and `insert_array`'s usage against `*_row_id` numeric-convention fields below) passes
+// the lesson's own `_id`, which is a `Number` on the Lessons schema. This was previously masked by
+// `lessonsM` being an untyped legacy JS import (`lesson._id` was implicitly `any`); now that
+// `LessonsM` is colocated with a real Mongoose schema type (academy-admin.models.ts), TypeScript
+// correctly flags the mismatch at this function's only call site.
+const setRemainderEmail = async (user_row_id: string, course_row_id: number, lesson_row_id: number) => {
     let insert_array: any = {}
     insert_array['course_row_id'] = course_row_id
     insert_array['lesson_row_id'] = lesson_row_id

@@ -11,8 +11,8 @@ import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-librar
 const { checkUserLoginToken } = require('../../../middleware/authorization')
 import { validatePositions, ResolvedPosition } from '../work-experience/work-experience.service'
 import { buildCompanyTeamMemberCountPipeline, getTeamMembersForCompanyIds } from './team-members.queries'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { SECTION_TEAM_MEMBERS } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { SECTION_TEAM_MEMBERS } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 

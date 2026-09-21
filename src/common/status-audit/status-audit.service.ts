@@ -14,7 +14,7 @@ import {
   upsertLifecycleStamp,
 } from './status-audit.queries'
 import { ActorRef, EntityAuditHistoryParams, FieldChange, RecordStatusChangeParams } from './status-audit.types'
-import { resolveActorName } from './status-audit.actor'
+import { resolveActorName, withFieldChangeActorNames } from './status-audit.actor'
 
 const INVALID_MODULE_MESSAGE = 'Sorry, Invalid module'
 
@@ -106,10 +106,14 @@ export async function getEntityAudit({
   // CONFIRMED BUG FIX: Audit History showed the same raw "Admin #94 (Sub Admin)" id the
   // pending/approved/rejected lists used to show before resolveActorName existed - same fix,
   // applied here too. Never mutates the stored log entry, only what this read returns.
+  // Also resolves each entry's own per-field `changes[].changed_by`/`reviewed_by` (previously left
+  // unresolved, same gap as the Pending/Rejected queue responses - see
+  // `withFieldChangeActorNames`'s own doc comment).
   const historyWithActorNames = await Promise.all(
-    (history as { actor: ActorRef }[]).map(async (entry) => ({
+    (history as { actor: ActorRef; changes: FieldChange[] }[]).map(async (entry) => ({
       ...entry,
       actor: { ...entry.actor, name: await resolveActorName(entry.actor) },
+      changes: await withFieldChangeActorNames(entry.changes ?? []),
     })),
   )
 

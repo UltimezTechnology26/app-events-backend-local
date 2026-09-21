@@ -49,6 +49,23 @@ function buildCategoryStatusStage(categoryStatus?: number) {
 }
 
 /**
+ * "Partner" filter (2026-09-16, new functionality - no legacy precedent, per user request):
+ * `cln_company_added_to_partners` is an existence table keyed by `company_row_id` - a row present
+ * there means the company has completed Coinpedia's partner program; no row means it hasn't. Same
+ * treatment as `buildCategoryStatusStage` - a filter-relevant lookup must run ahead of the
+ * `$facet`'s pagination, not inside `data` alongside the other display-only lookups, so this stage
+ * assumes `partner` (the looked-up, unwound field) already exists on the document by the time it
+ * runs. `partnerStatus === 1` means "is a partner" (row exists, so `partner` is non-null after a
+ * `preserveNullAndEmptyArrays` unwind); `0` means "not yet a partner".
+ */
+function buildPartnerStatusStage(partnerStatus?: number) {
+  if (partnerStatus === undefined || Number.isNaN(partnerStatus) || ![0, 1].includes(partnerStatus)) {
+    return []
+  }
+  return [{ $match: { partner: partnerStatus === 1 ? { $ne: null } : null } }]
+}
+
+/**
  * Ports company.js's GET /list (approval_status:1, active_status:1) and GET /disabled_list
  * (active_status:0) `$and` match-building logic (Part 3 §7 Phase H step 4) — one
  * activeStatus-parameterized builder replaces both near-identical routes. `list`'s more general
@@ -117,12 +134,14 @@ export function buildCompanyListMatchQuery({
 export function buildCompanyListPipeline({
   matchQuery,
   categoryStatus,
+  partnerStatus,
   skip,
   limit,
   sortBy,
 }: {
   matchQuery: ReturnType<typeof buildCompanyListMatchQuery>
   categoryStatus?: number
+  partnerStatus?: number
   skip: number
   limit: number
   sortBy?: string
@@ -147,6 +166,13 @@ export function buildCompanyListPipeline({
       },
     },
     ...buildCategoryStatusStage(categoryStatus),
+    // The partner lookup moved here (ahead of pagination) alongside business_info, same reason:
+    // buildPartnerStatusStage needs to filter on it before $skip/$limit. It's unwound immediately
+    // so both the filter stage and the final $project (`partner_added_id: '$partner._id'`) see the
+    // same shape whether or not a `partnerStatus` filter is actually applied this call.
+    { $lookup: { from: 'cln_company_added_to_partners', localField: '_id', foreignField: 'company_row_id', as: 'partner' } },
+    { $unwind: { path: '$partner', preserveNullAndEmptyArrays: true } },
+    ...buildPartnerStatusStage(partnerStatus),
     { $sort: sortStage },
     {
       $facet: {
@@ -155,7 +181,6 @@ export function buildCompanyListPipeline({
           { $limit: limit },
           { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
           { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
-          { $lookup: { from: 'cln_company_added_to_partners', localField: '_id', foreignField: 'company_row_id', as: 'partner' } },
           {
             $lookup: {
               from: 'cln_professionals',
@@ -172,7 +197,6 @@ export function buildCompanyListPipeline({
               as: 'updated_by_admin_info',
             },
           },
-          { $unwind: { path: '$partner', preserveNullAndEmptyArrays: true } },
           { $lookup: { from: 'cln_sub_admins', localField: 'sub_admin_row_id', foreignField: '_id', as: 'sub_admin_info' } },
           { $unwind: { path: '$sub_admin_info', preserveNullAndEmptyArrays: true } },
           { $lookup: { from: 'cln_static_company_business_models', localField: 'main_business_model_id', foreignField: '_id', as: 'main_business_info', pipeline: [{ $project: { business_name: 1 } }] } },

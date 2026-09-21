@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildArrayLabelResolver, buildSingleLabelResolver, resolveCountryName, resolveDateLabel } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildArrayLabelResolver, buildSingleLabelResolver, resolveCountryName, resolveDateLabel } from '../../modules/change-request/change-request.common-resolvers'
 
 export const JOBS_LABEL_RESOLVERS: Record<string, LabelResolver> = {
   country_id: resolveCountryName,

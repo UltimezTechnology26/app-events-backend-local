@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildEnumLabelResolver, resolveDateLabel } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildEnumLabelResolver, resolveDateLabel } from '../../modules/change-request/change-request.common-resolvers'
 
 const resolveTokenTypeLabel = buildEnumLabelResolver({ 1: 'Registered', 2: 'Manually Added' })
 const resolveCompanyTypeLabel = buildEnumLabelResolver({ 1: 'Registered Company', 2: 'Manually Added' })

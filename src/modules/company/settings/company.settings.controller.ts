@@ -12,6 +12,7 @@ import {
   saveOrUpdateSocialDetails,
   saveOrUpdateSocialMediaDetailsTeamPanel,
   getIndividualDetails,
+  getIndividualDetailsBySlug,
   getIndividualDetailsTeamPanel,
   updateCompanyLogo,
   removeCompanyLogo,
@@ -160,6 +161,20 @@ companySettingsRouter.get('/individual_details', asyncRoute('Company details.', 
   const result = await getIndividualDetails({
     actor,
     queryCompanyRowId: req.query.company_row_id as string | undefined,
+    includePendingOverlay: req.query.include_pending_overlay === 'true',
+  })
+  res.json(result)
+}))
+
+// Admin panel's Company View page, routed by the same `company_id` slug the public company page
+// uses (not the numeric row id) - see getIndividualDetailsBySlug's own doc comment.
+companySettingsRouter.get('/individual_details_by_slug/:company_id', asyncRoute('Company details by slug.', async (req, res) => {
+  const guard = await requireAllLogin7(req)
+  if (guard) return res.json(guard)
+  const actor = await checkAllLoginToken(req.headers, [7])
+  const result = await getIndividualDetailsBySlug({
+    actor,
+    companySlug: req.params.company_id as string,
     includePendingOverlay: req.query.include_pending_overlay === 'true',
   })
   res.json(result)

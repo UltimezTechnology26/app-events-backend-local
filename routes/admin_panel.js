@@ -36,15 +36,34 @@ const { fundingInvestorTypesRouter } = require('../src/modules/funding/funding.i
 const { fundingRoundsRouter } = require('../src/modules/funding/funding.rounds.controller')
 const { regulatoryDetailsRouter } = require('../src/modules/company/company.regulatory_details.controller')
 const admin_user = require('../controllers/admin_panel/app/user')
+const { professionalsClaimsRouter } = require('../src/modules/professionals-claims/professionals-claims.controller')
+const { professionalsDeleteLifecycleRouter } = require('../src/modules/professionals-delete-lifecycle/professionals-delete-lifecycle.controller')
+const { professionalsAuditRouter } = require('../src/modules/professionals-audit/professionals-audit.controller')
+const { adminFollowersRouter } = require('../src/modules/professionals-followers/professionals-followers.controller')
+const { sourcesRouter } = require('../src/modules/sources/sources.controller')
+const { academyCoursesRouter } = require('../src/modules/academy-admin/academy-admin.courses.controller')
+const { academyChaptersRouter } = require('../src/modules/academy-admin/academy-admin.chapters.controller')
+const { academyLessonsRouter } = require('../src/modules/academy-admin/academy-admin.lessons.controller')
+const { academyQuizQuestionsRouter } = require('../src/modules/academy-admin/academy-admin.quiz-questions.controller')
+const { academyUsersRouter } = require('../src/modules/academy-admin/academy-admin.users.controller')
+const { communityGroupsRouter } = require('../src/modules/community-admin/community-admin.groups.controller')
+const { communityPostsRouter } = require('../src/modules/community-admin/community-admin.posts.controller')
+const { communityChallengeRouter } = require('../src/modules/community-admin/community-admin.challenge.controller')
+const { communityRequestArticleRouter } = require('../src/modules/community-admin/community-admin.request-article.controller')
 const admin_user_approvals = require('../controllers/admin_panel/app/user_approvals')
+const { professionalsApprovalsRouter } = require('../src/modules/professionals-approvals/professionals-approvals.controller')
+const { professionalsRouter } = require('../src/modules/professionals/professionals.controller')
+const { professionalsChangeApprovalsRouter } = require('../src/modules/professionals/professionals.approvals.controller')
 
 const admin_feedback = require('../controllers/admin_panel/app/feedback')
+const { professionalsFeedbackAdminRouter } = require('../src/modules/professionals-feedback/professionals-feedback.admin.controller')
 const { fundingRouter } = require('../src/modules/funding/funding.controller')
 const { companyAcquisitionsRouter } = require('../src/modules/company_acquisitions/company_acquisitions.controller')
 const { adminWorkExperienceRouter } = require('../src/modules/work-experience/work-experience.controller')
 const { positionsRouter } = require('../src/modules/work-experience/work-experience.positions.controller')
 const { adminTeamMembersRouter } = require('../src/modules/team-members/team-members.controller')
 const notifications = require('../controllers/admin_panel/app/notifications')
+const { professionalsNotificationsRouter } = require('../src/modules/professionals-notifications/professionals-notifications.controller')
 const push_notification = require('../controllers/admin_panel/app/notifications/push_notification')
 
 
@@ -77,6 +96,7 @@ const community_21days_challenge = require('../controllers/admin_panel/main/comm
 const job_skill = require('../controllers/admin_panel/app/jobs/skills')
 const education_type = require('../controllers/admin_panel/app/jobs/education_type')
 const meetings = require('../controllers/admin_panel/app/meetings/meetings')
+const { professionalsMeetingsAdminRouter } = require('../src/modules/professionals-meetings/professionals-meetings.admin.controller')
 
 
 
@@ -87,6 +107,7 @@ const { systemSettingsRouter } = require('../src/modules/system_settings/system_
 
 const manual_users = require('../controllers/admin_panel/app/user/manual_users')
 const work_experiences = require('../controllers/admin_panel/app/user/work_experiences')
+const { professionalsManualRetrievalsRouter } = require('../src/modules/professionals-manual-retrievals/professionals-manual-retrievals.controller')
 //admin - Ends Here
 
 
@@ -177,7 +198,53 @@ router.use('/company_claim_requests', companyClaimRequestsAdminRouter)
 router.use('/company_employees', adminTeamMembersRouter)
 router.use('/users', admin_user)
 router.use('/users', adminWorkExperienceRouter)
+
+// Professionals migration, Phase E: the 8 claim-request routes ported out of
+// controllers/admin_panel/app/user.js into src/modules/professionals-claims/**. Mounted at a
+// temporary `_v2` prefix, parallel to the untouched legacy '/users' mount above.
+router.use('/users_claims_v2', professionalsClaimsRouter)
+
+// Professionals migration, Phase F: the 5 delete/recover-lifecycle routes ported out of
+// controllers/admin_panel/app/user.js into src/modules/professionals-delete-lifecycle/**. Mounted
+// at a temporary `_v2` prefix, parallel to the untouched legacy '/users' mount above.
+router.use('/users_delete_lifecycle_v2', professionalsDeleteLifecycleRouter)
+
+// Professionals migration, Phase G: 4 ancillary/audit routes ported out of
+// controllers/admin_panel/app/user.js into src/modules/professionals-audit/**. Mounted at a
+// temporary `_v2` prefix, parallel to the untouched legacy '/users' mount above.
+router.use('/users_audit_v2', professionalsAuditRouter)
+
+// Sources admin section: read-only display of the two BigQuery-only Company_Sources_Urls /
+// Professional_Sources_Urls tables, migrated into real Mongo collections so MongoDB is the store
+// of record (BigQuery mirrors it 15 minutes later like everything else). New feature, no legacy
+// route to run parallel to, mounted directly.
+router.use('/sources', sourcesRouter)
+
+// Professionals migration: /user_followers and /login_into_account ported out of
+// controllers/admin_panel/app/user.js into src/modules/professionals-followers/**. Mounted at a
+// temporary `_v2` prefix, parallel to the untouched legacy '/users' mount above.
+router.use('/users_followers_v2', adminFollowersRouter)
 router.use('/users_approvals', admin_user_approvals)
+
+// Professionals migration, Phase D: user_approvals.js ported into
+// src/modules/professionals-approvals/**. Mounted at a temporary `_v2` prefix, parallel to the
+// untouched legacy '/users_approvals' mount above.
+router.use('/users_approvals_v2', professionalsApprovalsRouter)
+// TEMPORARY parallel mount (Professionals migration Phase A, per the plan's confirmed cutover
+// strategy): the new src/modules/professionals module is mounted at /users_v2, side-by-side with
+// the untouched legacy /users routes above (controllers/admin_panel/app/user.js is NOT modified
+// or deleted by this phase). Covers /list, /admin_created_list, /create_new_user, /update_user,
+// /enable_user, /disable_user, /years_overview, /overview, /users_pages, /public_status_list
+// only — every other /users_v2/* path 404s until a later phase ports it. Remove this comment and
+// the legacy '/users' mount above only after: (1) the characterization capture/compare cycle
+// passes for every ported route, (2) the frontend has been switched over to /users_v2 and
+// verified live, and (3) the user has explicitly signed off on deleting user.js's Phase A routes
+// — none of that has happened yet as of this mount.
+router.use('/users_v2', professionalsRouter)
+// New change-request review/publish flow for Professionals (mirrors '/company_approvals' above),
+// its own mount rather than nested under '/users_v2' since it's a wholly new set of routes with
+// no legacy '/users_v2' sibling to collide with.
+router.use('/professionals_change_approvals_v2', professionalsChangeApprovalsRouter)
 
 router.use('/sub_admin', sub_admin)
 router.use('/sub_admin_auth', sub_admin_auth)
@@ -186,14 +253,27 @@ router.use('/sub_admin_auth', sub_admin_auth)
 // companyAdminApprovalsRouter.
 router.use('/company_approvals', companyAdminApprovalsRouter)
 router.use('/feedback', admin_feedback)
+// Professionals migration gap-audit backlog: admin_panel/app/feedback.js ported into
+// src/modules/professionals-feedback/**. Mounted at a temporary `_v2` prefix, parallel to the
+// untouched legacy '/feedback' mount above.
+router.use('/feedback_v2', professionalsFeedbackAdminRouter)
 router.use('/funding', fundingRouter)
 router.use('/company_acquisitions', companyAcquisitionsRouter)
 router.use('/notifications', notifications)
+// Professionals migration gap-audit backlog: admin_panel/app/notifications.js ported into
+// src/modules/professionals-notifications/**. Mounted at a temporary `_v2` prefix, parallel to the
+// untouched legacy '/notifications' mount above.
+router.use('/notifications_v2', professionalsNotificationsRouter)
 router.use('/notifications/push_notification', push_notification)
 
 
 router.use('/manual_users', manual_users)
 router.use('/work_experiences', work_experiences)
+
+// Professionals migration, Phase C: manual_users.js ported into
+// src/modules/professionals-manual-retrievals/**. Mounted at a temporary `_v2` prefix, parallel
+// to the untouched legacy '/manual_users' mount above.
+router.use('/manual_retrievals_v2', professionalsManualRetrievalsRouter)
 router.use('/subscribe_category', subscribe_category)
 router.use('/email_newsletter', email_newsletter)
 
@@ -202,26 +282,51 @@ router.use('/email_performance', email_performance)
 
 
 router.use('/main/quiz_questions', quiz_questions)
+// Phase 1 of the Academy migration ("Add Question" step) - temporary `_v2` parallel mount,
+// legacy '/main/quiz_questions' above stays live and untouched.
+router.use('/main/quiz_questions_v2', academyQuizQuestionsRouter)
 router.use('/main/contests/questions', contests_questions)
 router.use('/main/contests/weekly_contests', weekly_contests)
 
 router.use('/academy/lessons', academy_lessons)
+router.use('/academy/lessons_v2', academyLessonsRouter)
 router.use('/academy/lessons/faq', faq_lessons)
 router.use('/academy/users', academy_users)
+// Phase 2 of the Academy migration (Manage Users / Manage Certificate) - temporary `_v2`
+// parallel mount, legacy '/academy/users' above stays live and untouched.
+router.use('/academy/users_v2', academyUsersRouter)
 
 router.use('/academy/courses', academy_courses)
+// Phase 1 of the Academy migration (module-based TS, see plan doc) - temporary `_v2` parallel
+// mount, legacy '/academy/courses' above stays live and untouched until the frontend explicitly
+// cuts over to this module and legacy is deleted as its own separate, later step.
+router.use('/academy/courses_v2', academyCoursesRouter)
 router.use('/academy/chapters', academy_chapters)
+router.use('/academy/chapters_v2', academyChaptersRouter)
 router.use('/academy/overview', academy_overview)
 
 router.use('/community/groups', community_groups)
+// Phase 3 of the Community migration (Manage Community / Groups) - temporary `_v2` parallel
+// mount, legacy '/community/groups' above stays live and untouched.
+router.use('/community/groups_v2', communityGroupsRouter)
 router.use('/community/posts', community_posts)
+router.use('/community/posts_v2', communityPostsRouter)
 router.use('/community/overview', community_overview)
 router.use('/community/challenge', community_21days_challenge)
+router.use('/community/challenge_v2', communityChallengeRouter)
 router.use('/community/request_article', community_request_article)
+// Phase 4 (backend-only) of the Community migration (Requested Articles) - temporary `_v2`
+// parallel mount, legacy '/community/request_article' above stays live and untouched. No
+// admin-panel frontend page exists for this per the 2026-09-19 scope change.
+router.use('/community/request_article_v2', communityRequestArticleRouter)
 
 router.use('/job/skill', job_skill)
 router.use('/job/education_type', education_type)
 router.use('/meetings', meetings)
+// Professionals migration gap-audit backlog: admin_panel/app/meetings/meetings.js ported into
+// src/modules/professionals-meetings/**. Mounted at a temporary `_v2` prefix, parallel to the
+// untouched legacy '/meetings' mount above.
+router.use('/meetings_v2', professionalsMeetingsAdminRouter)
 
 
 

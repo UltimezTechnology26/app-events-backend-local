@@ -9,10 +9,10 @@ import { asyncRoute } from '../../../middleware/asyncRoute'
 import { getEntityAudit } from '../../common/status-audit/status-audit.service'
 import { validateAuditRequest } from '../../common/status-audit/status-audit.validation'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
-import { getPendingChangeRequests, getApprovedChangeRequests, publishAllChangeRequests } from '../../common/change-request/change-request.service'
-import { applyChangeRequest } from '../../common/change-request/change-request.apply'
-import { approveChangeRequest, approveChangeRequestFields } from '../../common/change-request/change-request.approve'
-import { rejectChangeRequest, cancelChangeRequest, rejectChangeRequestFields } from '../../common/change-request/change-request.review'
+import { getPendingChangeRequests, getApprovedChangeRequests, publishAllChangeRequests } from '../../modules/change-request/change-request.service'
+import { applyChangeRequest } from '../../modules/change-request/change-request.apply'
+import { approveChangeRequest, approveChangeRequestFields } from '../../modules/change-request/change-request.approve'
+import { rejectChangeRequest, cancelChangeRequest, rejectChangeRequestFields } from '../../modules/change-request/change-request.review'
 import {
   validateChangeRequestId,
   validateCompanyRowId,
@@ -20,7 +20,7 @@ import {
   validateRating,
   validateNote,
   CHANGE_REQUEST_MESSAGES,
-} from '../../common/change-request/change-request.validation'
+} from '../../modules/change-request/change-request.validation'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 
 /**

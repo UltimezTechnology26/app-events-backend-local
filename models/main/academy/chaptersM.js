@@ -1,42 +1,6 @@
-const mongoose = require('mongoose')
-const { getCollectionID } = require('../../../utils/helpers/database_helper')
-
-const saveSchema = mongoose.Schema({
-    _id: {
-        type: Number
-    },
-    course_row_id: {
-        type: Number,
-        index: true,
-        required: true
-    },
-    chapter_number: {
-        type: Number,
-        index: true,
-        required: true
-    },
-    title: {
-        type: String
-    },
-    description: {
-        type: String
-    },
-    chapter_status: {
-        type: Boolean,
-        default: true
-    },
-    date_n_time: {
-        type: Date,
-        required: true
-    }
-})
-
-saveSchema.pre('save', async function (next) {
-    if (!this._id) {
-        const value = await getCollectionID('cln_academy_courses_chapters')
-        this._id = value
-    }
-    next()
-})
-
-module.exports = mongoose.model('cln_academy_courses_chapters', saveSchema)
+// MOVED (2026-09-17): the real schema now lives in
+// src/modules/academy-admin/academy-admin.models.ts (see that file's own doc comment for why -
+// genuine model colocation without a second `mongoose.model()` registration for
+// 'cln_academy_courses_chapters'). This file stays as a passthrough so every legacy
+// `require('models/main/academy/chaptersM')` call site keeps working unchanged.
+module.exports = require('../../../src/modules/academy-admin/academy-admin.models').ChaptersM
