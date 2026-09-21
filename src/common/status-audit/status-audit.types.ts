@@ -13,6 +13,7 @@ export interface ActorRef {
 
 /** The lifecycle transitions this service records. */
 export type LifecycleAction =
+  | 'create'
   | 'approve'
   | 'reject'
   | 'enable'

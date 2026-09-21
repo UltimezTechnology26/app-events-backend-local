@@ -28,7 +28,22 @@ router.get('/list/:skip/:limit', async (req, res) => {
             const skip = !Number.isNaN(Number.parseInt(req.params.skip)) ? Number.parseInt(req.params.skip) : 0
             const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
 
-            const queryRun = await sub_adminM.find(query, { _id: 1, email_id: 1, create_type_row_id: 1, mobile_number: 1, login_status: 1, date_n_time: 1, full_name: 1 }).sort({ _id: -1 }).skip(skip).limit(limit)
+            // CONFIRMED PERF FIX (2026-09-17): `queryRun` (the page) and the total count used to run
+            // sequentially, and the per-row `create_types_query` lookup was a real N+1 - one DB
+            // round trip per row inside the loop instead of one batched query for the whole page.
+            // CONFIRMED BUG FIX (2026-09-17): `sub_admin_type`/`disabled_reason`/`disabled_date_n_time`
+            // were never included in this projection even though `sub_admin_type` was already being
+            // read off `run` a few lines below (always undefined as a result) and the other two exist
+            // on the schema but were never surfaced here at all - "show maximum data" request.
+            const [queryRun, countQueryRun] = await Promise.all([
+                sub_adminM.find(query, { _id: 1, email_id: 1, create_type_row_id: 1, mobile_number: 1, login_status: 1, date_n_time: 1, full_name: 1, sub_admin_type: 1, disabled_reason: 1, disabled_date_n_time: 1 }).sort({ _id: -1 }).skip(skip).limit(limit),
+                sub_adminM.countDocuments(query)
+            ])
+
+            const allCreateTypeIds = [...new Set(queryRun.flatMap(run => run.create_type_row_id || []))]
+            const createTypesLookup = allCreateTypeIds.length
+                ? await sub_admin_access_typeM.find({ _id: { $in: allCreateTypeIds }, type_status: 1 }, { create_type_name: 1, _id: 1 })
+                : []
 
             let myArray = []
             if (queryRun) {
@@ -41,15 +56,21 @@ router.get('/list/:skip/:limit', async (req, res) => {
                     innerObj['login_status'] = run.login_status
                     innerObj['sub_admin_type'] = run.sub_admin_type
                     innerObj['date_n_time'] = run.date_n_time
+                    innerObj['disabled_reason'] = run.disabled_reason
+                    innerObj['disabled_date_n_time'] = run.disabled_date_n_time
                     innerObj['create_type_row_id'] = await getIntIdFromArray(run.create_type_row_id)
-                    innerObj['create_types_query'] = await sub_admin_access_typeM.find({ _id: { $in: run.create_type_row_id }, type_status: 1 }, { create_type_name: 1, _id: 1 })
+                    const rowCreateTypeIds = run.create_type_row_id || []
+                    innerObj['create_types_query'] = createTypesLookup.filter(type => rowCreateTypeIds.includes(type._id))
 
                     const new_object = await Promise.resolve(innerObj)
                     myArray.push(new_object)
                 }
             }
 
-            res.json({ status: true, message: myArray, countQueryRun: queryRun.length })
+            // CONFIRMED BUG FIX (2026-09-17): this previously returned `queryRun.length` (the size
+            // of the current page, at most `limit`) as the "total count" - the frontend's pagination
+            // page-count would be wrong on every page except a short final one. Now the real total.
+            res.json({ status: true, message: myArray, countQueryRun: countQueryRun })
         }
         catch (err) {
             console.log('Sub admins list.', err.message)
@@ -642,8 +663,16 @@ router.get('/sub_admin_email_list/:skip/:limit', async (req, res) => {
             const skip = !Number.isNaN(Number.parseInt(req.params.skip)) ? Number.parseInt(req.params.skip) : 0
             const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
 
-            const queryRun = await sub_admin_emailsM.find(query, { _id: 1, email_id: 1, date_n_time: 1, full_name: 1, type: 1 }).sort({ _id: -1 }).skip(skip).limit(limit)
-            const count = await sub_admin_emailsM.countDocuments({ query })
+            // CONFIRMED PERF FIX (2026-09-17): list + count ran sequentially - Promise.all'd.
+            // CONFIRMED BUG FIX (2026-09-17): `countDocuments({ query })` wrapped the filter in an
+            // extra `{ query: ... }` shorthand instead of spreading it, so it counted documents
+            // with a literal field named "query" (never matches) - `countQueryRun` was always 0.
+            // Already flagged, not silently patched, in an earlier frontend-only pass
+            // (sub-admin-mails.types.ts's own doc comment) - now fixed at the actual source.
+            const [queryRun, count] = await Promise.all([
+                sub_admin_emailsM.find(query, { _id: 1, email_id: 1, date_n_time: 1, full_name: 1, type: 1 }).sort({ _id: -1 }).skip(skip).limit(limit),
+                sub_admin_emailsM.countDocuments(query)
+            ])
 
             let myArray = []
             if (queryRun) {

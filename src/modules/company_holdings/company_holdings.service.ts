@@ -20,9 +20,9 @@ import {
 const { calculateCompanyProfileScore } = require('../../../utils/helpers/app_helper')
 const { getPresentDateTime } = require('../../../utils/helpers/helper')
 import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-library/cache'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { computeDiff } from '../../common/change-request/change-request.diff'
-import { COMPANY_SECTION_REGISTRY, SECTION_HOLDING_CRYPTO } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { computeDiff } from '../../modules/change-request/change-request.diff'
+import { SECTION_REGISTRY, SECTION_HOLDING_CRYPTO } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
@@ -181,14 +181,14 @@ export async function saveOrUpdateHolding({ actor, body, preValidationErrors }: 
     const ownerHoldingChanges = await computeDiff({
       before: preWriteHoldingValues,
       submitted: holdingFields,
-      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].schemaPaths,
-      editableFields: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].editableFields,
+      schemaPaths: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].schemaPaths,
+      editableFields: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].editableFields,
     })
     if (ownerHoldingChanges.length > 0) {
       try {
         await insertChangeLog({
           module: AUDIT_MODULE_COMPANY,
-          target_collection: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
+          target_collection: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
           target_row_id: holding_row_id,
           root_document_id: company_row_id,
           section: SECTION_HOLDING_CRYPTO,
@@ -217,13 +217,13 @@ export async function saveOrUpdateHolding({ actor, body, preValidationErrors }: 
   const ownerHoldingCreateChanges = await computeDiff({
     before: {},
     submitted: holdingFields,
-    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].schemaPaths,
-    editableFields: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].editableFields,
+    schemaPaths: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].schemaPaths,
+    editableFields: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].editableFields,
   })
   try {
     await insertChangeLog({
       module: AUDIT_MODULE_COMPANY,
-      target_collection: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
+      target_collection: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
       target_row_id: company_row_id,
       root_document_id: company_row_id,
       section: SECTION_HOLDING_CRYPTO,
@@ -312,7 +312,7 @@ export async function deleteHolding({ actor, holding_row_id_raw }: DeleteHolding
   try {
     await insertChangeLog({
       module: AUDIT_MODULE_COMPANY,
-      target_collection: COMPANY_SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
+      target_collection: SECTION_REGISTRY[SECTION_HOLDING_CRYPTO].collection,
       target_row_id: holding_row_id,
       root_document_id: check_query?.company_row_id ?? 0,
       section: SECTION_HOLDING_CRYPTO,

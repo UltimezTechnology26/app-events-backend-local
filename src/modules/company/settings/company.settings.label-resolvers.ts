@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../../common/change-request/change-request.diff'
-import { buildArrayLabelResolver, buildEnumLabelResolver, buildSingleLabelResolver, resolveCompanyName, resolveCountryName, resolveDateLabel } from '../../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../../modules/change-request/change-request.diff'
+import { buildArrayLabelResolver, buildEnumLabelResolver, buildSingleLabelResolver, resolveCompanyName, resolveCountryName, resolveDateLabel } from '../../../modules/change-request/change-request.common-resolvers'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const getCompanyBusinessModelsM = () => require('../../../../models/app/static/company_business_modelsM')

@@ -4,8 +4,8 @@ const { calculateCompanyProfileScore } = require('../../../utils/helpers/app_hel
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { ActorRef } from '../../common/status-audit/status-audit.types'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { SECTION_JOBS } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { SECTION_JOBS } from '../../modules/change-request/change-request.registry'
 import { invalidateJobCaches } from './jobs.cache'
 import {
   findApprovedActiveCompany,

@@ -1,16 +1,23 @@
 const sanitize = require('mongo-sanitize')
 const professional_positionsM = require('../../../models/app/static/professional_positionsM')
 const professionals_work_experienceM = require('../../../models/app/professionals_work_experienceM')
+const professionals_manual_retrievalsM = require('../../../models/app/users/professionals_manual_retrievalsM')
 const professionalsM = require('../../../models/app/professionalsM')
 const companyM = require('../../../models/app/company/companyM')
 const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
-const { addManualPosition, calculateUserProfileScore } = require('../../../utils/helpers/app_helper')
+const { addManualPosition, calculateUserProfileScore, deleteProfessionalDetails } = require('../../../utils/helpers/app_helper')
 import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-library/auth'
 const { getPresentDateTime, checkUserSubadminAccess } = require('../../../utils/helpers/helper')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-library/cache'
 import { invalidateWorkExperienceCaches } from './work-experience.cache'
-import { buildEmployeeRequestCountPipeline } from './work-experience.queries'
+import { buildEmployeeRequestCountPipeline, getManualProfessionalDetailListPipeline } from './work-experience.queries'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { SECTION_PROFESSIONAL_DETAILS } from '../../modules/change-request/change-request.registry'
+import { AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-audit.registry'
+import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
+
+const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
 export interface ResolvedPosition {
   position_type: number
@@ -460,70 +467,111 @@ export async function adminCreateOrUpdateWorkExperience({
     insert_array['public_view'] = false
   }
 
-  if (!professional_row_id) {
-    if (body.public_view) {
-      await professionals_work_experienceM.updateMany(
-        { user_row_id: target_user_row_id, user_account_type: 1 },
-        { $set: { public_view: false } }
-      )
-    }
+  // Publish gate applies to admin-panel edits only (design §2) — this whole function is
+  // admin-only (no owner path exists here; the app-side equivalent is
+  // createOrUpdateWorkExperience above), so every call submits a change request instead of
+  // writing live. The public_view demotion / notification / profile-score side effects below
+  // only make sense once a write actually lands live, so they stay on the OLD code path, which no
+  // longer runs for either branch — same deliberate scope limit as Team Members' identical gate
+  // (team-members.service.ts's adminCreateOrUpdateTeamMember doc comment).
+  const adminRowId = Number.parseInt(admin_context.message.admin_row_id)
+  const actor = toActorRefWithId(
+    {
+      updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+      updated_by_row_id: adminRowId,
+    },
+    adminRowId,
+  )
 
+  if (!professional_row_id) {
     insert_array['user_account_type'] = 1
     insert_array['user_row_id'] = target_user_row_id
     insert_array['company_type'] = company_type
     insert_array['company_row_id'] = company_row_id
 
-    await professionals_work_experienceM(insert_array).save()
-
-    // CONFIRMED BUG FIX: a manual company selected as a work-experience employer never
-    // incremented its used_counts — see the identical fix/rationale in funding.service.ts.
-    if (company_type === 2) {
-      await company_manual_retrievalsM.updateOne({ _id: company_row_id }, { $inc: { used_counts: 1 } })
-    }
-
-    await professionalsM.updateOne({ _id: target_user_row_id }, { $set: { updated_date_n_time: getPresentDateTime() } })
-    await calculateUserProfileScore(target_user_row_id, ['professional_detail'])
-    if (company_type === 1 && company_row_id) {
-      // Same gap as createOrUpdateWorkExperience's app-side path: this write lands in
-      // professionals_work_experienceM, which the company's Team Details tab (employee_list_*)
-      // and public profile (app_company_individual_other_details_*) both read.
-      await deleteKeysByPattern('employee_list_*')
-      await deleteKeysByPattern('app_company_individual_other_details_*')
-    }
-
-    return { status: true, message: { alert_message: 'Your professional details have been successfully submitted. ' } }
-  } else {
-    if (body.public_view) {
-      await professionals_work_experienceM.updateMany(
-        { _id: { $ne: professional_row_id }, user_account_type: 1, user_row_id: target_user_row_id },
-        { $set: { public_view: false } }
-      )
-      await deleteKeysByPattern('speakers_list_*')
-      await deleteKeysByPattern('professional_detail_lists*')
-      await deleteKeysByPattern('app_user_detail_*')
-    }
-    await professionals_work_experienceM.updateOne({ _id: professional_row_id }, { $set: insert_array })
-    const updateFields = getUpdateTrackerFields(admin_context)
-    await professionalsM.updateOne(
-      { _id: target_user_row_id },
-      { $set: { updated_date_n_time: getPresentDateTime(), ...updateFields } }
-    )
-    await deleteKeysByPattern('speakers_list_*')
-    await deleteKeysByPattern('professional_detail_lists*')
-    await deleteKeysByPattern('app_user_detail_*')
-    if (company_type === 1 && company_row_id) {
-      await deleteKeysByPattern('employee_list_*')
-      await deleteKeysByPattern('app_company_individual_other_details_*')
-    }
-
-    return {
-      status: true,
-      message: {
-        alert_message: 'We have successfully updated your professional details',
-        cache_response: 'cache expire from speaker list '
-      }
-    }
+    return submitChildChangeRequest({
+      module: AUDIT_MODULE_PROFESSIONALS,
+      section: SECTION_PROFESSIONAL_DETAILS,
+      rootDocumentId: target_user_row_id,
+      targetRowId: null,
+      liveValues: {},
+      submitted: insert_array,
+      actor,
+    })
   }
+
+  const liveValues = (await professionals_work_experienceM.findOne({ _id: professional_row_id }).lean()) ?? {}
+  return submitChildChangeRequest({
+    module: AUDIT_MODULE_PROFESSIONALS,
+    section: SECTION_PROFESSIONAL_DETAILS,
+    rootDocumentId: target_user_row_id,
+    targetRowId: professional_row_id,
+    liveValues,
+    submitted: insert_array,
+    actor,
+  })
+}
+
+export interface AdminDeleteProfessionalDetailParams {
+  /** Full result of checkAdminLoginToken(...) for the acting admin — NOT the target professional. */
+  admin_context: AdminTokenContext
+  /** The professional whose work experience is being deleted (admin acts on someone else's data). */
+  target_user_row_id: number
+  /** professionals_work_experienceM record id being deleted. */
+  professional_row_id: number
+}
+
+/**
+ * CONFIRMED BUG FIX: admin-panel Delete for Professional Details used to go straight through the
+ * legacy, ungated `GET admin_panel/users/delete_professional_details/:user_row_id/:professional_details_id`
+ * (controllers/admin_panel/app/user.js:4538) — a plain GET that deleted the row immediately, no
+ * change-request review at all. This was the only Add/Edit/Delete trio on this section where
+ * Delete didn't go through review (Add/Edit already gate through adminCreateOrUpdateWorkExperience
+ * above), confirmed live during Professionals-migration QA: an admin could delete a work-experience
+ * entry with zero approval step while a same-admin edit to the exact same row required one.
+ * Mirrors Awards' deleteAward admin branch (professionals-awards.service.ts) — ownership check,
+ * row snapshot, submitChildDeleteRequest — and adminCreateOrUpdateWorkExperience's own
+ * actor-construction pattern immediately above.
+ */
+export async function adminDeleteProfessionalDetail({
+  admin_context,
+  target_user_row_id,
+  professional_row_id,
+}: AdminDeleteProfessionalDetailParams): Promise<{ status: boolean; message: any }> {
+  const check_access = await checkUserSubadminAccess({
+    admin_row_id: Number.parseInt(admin_context.message.admin_row_id),
+    admin_manager_type: admin_context.message.admin_manager_type,
+    sub_admin_type: Number.parseInt(admin_context.message.sub_admin_type),
+    user_row_id: target_user_row_id,
+  })
+  if (!check_access.status) {
+    return { status: false, message: { alert_message: check_access.message } }
+  }
+
+  const query = await professionals_work_experienceM.findOne({ _id: professional_row_id, user_row_id: target_user_row_id })
+  if (!query) {
+    return { status: false, message: { alert_message: 'Invalid Professional Row ID' } }
+  }
+
+  const rowSnapshot = typeof query.toObject === 'function' ? query.toObject() : { ...query }
+
+  const adminRowId = Number.parseInt(admin_context.message.admin_row_id)
+  const actor = toActorRefWithId(
+    {
+      updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+      updated_by_row_id: adminRowId,
+    },
+    adminRowId,
+  )
+
+  return submitChildDeleteRequest({
+    module: AUDIT_MODULE_PROFESSIONALS,
+    section: SECTION_PROFESSIONAL_DETAILS,
+    rootDocumentId: target_user_row_id,
+    targetRowId: professional_row_id,
+    rowSnapshot,
+    actor,
+  })
 }
 
 /**
@@ -541,4 +589,61 @@ export async function getEmployeeRequestCounts() {
     pending: pendingResult[0]?.count ?? 0,
     approved: approvedResult[0]?.count ?? 0,
   }
+}
+
+// Phase B (work-experience reconciliation, per plan doc 2026-09-10). Ports
+// controllers/app/users/setting.js's /delete_professional_details/:professional_details_id
+// (~2313-2352) — the one remaining professionals-work-experience route not yet in this module.
+// Same behavior, same response shape.
+//
+// FLAGGED, NOT FIXED: this calls the shared `deleteProfessionalDetails` helper
+// (utils/helpers/app_helper.js:657), whose own catch block is `catch { console.error(...,
+// err.message) }` — no bound `err` parameter, so `err.message` throws a *second*, unhandled
+// ReferenceError if the delete itself ever fails, instead of the intended log-and-return-false.
+// Not fixed here: it's a shared helper used by several other legacy call sites outside this
+// migration's scope, and fixing it is a behavior change (a real error response instead of an
+// uncaught exception) needing its own sign-off.
+export async function deleteProfessionalDetail(userRowId: number, professionalDetailsIdRaw: string) {
+  const professionalDetailsId = Number.parseInt(professionalDetailsIdRaw)
+  if (Number.isNaN(professionalDetailsId)) {
+    return { status: false, message: { alert_message: 'Sorry, Invalid Professional row id' } }
+  }
+
+  const query: any = await professionals_work_experienceM.findOne(
+    { _id: professionalDetailsId, user_row_id: userRowId },
+    { company_row_id: 1, till_date_status: 1, company_type: 1 },
+  )
+  if (!query) {
+    return { status: false, message: 'Invalid Professional Row ID' }
+  }
+
+  await deleteProfessionalDetails({ professional_details_id: professionalDetailsId, type: 1 })
+  await deleteKeysByPattern('app_user_other_details_*')
+  await deleteKeysByPattern('professional_detail_list_*')
+  if (query.company_type === 1 && query.company_row_id) {
+    await deleteKeysByPattern('employee_list_*')
+    await deleteKeysByPattern('app_company_individual_other_details_*')
+  }
+  await calculateUserProfileScore(userRowId, ['professional_detail'])
+
+  return { status: true, message: { alert_message: 'Your details have been deleted successfully. ' } }
+}
+
+// Phase B (work-experience reconciliation). Ports controllers/admin_panel/app/user/
+// work_experiences.js's GET /manual_professional_detail_list/:user_row_id/:skip/:limit (~8-178).
+// Same behavior, same company-grouped response shape — see getManualProfessionalDetailListPipeline
+// in work-experience.queries.ts for the confirmed perf fix (user_row_id moved into the first
+// $match instead of being applied after two $lookups).
+export async function getManualProfessionalDetailList(userRowId: number, skip: number, limit: number) {
+  const checkUser = await professionals_manual_retrievalsM.findOne({ _id: userRowId })
+  if (!checkUser) {
+    return { status: false, message: 'Invalid User Row ID.' }
+  }
+
+  const query = await professionals_work_experienceM
+    .aggregate(getManualProfessionalDetailListPipeline(userRowId))
+    .skip(skip)
+    .limit(limit)
+
+  return { status: true, message: query }
 }

@@ -21,7 +21,7 @@ import {
 } from './company_admin.approvals.queries'
 import { Actor } from './company_admin.types'
 import { recordCompanyStatusChange } from './company_admin.audit'
-import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities } from '../../common/change-request/change-request.service'
+import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 
 export interface GetCompaniesListParams {

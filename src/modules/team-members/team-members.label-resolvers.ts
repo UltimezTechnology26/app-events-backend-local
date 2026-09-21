@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildEnumLabelResolver, buildSingleLabelResolver, resolveDateLabel } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildEnumLabelResolver, buildSingleLabelResolver, resolveDateLabel } from '../../modules/change-request/change-request.common-resolvers'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const getProfessionalPositionsM = () => require('../../../models/app/static/professional_positionsM')
@@ -115,6 +115,7 @@ const resolveSubPositionName: LabelResolver = async (value, record) => {
 
 export const TEAM_MEMBERS_LABEL_RESOLVERS: Record<string, LabelResolver> = {
   start_date: resolveDateLabel,
+  end_date: resolveDateLabel,
   verified_on: resolveDateLabel,
   employment_type: resolveEmploymentTypeLabel,
   designation_type: resolveDesignationTypeLabel,
@@ -130,6 +131,7 @@ export const TEAM_MEMBERS_LABEL_RESOLVERS: Record<string, LabelResolver> = {
 export const TEAM_MEMBERS_FIELD_LABELS: Record<string, string> = {
   user_row_id: 'Name',
   start_date: 'Joining Date',
+  end_date: 'Leaving Date',
   employment_type: 'Employment Type',
   location_type: 'Work Location Type',
   designation_type: 'Designation Type',
@@ -146,10 +148,21 @@ export const TEAM_MEMBERS_FIELD_LABELS: Record<string, string> = {
  * user account type, user row ID, company type... is of no use, this is the work of
  * development"). They still ride along in the payload via editableFields so publish keeps
  * producing a valid row - they're just never shown to a reviewer.
+ *
+ * CONFIRMED BUG FIX: `end_date` ("Leaving Date" on the form) was missing from both this array AND
+ * TEAM_MEMBERS_EDITABLE_FIELDS/PROFESSIONAL_DETAILS_EDITABLE_FIELDS (change-request.registry.ts) —
+ * computeDiff silently drops any submitted field not in editableFields, so a real leaving date
+ * typed into the form was submitted correctly by the frontend and adminCreateOrUpdateWorkExperience
+ * alike, but never made it into the stored change request's payload at all. On publish this
+ * created a row with till_date_status: 1 ("has a leaving date") but no end_date field whatsoever,
+ * which the UI then rendered as "Present" — reproduced live during Professionals-migration QA.
+ * Added to editableFields (the fix) and here (so a reviewer actually sees the leaving date being
+ * set, matching how Joining Date is already shown).
  */
 export const TEAM_MEMBERS_DISPLAY_FIELDS = [
   'user_row_id',
   'start_date',
+  'end_date',
   'employment_type',
   'location_type',
   'designation_type',

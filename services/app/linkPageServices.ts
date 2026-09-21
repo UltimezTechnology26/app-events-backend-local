@@ -1,3 +1,4 @@
+import { PipelineStage } from 'mongoose';
 import professionalsM from '../../models/app/professionalsM';
 import redisCache, { CacheDuration } from '../../config/redis';
 import logger from '../../config/logger';
@@ -42,6 +43,13 @@ interface UserDetailParams {
     user_row_id: number;
     query: any;
     headers: any;
+    /**
+     * True only when the caller presented a valid admin token (checked by the controller, never
+     * derived here) - lets a genuine admin view a disabled/pending professional's own admin View
+     * page (user-requested 2026-09-21: "it must be only for admin"). Never set for the public/
+     * self-service caller of this same route - see getUserDetails' own doc comment.
+     */
+    isAdminCaller?: boolean;
 }
 
 /**
@@ -360,7 +368,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                 }
             }
 
-            if ((Number.parseInt(query_run.account_visible_type) === 2) || (user_following_status === 2) || (query_run._id == user_row_id)) {
+            if ((Number.parseInt(String(query_run.account_visible_type)) === 2) || (user_following_status === 2) || (query_run._id == user_row_id)) {
                 resultArray['account_visible_type'] = query_run.account_visible_type
 
                 let search_query = [{}]
@@ -701,7 +709,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
                     resultArray['user_experience'] = users_experience_qery
                 }
 
-                const pipeline = buildFundsInvestedListPipeline(query_run._id, query)
+                const pipeline = buildFundsInvestedListPipeline(query_run._id!, query)
 
                 // 🟢 Run aggregation
                 resultArray['funds_invested_list'] = await fundingInvestmentM.aggregate(pipeline);
@@ -1957,29 +1965,38 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
 }
 
 
-export const getUserDetails = async ({ username, user_row_id }: UserDetailParams): Promise<UserDetailsResponse> => {
+export const getUserDetails = async ({ username, user_row_id, isAdminCaller = false }: UserDetailParams): Promise<UserDetailsResponse> => {
     const startTime = Date.now();
 
     try {
         const key = `app_user_detail_${username}_${user_row_id}`;
 
-        // Try to get from cache first
-        const cacheHitResponse = await redisCache.getCache({ key });
+        // Admin bypass never reads or writes the shared public cache - the result can include a
+        // disabled/pending professional's data, and that must never be served back out to a
+        // public/self-service caller of this same key (cache poisoning risk, not just a staleness
+        // one). Low-traffic admin-only path, so a live DB read every time is an acceptable cost.
+        if (!isAdminCaller) {
+            // Try to get from cache first
+            const cacheHitResponse = await redisCache.getCache({ key });
 
-        if (cacheHitResponse.status) {
-            const responseTime = Date.now() - startTime;
-            logger.info(`getUserDetails(${username}) - Response time: ${responseTime}ms (cache hit)`);
-            return {
-                status: true,
-                message: cacheHitResponse.message,
-                cache_response_status: true
-            };
+            if (cacheHitResponse.status) {
+                const responseTime = Date.now() - startTime;
+                logger.info(`getUserDetails(${username}) - Response time: ${responseTime}ms (cache hit)`);
+                return {
+                    status: true,
+                    message: cacheHitResponse.message,
+                    cache_response_status: true
+                };
+            }
         }
 
         // Cache miss - fetch from database
         let resultArray: any = {}
+        // Admin callers (checked by the controller, never derived here) can view a professional
+        // regardless of login/approval status - every other caller (public, self-service) keeps
+        // the original gate exactly as before.
         const query_run = await professionalsM.aggregate([
-            { $match: { login_status: 1, approval_status: 1, user_name: username } },
+            { $match: isAdminCaller ? { user_name: username } : { login_status: 1, approval_status: 1, user_name: username } },
             {
                 $lookup:
                 {
@@ -2533,7 +2550,12 @@ export const getUserDetails = async ({ username, user_row_id }: UserDetailParams
                 resultArray['profile_score'] = query_run[0]?.profile_score
 
 
-                const user_designation_head = await professionals_work_experienceM.find({ user_row_id: query_run[0]._id, till_date_status: 2, public_view: true }, { position: 1, company_name: 1, till_date_status: 1 }).sort({ start_date: -1 }).limit(1)
+                // `position`/`company_name` aren't fields on cln_professionals_work_experiences' own
+                // schema (confirmed against work-experience.models.ts's full field list) - this
+                // projection has always returned `undefined` for both, pre-existing since this route
+                // was written, not introduced by real schema typing. Preserved as-is; cast to `any`
+                // only so this specific read type-checks the same way it always silently did.
+                const user_designation_head: any[] = await professionals_work_experienceM.find({ user_row_id: query_run[0]._id, till_date_status: 2, public_view: true }, { position: 1, company_name: 1, till_date_status: 1 }).sort({ start_date: -1 }).limit(1)
                 if (user_designation_head && user_designation_head.length > 0) {
                     resultArray['company_name'] = user_designation_head[0].company_name
                     resultArray['work_position'] = user_designation_head[0].position
@@ -2561,7 +2583,7 @@ export const getUserDetails = async ({ username, user_row_id }: UserDetailParams
                 }
 
                 resultArray['user_following_status'] = user_following_status
-                await redisCache.setCache({
+                if (!isAdminCaller) await redisCache.setCache({
                     key,
                     value: resultArray,
                     ttl: CacheDuration.THIRTY_MINUTES
@@ -3570,12 +3592,12 @@ const getUsersList = async ({
             }
         ];
 
-        const resultDocs = await professionalsM.aggregate(listPipeline)
+        const resultDocs = await professionalsM.aggregate(listPipeline as PipelineStage[])
 
         const countDocs = await professionalsM.aggregate([
             ...basePipeline,
             { $count: "count" }
-        ])
+        ] as PipelineStage[])
 
         const count_query = countDocs[0]?.count || 0;
 
@@ -4251,7 +4273,7 @@ const getUsersList = async ({
             { $count: "count" }
         ];
 
-        const count_query = await fundingInvestmentM.aggregate(countPipeline)
+        const count_query = await fundingInvestmentM.aggregate(countPipeline as PipelineStage[])
         const total_counts = count_query[0]?.count || 0;
 
         return { list: docs, count: total_counts };

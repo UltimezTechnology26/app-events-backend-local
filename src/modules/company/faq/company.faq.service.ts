@@ -3,9 +3,9 @@ const { checkCompanyRowID, deleteFAQ, calculateCompanyProfileScore } = require('
 import { buildFaqSearchMatch, findFaqByIdAndCompany, findFaqByIdAndCompanyLean, updateFaqById, insertFaq, aggregateFaqList, findFaqById, findFaqByIdLean } from './company.faq.queries'
 import { extractPaginatedResult } from '../../common/common.pagination'
 import { invalidateFaqCaches, buildFaqListKey, getCache, setCache } from './company.faq.cache'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../../common/change-request/change-request.child.service'
-import { computeDiff } from '../../../common/change-request/change-request.diff'
-import { COMPANY_SECTION_REGISTRY, SECTION_FAQ } from '../../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../../modules/change-request/change-request.child.service'
+import { computeDiff } from '../../../modules/change-request/change-request.diff'
+import { SECTION_REGISTRY, SECTION_FAQ } from '../../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../../common/status-audit/status-audit.queries'
@@ -111,8 +111,8 @@ export async function saveOrUpdateFaqDetails({ actor, body, preValidationErrors 
     const ownerFaqChanges = await computeDiff({
       before: preWriteFaqValues,
       submitted: faqFields,
-      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
-      editableFields: COMPANY_SECTION_REGISTRY[SECTION_FAQ].editableFields,
+      schemaPaths: SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
+      editableFields: SECTION_REGISTRY[SECTION_FAQ].editableFields,
     })
     if (ownerFaqChanges.length > 0) {
       try {
@@ -144,8 +144,8 @@ export async function saveOrUpdateFaqDetails({ actor, body, preValidationErrors 
   const ownerFaqCreateChanges = await computeDiff({
     before: {},
     submitted: faqFields,
-    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
-    editableFields: COMPANY_SECTION_REGISTRY[SECTION_FAQ].editableFields,
+    schemaPaths: SECTION_REGISTRY[SECTION_FAQ].schemaPaths,
+    editableFields: SECTION_REGISTRY[SECTION_FAQ].editableFields,
   })
   try {
     await insertChangeLog({

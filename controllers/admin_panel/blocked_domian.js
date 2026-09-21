@@ -42,8 +42,10 @@ router.get('/block_domains_list/:skip/:limit', async (req, res) => {
             const limit = !Number.isNaN(Number.parseInt(req.params.limit)) ? Number.parseInt(req.params.limit) : 100
             let query = (req.query.search) ? { domain_name: { '$regex': req.query.search, $options: 'i' } } : {}
 
-            const queryRun = await domains_blockedM.find(query).sort({ _id: -1 }).skip(skip).limit(limit)
-            const countQueryRun = await domains_blockedM.countDocuments(query)
+            const [queryRun, countQueryRun] = await Promise.all([
+                domains_blockedM.find(query).sort({ _id: -1 }).skip(skip).limit(limit),
+                domains_blockedM.countDocuments(query)
+            ])
 
             res.json({ status: true, message: queryRun, countQueryRun: countQueryRun, tokenStatus: true })
         }

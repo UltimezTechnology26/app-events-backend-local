@@ -26,9 +26,9 @@ import {
   findProductByIdLean,
   ProductUpdateFields
 } from './company_products.queries'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { computeDiff } from '../../common/change-request/change-request.diff'
-import { COMPANY_SECTION_REGISTRY, SECTION_OWNED_PRODUCTS } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { computeDiff } from '../../modules/change-request/change-request.diff'
+import { SECTION_REGISTRY, SECTION_OWNED_PRODUCTS } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
@@ -215,14 +215,14 @@ export async function saveOrUpdateProduct({ actor, body, preValidationErrors }: 
     const ownerProductChanges = await computeDiff({
       before: preWriteProductValues,
       submitted: productFields,
-      schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
-      editableFields: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
+      schemaPaths: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
+      editableFields: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
     })
     if (ownerProductChanges.length > 0) {
       try {
         await insertChangeLog({
           module: AUDIT_MODULE_COMPANY,
-          target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+          target_collection: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
           target_row_id: edit_product_row_id,
           root_document_id: company_row_id,
           section: SECTION_OWNED_PRODUCTS,
@@ -257,13 +257,13 @@ export async function saveOrUpdateProduct({ actor, body, preValidationErrors }: 
   const ownerProductCreateChanges = await computeDiff({
     before: {},
     submitted: productFields,
-    schemaPaths: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
-    editableFields: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
+    schemaPaths: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].schemaPaths,
+    editableFields: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].editableFields,
   })
   try {
     await insertChangeLog({
       module: AUDIT_MODULE_COMPANY,
-      target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+      target_collection: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
       target_row_id: company_row_id,
       root_document_id: company_row_id,
       section: SECTION_OWNED_PRODUCTS,
@@ -382,7 +382,7 @@ export async function deleteProduct({ actor, edit_product_row_id_raw }: DeletePr
   try {
     await insertChangeLog({
       module: AUDIT_MODULE_COMPANY,
-      target_collection: COMPANY_SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
+      target_collection: SECTION_REGISTRY[SECTION_OWNED_PRODUCTS].collection,
       target_row_id: edit_product_row_id,
       root_document_id: check_query?.company_row_id ?? 0,
       section: SECTION_OWNED_PRODUCTS,

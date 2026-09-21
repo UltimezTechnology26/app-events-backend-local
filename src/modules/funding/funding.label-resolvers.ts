@@ -1,5 +1,5 @@
-import { LabelResolver } from '../../common/change-request/change-request.diff'
-import { buildEnumLabelResolver, buildSingleLabelResolver, resolveCompanyName, resolveDateLabel } from '../../common/change-request/change-request.common-resolvers'
+import { LabelResolver } from '../../modules/change-request/change-request.diff'
+import { buildEnumLabelResolver, buildSingleLabelResolver, resolveCompanyName, resolveDateLabel } from '../../modules/change-request/change-request.common-resolvers'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const resolveFundingCategoryName = buildSingleLabelResolver(() => require('../../../models/app/static/funding_roundsM'), 'category_name')

@@ -19,11 +19,11 @@ import {
   AcquisitionListResult,
   AcquisitionActor
 } from './company_acquisitions.types'
-import { submitChildChangeRequest, submitChildDeleteRequest } from '../../common/change-request/change-request.child.service'
-import { SECTION_ACQUISITIONS } from '../../common/change-request/change-request.registry'
+import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
+import { SECTION_ACQUISITIONS } from '../../modules/change-request/change-request.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
-import { ChangeRequestDoc, SubmitChangeRequestResult } from '../../common/change-request/change-request.types'
+import { ChangeRequestDoc, SubmitChangeRequestResult } from '../../modules/change-request/change-request.types'
 
 const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
