@@ -21,6 +21,3 @@ const agendaConfig = {
 const agenda = new Agenda(agendaConfig);
 
 module.exports = agenda;
-
-
-
