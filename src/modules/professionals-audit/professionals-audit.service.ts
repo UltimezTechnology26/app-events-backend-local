@@ -3,7 +3,7 @@
 // behavior, same response shapes — one confirmed real bug fixed (see getChangeLogs), a confirmed
 // dead model resolved (not ported), one confirmed perf fix.
 import {
-  buildIpAddressSearchQuery, buildIpAddressListPipeline, buildIpAddressCountPipeline,
+  buildIpAddressListPipeline, buildIpAddressCountPipeline,
   buildPointsListPipeline,
   buildChangeLogsMatchConditions, buildChangeLogsPipeline,
   buildSeoOverviewRecentLogsPipeline, buildSeoOverviewUserStatsPipeline, buildSeoOverviewStaticStatsPipeline, buildSeoOverviewStaticUrlsPipeline,
@@ -24,13 +24,12 @@ const SeoStaticUrlsM = require('../../../models/seo_static_urlsM')
 export async function getIpAddressList(skipRaw: string, limitRaw: string, search?: string, domainRaw?: string) {
   const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
   const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 100
-  const searchQuery = buildIpAddressSearchQuery(search, domainRaw)
 
   // CONFIRMED PERF FIX: legacy runs the list aggregate then the count aggregate sequentially —
   // independent of each other, Promise.all'd here (same class of fix as every prior phase).
   const [list, countResult] = await Promise.all([
-    ProfessionalsIpAddressM.aggregate(buildIpAddressListPipeline(searchQuery)).skip(skip).limit(limit),
-    ProfessionalsIpAddressM.aggregate(buildIpAddressCountPipeline(searchQuery)),
+    ProfessionalsIpAddressM.aggregate(buildIpAddressListPipeline(search, domainRaw, skip, limit)),
+    ProfessionalsIpAddressM.aggregate(buildIpAddressCountPipeline(search, domainRaw)),
   ])
   return { status: true, message: list, count: countResult[0]?.count || 0 }
 }

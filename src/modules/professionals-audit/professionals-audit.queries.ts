@@ -1,6 +1,17 @@
 // modules/professionals-audit/professionals-audit.queries.ts
 // Ported from controllers/admin_panel/app/user.js (~4618-5185).
 
+/** True only when `search` can only match a field that's populated by the `cln_professionals` join (full_name/user_name) rather than a native field on the ip-address row itself (page/device_name) — used to decide whether the expensive join can be deferred until after pagination. */
+export function ipAddressSearchNeedsJoin(search?: string): boolean {
+  return Boolean(search)
+}
+
+export function buildIpAddressNativeMatch(domainRaw?: string): object {
+  if (!domainRaw) return {}
+  const domain = Number.parseInt(domainRaw)
+  return Number.isNaN(domain) ? {} : { domain_row_id: domain }
+}
+
 export function buildIpAddressSearchQuery(search?: string, domainRaw?: string): object {
   const domain = domainRaw !== undefined ? Number.parseInt(domainRaw) : undefined
   if (search && domainRaw) {
@@ -20,20 +31,49 @@ export function buildIpAddressSearchQuery(search?: string, domainRaw?: string): 
   return {}
 }
 
-export function buildIpAddressListPipeline(searchQuery: object): object[] {
-  return [
-    { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
-    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_professionals_profile_images', localField: 'user_row_id', foreignField: 'user_row_id', as: 'userImage' } },
-    { $unwind: { path: '$userImage', preserveNullAndEmptyArrays: true } },
-    { $set: { full_name: '$user_info.full_name', user_name: '$user_info.user_name', pro_batch: '$user_info.pro_batch', profile_image: '$userImage.profile_image' } },
-    { $match: searchQuery },
-    { $project: { user_row_id: 1, device_name: 1, ip_address: 1, domain_row_id: 1, profile_image: 1, page: 1, date_n_time: 1, full_name: 1, user_name: 1, pro_batch: 1 } },
-    { $sort: { _id: -1 } },
-  ]
+const IP_ADDRESS_PROJECT = { user_row_id: 1, device_name: 1, ip_address: 1, domain_row_id: 1, profile_image: 1, page: 1, date_n_time: 1, full_name: 1, user_name: 1, pro_batch: 1 }
+
+const IP_ADDRESS_JOIN_STAGES: object[] = [
+  { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
+  { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+  { $lookup: { from: 'cln_professionals_profile_images', localField: 'user_row_id', foreignField: 'user_row_id', as: 'userImage' } },
+  { $unwind: { path: '$userImage', preserveNullAndEmptyArrays: true } },
+  { $set: { full_name: '$user_info.full_name', user_name: '$user_info.user_name', pro_batch: '$user_info.pro_batch', profile_image: '$userImage.profile_image' } },
+]
+
+/**
+ * CONFIRMED PERF FIX (production 504, real data volume — `cln_professionals_ip_addreses` is an
+ * unbounded login/session-history log, not a small table): the ported-as-is legacy shape ran the
+ * `cln_professionals`/`cln_professionals_profile_images` joins over the ENTIRE collection, then
+ * sorted all of it, and only applied `$skip`/`$limit` as the very last stages (via the service's
+ * trailing `.skip().limit()`, which just appends `$skip`/`$limit` to the end of the pipeline array)
+ * — so even the plain "no search" page load joined and sorted every row ever logged before
+ * returning 20. When `search` doesn't need the joined fields (i.e. no search term at all — the
+ * default, highest-traffic case), filter/sort/paginate on native fields FIRST and only join the
+ * page's own ~20 rows afterward. A name search still needs the join before matching (full_name/
+ * user_name only exist post-join) — that path is unchanged and remains the slower one, same as
+ * before, since it's the much less frequent, admin-initiated case.
+ */
+export function buildIpAddressListPipeline(search: string | undefined, domainRaw: string | undefined, skip: number, limit: number): object[] {
+  if (!ipAddressSearchNeedsJoin(search)) {
+    return [
+      { $match: buildIpAddressNativeMatch(domainRaw) },
+      { $sort: { _id: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      ...IP_ADDRESS_JOIN_STAGES,
+      { $project: IP_ADDRESS_PROJECT },
+    ]
+  }
+  const searchQuery = buildIpAddressSearchQuery(search, domainRaw)
+  return [...IP_ADDRESS_JOIN_STAGES, { $match: searchQuery }, { $project: IP_ADDRESS_PROJECT }, { $sort: { _id: -1 } }, { $skip: skip }, { $limit: limit }]
 }
 
-export function buildIpAddressCountPipeline(searchQuery: object): object[] {
+export function buildIpAddressCountPipeline(search: string | undefined, domainRaw: string | undefined): object[] {
+  if (!ipAddressSearchNeedsJoin(search)) {
+    return [{ $match: buildIpAddressNativeMatch(domainRaw) }, { $count: 'count' }]
+  }
+  const searchQuery = buildIpAddressSearchQuery(search, domainRaw)
   return [
     { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
     { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
@@ -174,6 +214,13 @@ export function buildSeoOverviewStaticStatsPipeline(excludeRegex: string): objec
   return [{ $match: { module: 'app', url: { $not: { $regex: excludeRegex, $options: 'i' } } } }, ...SEO_FACET_STAGES]
 }
 
+/**
+ * CONFIRMED PERF FIX (Overview page slow-load, 14s+ observed on production): this pipeline
+ * returned every field of every matching `cln_seo_static_urls` document (including the full
+ * `header_structure` array), with no `$limit` — but the frontend's `ProfessionalsSeoDetailsOverview`
+ * widget only ever reads `row.url` for its "Static URLs" table. Projected down to just `url` so the
+ * response isn't carrying (and MongoDB isn't materializing) data that's immediately discarded.
+ */
 export function buildSeoOverviewStaticUrlsPipeline(excludeRegex: string): object[] {
-  return [{ $match: { module: 'app', url: { $not: { $regex: excludeRegex, $options: 'i' } } } }]
+  return [{ $match: { module: 'app', url: { $not: { $regex: excludeRegex, $options: 'i' } } } }, { $project: { _id: 0, url: 1 } }]
 }
