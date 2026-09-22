@@ -29,6 +29,7 @@ import {
   validateChangeRequestId,
   validateUserRowId,
   isMainAdmin,
+  canApproveChangeRequests,
   validateRating,
   validateNote,
   CHANGE_REQUEST_MESSAGES,
@@ -104,7 +105,7 @@ professionalsChangeApprovalsRouter.post('/publish_all_changes/:user_row_id', wri
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
   // Maker-checker: a sub-admin submits but may never publish (same design invariant as Company).
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -123,7 +124,7 @@ professionalsChangeApprovalsRouter.post('/publish_change/:change_request_id', wr
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
   // Maker-checker: a sub-admin submits but may never publish (same design invariant as Company).
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -141,7 +142,7 @@ professionalsChangeApprovalsRouter.post('/publish_change/:change_request_id', wr
 professionalsChangeApprovalsRouter.post('/approve_change/:change_request_id', writeEndpointRateLimiter, asyncRoute('Approve professional change request.', async (req, res) => {
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -171,7 +172,7 @@ professionalsChangeApprovalsRouter.post('/approve_change/:change_request_id', wr
 professionalsChangeApprovalsRouter.post('/reject_change/:change_request_id', writeEndpointRateLimiter, asyncRoute('Reject professional change request.', async (req, res) => {
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -203,7 +204,7 @@ function validateFieldKeys(raw: unknown): string[] | null {
 professionalsChangeApprovalsRouter.post('/approve_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Approve individual professional change request fields.', async (req, res) => {
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -241,7 +242,7 @@ professionalsChangeApprovalsRouter.post('/approve_change_fields/:change_request_
 professionalsChangeApprovalsRouter.post('/reject_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Reject individual professional change request fields.', async (req, res) => {
   const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }

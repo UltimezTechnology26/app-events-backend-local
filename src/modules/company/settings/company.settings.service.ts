@@ -56,6 +56,7 @@ import { ActorRef } from '../../../common/status-audit/status-audit.types'
 import { AUDIT_MODULE_COMPANY } from '../../../common/status-audit/status-audit.registry'
 import { insertChangeLog } from '../../../common/status-audit/status-audit.queries'
 import { recordCompanyStatusChange } from '../../company_admin/company_admin.audit'
+import { checkCompanyNameForDuplicates } from '../company.duplicate-check'
 import logger from '../../../../config/logger'
 const { getCollectionID } = require('../../../../utils/helpers/database_helper')
 import {
@@ -217,6 +218,8 @@ export interface CompanyInsertPayload {
   created_date_n_time?: string
   updated_date_n_time?: string
   approval_status?: number
+  possible_duplicate_of?: number[]
+  duplicate_review_status?: 'pending' | 'confirmed_distinct' | 'merged'
   // Index signature so this structurally satisfies the query layer's generic
   // Record<string, unknown> Mongo $set parameter (updateCompanyBasicDetails) —
   // same convention already used by CompanyManualRetrievalDoc in queries.ts.
@@ -437,6 +440,22 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
     if (actor.status && actor.message.user_type == 2) {
       insertArray['sub_admin_row_id'] = sub_admin_row_id
       insertArray['claim_status'] = 1
+
+      // Advisory-only duplicate-name check (user-requested, 2026-09-22) - admin creation only, per
+      // explicit scope decision (self-service company sign-up is never affected). Never blocks the
+      // save - the admin already saw and could dismiss this same warning on the form; this just
+      // records what was flagged at creation time for the later "Possible Duplicates" review queue.
+      if (insertArray.company_name) {
+        const duplicateCheck = await checkCompanyNameForDuplicates(insertArray.company_name)
+        const duplicateIds = [
+          ...(duplicateCheck.exact_match ? [duplicateCheck.exact_match._id] : []),
+          ...duplicateCheck.similar_matches.map((match) => match._id),
+        ]
+        if (duplicateIds.length > 0) {
+          insertArray['possible_duplicate_of'] = duplicateIds
+          insertArray['duplicate_review_status'] = 'pending'
+        }
+      }
     }
     insertArray['created_date_n_time'] = date_n_time
 

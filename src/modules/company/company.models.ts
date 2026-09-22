@@ -92,6 +92,14 @@ const companySchema = new mongoose.Schema({
   profile_score: { type: Number, default: 0 },
   updated_by: { type: String, enum: ['user', 'subadmin', 'admin'], default: null },
   updated_by_row_id: { type: Number, default: null },
+  // Advisory-only duplicate-name flag (user-requested, 2026-09-22): set when an admin creates a
+  // company whose name exactly or closely matches an existing one, per their own explicit choice
+  // to proceed anyway rather than being blocked. Never restricts creation - purely bookkeeping for
+  // a later "Possible Duplicates" review queue. `possible_duplicate_of` holds the matched
+  // company_row_id(s) at the time of creation; undefined/absent on every company created before
+  // this feature and on every company with no match found.
+  possible_duplicate_of: { type: [Number], default: undefined },
+  duplicate_review_status: { type: String, enum: ['pending', 'confirmed_distinct', 'merged'], default: undefined },
 })
 
 companySchema.index({ approval_status: 1, active_status: 1 })
