@@ -11,6 +11,7 @@
 // actual admin-create write path) - company_admin reaching in here is the normal direction (it
 // already depends on this module's model via the legacy companyM.js reverse-shim).
 import { CompanyM } from './company.models'
+import { nameSimilarity, normalizeName } from '../../common/name-similarity/name-similarity'
 
 const SIMILARITY_THRESHOLD = 0.6
 const MAX_SIMILAR_MATCHES = 5
@@ -32,39 +33,9 @@ export interface DuplicateCheckResult {
   similar_matches: DuplicateCompanyMatch[]
 }
 
-/** Lowercase, strip punctuation, collapse whitespace, drop trailing corporate suffixes - so "Coinbase, Inc." and "coinbase inc" normalize to the same "coinbase". */
+/** Lowercase, strip punctuation, collapse whitespace, drop trailing corporate suffixes - so "Coinbase, Inc." and "coinbase inc" normalize to the same "coinbase". Thin wrapper over the shared `normalizeName` (common/name-similarity) with this module's own corporate-suffix stop-list. */
 export function normalizeCompanyName(name: string): string {
-  const stripped = name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  const words = stripped.split(' ').filter((word) => !CORPORATE_SUFFIXES.includes(word))
-  return words.join(' ')
-}
-
-function toBigrams(value: string): Set<string> {
-  const padded = ` ${value} `
-  const bigrams = new Set<string>()
-  for (let i = 0; i < padded.length - 1; i += 1) {
-    bigrams.add(padded.slice(i, i + 2))
-  }
-  return bigrams
-}
-
-/** Dice's coefficient over character bigrams - simple, dependency-free, and good enough at this scale to rank "how close are these two names" without a real fuzzy-search engine. 1 = identical, 0 = nothing in common. */
-export function nameSimilarity(a: string, b: string): number {
-  if (a === b) return 1
-  const bigramsA = toBigrams(a)
-  const bigramsB = toBigrams(b)
-  if (bigramsA.size === 0 || bigramsB.size === 0) return 0
-
-  let overlap = 0
-  for (const bigram of bigramsA) {
-    if (bigramsB.has(bigram)) overlap += 1
-  }
-  return (2 * overlap) / (bigramsA.size + bigramsB.size)
+  return normalizeName(name, CORPORATE_SUFFIXES)
 }
 
 /**

@@ -13,6 +13,20 @@ import {
 } from './professionals.list.queries'
 import { buildProfessionalsListKey, buildAdminCreatedListKey, getCache, setCache, PROFESSIONALS_LIST_TTL_SECONDS } from './professionals.cache'
 import { GetProfessionalListParams, GetAdminCreatedListParams } from './professionals.types'
+import { getViewCounts30d } from '../view-counts-30d/view-counts-30d.service'
+
+/**
+ * Merges `view_count_30d` onto each row (user-requested, 2026-09-22) - applied AFTER the list's
+ * own cache read/write, never baked into the cached list JSON, so a list-cache HIT still gets
+ * whatever the view-count cache currently holds instead of freezing view counts at whatever they
+ * were when the list was first cached (the two caches have deliberately different lifetimes/
+ * invalidation triggers).
+ */
+async function withProfessionalViewCounts30d<T extends { user_name?: string }>(rows: T[]): Promise<(T & { view_count_30d: number })[]> {
+  const usernames = rows.map((row) => row.user_name).filter((name): name is string => Boolean(name))
+  const counts = usernames.length > 0 ? await getViewCounts30d('professional', usernames) : {}
+  return rows.map((row) => ({ ...row, view_count_30d: row.user_name ? (counts[row.user_name.toLowerCase()] ?? 0) : 0 }))
+}
 
 function parseSkipLimit(skipRaw: string, limitRaw: string, defaultLimit: number) {
   const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
@@ -46,7 +60,8 @@ export async function getProfessionalList(params: GetProfessionalListParams) {
   const cacheKey = buildProfessionalsListKey(skip, limit, { matchQuery, designationStatus: params.designationStatusRaw, lookingForStatus: params.lookingForStatusRaw, sortBy: params.sortByRaw })
   const cached = await getCache({ key: cacheKey })
   if (cached.status) {
-    return cached.message
+    const cachedResult = cached.message as { status: boolean; message: { user_name?: string }[]; count: number }
+    return { ...cachedResult, message: await withProfessionalViewCounts30d(cachedResult.message) }
   }
 
   const designationStatus = Number.parseInt(params.designationStatusRaw as string)
@@ -70,7 +85,7 @@ export async function getProfessionalList(params: GetProfessionalListParams) {
 
   const result = { status: true, message: data, count }
   await setCache({ key: cacheKey, value: result, ttl: PROFESSIONALS_LIST_TTL_SECONDS })
-  return result
+  return { ...result, message: await withProfessionalViewCounts30d(data) }
 }
 
 /** Ports user.js's GET /admin_created_list/:skip/:limit (~line 2756-2975). See professionals.list.queries.ts for the confirmed pagination-ordering perf fix. */

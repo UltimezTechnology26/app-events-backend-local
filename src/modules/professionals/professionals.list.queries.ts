@@ -132,6 +132,11 @@ const PROFESSIONAL_LIST_SORT_MAP: Record<string, Record<string, 1 | -1>> = {
   score: { profile_score: -1 },
   oldest: { _id: 1 },
   newest: { _id: -1 },
+  // Matches `COMPANY_LIST_SORT_MAP`'s own `views` entry exactly (user-requested, 2026-09-22) -
+  // now the list's default sort, same as Live Companies. Sorts on the legacy `view_counts` Mongo
+  // field, not the real GA4 `view_count_30d` (merged in after this query runs, from Redis) - same
+  // pre-existing constraint Company's own "Views (High-Low)" sort already has.
+  views: { view_counts: -1 },
 }
 
 /**

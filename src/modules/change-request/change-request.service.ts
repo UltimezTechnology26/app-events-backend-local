@@ -8,6 +8,7 @@ import { SECTION_REGISTRY, isKnownSection, SectionConfig } from './change-reques
 import {
   amendPendingRequest,
   findApprovedRequestsForEntity,
+  findApprovedRequestsPaginated,
   findPendingRequest,
   findPendingRequestsForEntity,
   findPendingRequestsPaginated,
@@ -307,6 +308,45 @@ export async function publishAllChangeRequests({
     },
     publishedCount,
   }
+}
+
+/**
+ * Global cross-entity approved-but-unpublished-changes queue — every root document's approved,
+ * not-yet-fully-published requests together, mirroring getPendingChangeRequestsAcrossEntities/
+ * getRejectedChangeRequestsAcrossEntities above (user-requested Approved Changes queue,
+ * 2026-09-22). `derived_status` is read straight off the stored request (REQUEST_PROJECTION
+ * already includes it, kept in sync at write-time by updateFieldStatuses/amendPendingRequest) —
+ * same convention as the Pending/Rejected queues' own summaries, not recomputed here.
+ */
+export async function getApprovedChangeRequestsAcrossEntities({
+  module,
+  skip,
+  limit,
+}: {
+  module: string
+  skip: number
+  limit: number
+}): Promise<{ status: boolean; message: (ApprovedChangeSummary & { root_document_id: number })[]; count: number }> {
+  const { data, count } = await findApprovedRequestsPaginated({ module, skip, limit })
+
+  const message = await Promise.all(data.map(async (request) => ({
+    change_request_id: request._id,
+    section: request.section,
+    status: CHANGE_REQUEST_STATUS.APPROVED as typeof CHANGE_REQUEST_STATUS.APPROVED,
+    revision: request.revision,
+    requested_by: await withActorName(request.requested_by),
+    requested_at: request.requested_at,
+    reviewed_by: await withReviewerName(request.reviewed_by),
+    reviewed_at: request.reviewed_at,
+    rating: request.rating,
+    note: request.note,
+    changes: await withFieldChangeActorNames(request.changes),
+    action: request.action,
+    derived_status: request.derived_status,
+    root_document_id: request.root_document_id,
+  })))
+
+  return { status: true, message, count }
 }
 
 export async function getApprovedChangeRequests({

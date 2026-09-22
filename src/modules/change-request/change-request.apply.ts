@@ -91,9 +91,18 @@ const APPLIED_MESSAGE = 'Changes published successfully'
 export async function applyChangeRequest({
   changeRequestId,
   actor,
+  fieldKeys,
 }: {
   changeRequestId: number
   actor: ActorRef
+  /**
+   * Field-level selective publish (user-requested, 2026-09-22): when given, only these field
+   * names are published from the request's approved-and-unpublished set, leaving the rest
+   * approved-but-still-unpublished for a later publish. Omitted entirely (undefined) preserves
+   * the original behavior — every approved-and-unpublished field on the request gets published,
+   * unchanged for existing callers (publish_change/:id, publishAllChangeRequests).
+   */
+  fieldKeys?: string[]
 }): Promise<ApplyChangeRequestResult> {
   const request = await findRequestById(changeRequestId)
   if (!request) {
@@ -127,7 +136,7 @@ export async function applyChangeRequest({
   const hasFieldLevelStatuses = (request.changes ?? []).some((c) => c.status !== undefined)
   const usesFieldLevelApproval = Boolean(config.fieldLevelApproval) && request.action === ACTION_UPDATE && hasFieldLevelStatuses
   const approvedUnpublished = usesFieldLevelApproval
-    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published)
+    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published && (!fieldKeys || fieldKeys.includes(c.field)))
     : []
 
   if (usesFieldLevelApproval) {

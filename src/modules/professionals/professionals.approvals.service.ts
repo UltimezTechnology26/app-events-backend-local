@@ -4,7 +4,7 @@
 // company_admin.approvals.service.ts's getGlobalPendingChangeRequests/getGlobalRejectedChangeRequests
 // exactly, parameterized with AUDIT_MODULE_PROFESSIONALS and enriched with professional display
 // info (name/username/avatar) instead of company name/id/logo.
-import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
+import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities, getApprovedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
 import { AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-audit.registry'
 import { findProfessionalsDisplayInfoByIds } from './professionals.approvals.queries'
 
@@ -88,6 +88,45 @@ export async function getGlobalRejectedChangeRequestsForProfessionals({ skipRaw,
   const professionalById = buildEntityById(professionals)
 
   const data: RejectedProfessionalChangeQueueRow[] = requests.map((request) => ({
+    ...request,
+    entity: toEntity(professionalById.get(request.root_document_id)),
+  }))
+
+  return { status: true, message: data, count }
+}
+
+export interface ApprovedProfessionalChangeQueueRow {
+  change_request_id: number
+  section: string
+  revision: number
+  requested_by: unknown
+  requested_at: Date
+  reviewed_by: unknown
+  reviewed_at: Date | null
+  rating: number | null
+  note: string | null
+  changes: unknown[]
+  root_document_id: number
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
+  entity: ProfessionalChangeQueueEntity | null
+}
+
+/**
+ * Global cross-professional approved-but-unpublished-changes queue — same shape as
+ * getGlobalPendingChangeRequestsForProfessionals/getGlobalRejectedChangeRequestsForProfessionals
+ * above (user-requested Approved Changes queue, 2026-09-22).
+ */
+export async function getGlobalApprovedChangeRequestsForProfessionals({ skipRaw, limitRaw }: GetGlobalProfessionalChangesParams) {
+  const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
+  const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 20
+
+  const { message: requests, count } = await getApprovedChangeRequestsAcrossEntities({ module: AUDIT_MODULE_PROFESSIONALS, skip, limit })
+
+  const userRowIds = Array.from(new Set(requests.map((request) => request.root_document_id)))
+  const professionals = userRowIds.length > 0 ? await findProfessionalsDisplayInfoByIds(userRowIds) : []
+  const professionalById = buildEntityById(professionals)
+
+  const data: ApprovedProfessionalChangeQueueRow[] = requests.map((request) => ({
     ...request,
     entity: toEntity(professionalById.get(request.root_document_id)),
   }))
