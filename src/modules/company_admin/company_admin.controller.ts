@@ -15,6 +15,7 @@ import {
   updateCompanyPageDetails,
   checkUserOrCompanyIdAvailability,
 } from './company_admin.service'
+import { checkCompanyNameForDuplicates } from '../company/company.duplicate-check'
 // Enable/Disable now route through the pending -> approve -> publish gate (user-requested
 // 2026-09-20) instead of writing live immediately — see company_admin.lifecycle-request.service.ts.
 import { submitEnableCompanyRequest, submitDisableCompanyRequest } from './company_admin.lifecycle-request.service'
@@ -395,4 +396,20 @@ companyAdminRouter.get('/check_user_company_id/:investor_type/:id', asyncRoute('
   const investor_type = Number.parseInt(req.params.investor_type as string)
   const result = await checkUserOrCompanyIdAvailability({ investor_type, id: req.params.id as string })
   res.json(result)
+}))
+
+/**
+ * Advisory-only duplicate-name check for the admin "Create New Company" form (user-requested,
+ * 2026-09-22) — never restricts creation, only surfaces exact/similar existing companies so the
+ * admin can make an informed call. `exclude_company_id` lets the same check run harmlessly while
+ * editing an existing company's own name without it matching itself.
+ */
+companyAdminRouter.get('/check_company_name', asyncRoute('Check company name for duplicates.', async (req, res) => {
+  const guard = requireAdmin7(req)
+  if (guard) return res.json(guard)
+
+  const name = typeof req.query.name === 'string' ? req.query.name : ''
+  const excludeCompanyId = typeof req.query.exclude_company_id === 'string' ? Number.parseInt(req.query.exclude_company_id) : undefined
+  const result = await checkCompanyNameForDuplicates(name, Number.isNaN(excludeCompanyId as number) ? undefined : excludeCompanyId)
+  res.json({ status: true, message: result })
 }))

@@ -17,6 +17,7 @@ import {
   validateChangeRequestId,
   validateCompanyRowId,
   isMainAdmin,
+  canApproveChangeRequests,
   validateRating,
   validateNote,
   CHANGE_REQUEST_MESSAGES,
@@ -215,7 +216,7 @@ companyAdminApprovalsRouter.post('/publish_change/:change_request_id', writeEndp
   }
 
   // Maker-checker: a sub-admin submits but may never publish (design §13.1 item 3).
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -243,7 +244,7 @@ companyAdminApprovalsRouter.post('/publish_all_changes/:company_row_id', writeEn
   }
 
   // Maker-checker: a sub-admin submits but may never publish (design §13.1 item 3).
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -265,7 +266,7 @@ companyAdminApprovalsRouter.post('/approve_change/:change_request_id', writeEndp
     return
   }
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -299,7 +300,7 @@ companyAdminApprovalsRouter.post('/reject_change/:change_request_id', writeEndpo
     return
   }
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -335,7 +336,7 @@ companyAdminApprovalsRouter.post('/approve_change_fields/:change_request_id', wr
     return
   }
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
@@ -377,7 +378,7 @@ companyAdminApprovalsRouter.post('/reject_change_fields/:change_request_id', wri
     return
   }
 
-  if (!isMainAdmin(checkToken.message.admin_manager_type)) {
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
     res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
     return
   }
