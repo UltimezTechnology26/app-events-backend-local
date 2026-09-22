@@ -21,7 +21,7 @@ import {
 } from './company_admin.approvals.queries'
 import { Actor } from './company_admin.types'
 import { recordCompanyStatusChange } from './company_admin.audit'
-import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
+import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities, getApprovedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 
 export interface GetCompaniesListParams {
@@ -304,6 +304,52 @@ export async function getGlobalRejectedChangeRequests({ skipRaw, limitRaw }: Get
   const companyById = new Map(companies.map((company: { _id: number }) => [company._id, company]))
 
   const data: RejectedChangeQueueRow[] = requests.map((request) => {
+    const company = companyById.get(request.root_document_id) as
+      | { _id: number; company_name?: string; company_id?: string; company_logo?: string }
+      | undefined
+    return {
+      ...request,
+      entity: company
+        ? { company_row_id: company._id, company_name: company.company_name ?? null, company_id: company.company_id ?? null, company_logo: company.company_logo ?? null }
+        : null,
+    }
+  })
+
+  return { status: true, message: data, count }
+}
+
+export interface ApprovedChangeQueueRow {
+  change_request_id: number
+  section: string
+  revision: number
+  requested_by: unknown
+  requested_at: Date
+  reviewed_by: unknown
+  reviewed_at: Date | null
+  rating: number | null
+  note: string | null
+  changes: unknown[]
+  root_document_id: number
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
+  entity: { company_row_id: number; company_name: string | null; company_id: string | null; company_logo: string | null } | null
+}
+
+/**
+ * Global cross-entity approved-but-unpublished-changes queue — same shape as
+ * getGlobalPendingChangeRequests/getGlobalRejectedChangeRequests above (user-requested Approved
+ * Changes queue, 2026-09-22).
+ */
+export async function getGlobalApprovedChangeRequests({ skipRaw, limitRaw }: GetGlobalPendingChangesParams) {
+  const skip = !Number.isNaN(Number.parseInt(skipRaw)) ? Number.parseInt(skipRaw) : 0
+  const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 20
+
+  const { message: requests, count } = await getApprovedChangeRequestsAcrossEntities({ module: AUDIT_MODULE_COMPANY, skip, limit })
+
+  const companyIds = Array.from(new Set(requests.map((request) => request.root_document_id)))
+  const companies = companyIds.length > 0 ? await findCompaniesDisplayInfoByIds(companyIds) : []
+  const companyById = new Map(companies.map((company: { _id: number }) => [company._id, company]))
+
+  const data: ApprovedChangeQueueRow[] = requests.map((request) => {
     const company = companyById.get(request.root_document_id) as
       | { _id: number; company_name?: string; company_id?: string; company_logo?: string }
       | undefined
