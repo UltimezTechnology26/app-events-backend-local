@@ -934,27 +934,17 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         $lookup:
                         {
                             from: "cln_professionals",
+                            localField: "user_row_id",
+                            foreignField: "_id",
                             let: {
-                                user_row_id: '$user_row_id',
                                 user_type: '$user_type'
                             },
                             as: "user_info",
                             pipeline: [
                                 {
                                     $match: {
-                                        $and: [
-                                            {
-                                                $expr: {
-                                                    $and: [
-                                                        { $eq: [1, '$$user_type'] },
-                                                        { $eq: ['$_id', '$$user_row_id'] }
-                                                    ]
-                                                }
-                                            },
-                                            {
-                                                login_status: 1
-                                            }
-                                        ]
+                                        $expr: { $eq: ['$$user_type', 1] },
+                                        login_status: 1
                                     }
                                 },
                                 {
@@ -987,20 +977,16 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                         $lookup:
                         {
                             from: "cln_professionals_manual_retrievals",
+                            localField: "user_row_id",
+                            foreignField: "_id",
                             let: {
-                                user_type: '$user_type',
-                                user_row_id: '$user_row_id'
+                                user_type: '$user_type'
                             },
                             as: "manual_info",
                             pipeline: [
                                 {
                                     $match: {
-                                        $expr: {
-                                            $and: [
-                                                { $eq: [2, '$$user_type'] },
-                                                { $eq: ['$_id', '$$user_row_id'] }
-                                            ]
-                                        }
+                                        $expr: { $eq: ['$$user_type', 2] }
                                     }
                                 },
 
