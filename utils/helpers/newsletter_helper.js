@@ -181,9 +181,34 @@ export const sendEmailsForPricePrediction = async () => {
                         //console.log("send_email_status", send_email_status)
 
                         if (send_email_status) {
+                            const users_list = await getUsersList({ email_newsletter_row_id })
+
+                            if (!users_list[0]) {
+                                continue
+                            }
+
+                            // Claim today's send atomically first - the unique index on
+                            // {newsletter_row_id, sent_date} rejects a second concurrent
+                            // claim (e.g. two app instances/replicas firing the same cron
+                            // around the same time), so only one of them proceeds to send.
+                            let report_insert_query
+                            try {
+                                report_insert_query = await email_newsletters_sent_reportsM({
+                                    newsletter_row_id: email_newsletter_row_id,
+                                    sent_date: today_date,
+                                    created_on: getPresentDateTime()
+                                }).save()
+                            }
+                            catch (claim_err) {
+                                if (claim_err.code === 11000) {
+                                    continue
+                                }
+                                throw claim_err
+                            }
+                            const sent_report_row_id = report_insert_query._id
+
                             const gainer_list = await gainersList({ notification_type })
                             const loser_list = await losersList({ notification_type })
-                            const users_list = await getUsersList({ email_newsletter_row_id })
 
                             let article_content = ''
                             if (article_list.length) {
@@ -329,30 +354,16 @@ export const sendEmailsForPricePrediction = async () => {
 
                             const pass_subject = title
 
-
-                            if (users_list[0]) {
-                                const date_n_time = getPresentDateTime()
-                                const report_insert_query = await email_newsletters_sent_reportsM({
-                                    newsletter_row_id: email_newsletter_row_id,
-                                    created_on: date_n_time
-                                }).save()
-                                const sent_report_row_id = report_insert_query._id
-
-                                console.log(users_list[0])
-
-                                await sendNewslettersEmails({
-                                    data: users_list,
-                                    run_time: 0,
-                                    interval_length: users_list.length,
-                                    pass_subject,
-                                    pass_message,
-                                    newsletter_title: title,
-                                    sent_report_row_id,
-                                    notification_type
-                                })
-                                //return sent_report_row_id
-                            }
-
+                            await sendNewslettersEmails({
+                                data: users_list,
+                                run_time: 0,
+                                interval_length: users_list.length,
+                                pass_subject,
+                                pass_message,
+                                newsletter_title: title,
+                                sent_report_row_id,
+                                notification_type
+                            })
                         }
                     }
                 }
@@ -748,9 +759,7 @@ export const dailyNewsLetter = async (date_type) => {
 
 
                            <div class="hide-in-desktop" style="display: none;">
-                            <div style="margin-top: 20px;border: 1px solid rgba(22, 197, 130, 0.5);background: linear-gradient(0deg, #FFFFFF, #FFFFFF),
-                                linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(22, 197, 130, 0.05) 100%);
-                                border-radius: 16px;padding: 24px;">
+                            <div style="margin-top: 20px;border: 1px solid rgba(22, 197, 130, 0.5); background: #fff; border-radius: 16px;padding: 24px;">
                                     <h2 style="margin-top: 0;"><img src="https://image.coinpedia.org/app_uploads/emails/top-gainer.png" alt="global-crypto" style="vertical-align: bottom;
                                         margin-right: 6px;"/> Top Gainers</h2>
                                     <div style="overflow-x:auto;">
@@ -772,9 +781,7 @@ export const dailyNewsLetter = async (date_type) => {
                                     font-weight: 700; font-size: 14px; line-height: 18px;margin-top: 20px;">View All Gainers <img src="https://image.coinpedia.org/app_uploads/emails/blue-arrow.png" alt="arrow" style="vertical-align: middle; margin-left: 4px;"/></button>
                                 </a>
                                     </div>
-                                    <div style="margin-top:20px;border: 1px solid rgba(224, 36, 61, 0.3);background: linear-gradient(0deg, #FFFFFF, #FFFFFF),
-                                linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(224, 36, 61, 0.05) 100%);
-                                border-radius: 16px;padding: 24px;">
+                                    <div style="margin-top:20px;border: 1px solid rgba(224, 36, 61, 0.3); background: #fff; border-radius: 16px;padding: 24px;">
                                     <h2 style="margin-top: 0;"><img src="https://image.coinpedia.org/app_uploads/emails/top-looser.png" alt="global-crypto" style="vertical-align: bottom;
                                         margin-right: 6px;"/> Top Looser</h2>
                                     <div style="overflow-x:auto;">
