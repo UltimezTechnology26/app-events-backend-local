@@ -474,12 +474,6 @@ router.post('/update_sponsors_partners', [
                 // regardless of what the client sent - "Partnership Type" showed blank for every partner ever
                 // created. Both sponsor and partner rows send the same field; there's no reason to gate it.
                 insert_array['sponsorship_type_title'] = req.body.sponsorship_type_title || ""
-                // CONFIRMED BUG FIX: requested_status was never set on insert, so new rows fell through to the
-                // schema's `default: 3` - a value outside the documented 0 (Pending) / 1 (Approved) / 2 (Rejected)
-                // enum, so every list/detail view rendering that field showed a blank/dash "Status". Approve/reject
-                // already explicitly set 1/2 later in this file; setting 0 here makes new rows start "Pending"
-                // instead of an undocumented sentinel.
-                insert_array['requested_status'] = 0
 
                 if (!Number.isNaN(Number.parseInt(req.body.category_row_id))) {
                     insert_array['category_row_id'] = req.body.category_row_id
@@ -492,6 +486,18 @@ router.post('/update_sponsors_partners', [
 
                     insert_array['event_row_id'] = event_row_id
                     insert_array['created_date_n_time'] = getPresentDateTime()
+                    // CONFIRMED BUG FIX (matches Speaker's own event_speakersM schema exactly):
+                    // this used to unconditionally set `requested_status: 0` (Pending) on every
+                    // insert, host or admin, which meant the host/admin's own direct add sat
+                    // "Pending" until someone separately approved it via /accept_sponsor_request -
+                    // there was never a "host added it, so it's already settled" state like
+                    // Speaker's `3`. Matches legacy admin-coinpedia + this route's own pre-existing
+                    // direct-write behavior (user-confirmed 2026-09-26): a host or admin adding a
+                    // sponsor/partner here is immediately approved, no separate accept/reject step -
+                    // that review only ever applied to a genuine third-party self-submission, not
+                    // modeled by this endpoint. An EDIT (below) never touches this field, so an
+                    // existing row's own accept/reject/pending state survives an edit unchanged.
+                    insert_array['requested_status'] = 3
 
                     const insert_query = await event_sponsors_partner_detailsM(insert_array).save()
 

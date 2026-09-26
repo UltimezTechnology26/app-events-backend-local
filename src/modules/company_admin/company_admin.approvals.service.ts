@@ -1,12 +1,9 @@
 // modules/company_admin/company_admin.approvals.service.ts
 const companyM = require('../../../models/app/company/companyM')
 const company_deleted_historyM = require('../../../models/app/company/company_deleted_historyM')
-const { getPresentDateTime, checkCompanySubadminAccess } = require('../../../utils/helpers/helper')
+const { checkCompanySubadminAccess } = require('../../../utils/helpers/helper')
 const { deleteCompanyDetails } = require('../../../utils/helpers/app_helper')
 import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-library/auth'
-const { updateNotification } = require('../../../utils/helpers/notification_helper')
-const { sendEmail } = require('../../../config/email')
-import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-library/cache'
 import {
   buildCompaniesListMatchQuery,
   buildCompaniesListPipeline,
@@ -16,8 +13,6 @@ import {
   buildDeletedListMatchQuery,
   findCompanyById,
   findCompaniesDisplayInfoByIds,
-  findPendingApprovalCompanyById,
-  updateCompanyApprovalFields,
 } from './company_admin.approvals.queries'
 import { Actor } from './company_admin.types'
 import { recordCompanyStatusChange } from './company_admin.audit'
@@ -51,140 +46,6 @@ export async function getCompaniesList({ approvalStatusRaw, activeStatusRaw, ski
   const { data, count } = extractCompaniesListResult(aggregateOutput)
 
   return { status: true, message: data, count }
-}
-
-export interface ApproveCompanyRequestParams {
-  admin: Actor
-  requestRowIdRaw: string
-}
-
-/** Ports company_approvals.js's GET /approve_request/:request_row_id (lines 319-385). */
-export async function approveCompanyRequest({ admin, requestRowIdRaw }: ApproveCompanyRequestParams) {
-  const queryRun = await findCompanyById(requestRowIdRaw)
-  if (!queryRun) {
-    return { status: false, message: { alert_message: 'Sorry, Invalid Request Row Id' } }
-  }
-
-  const company_row_id = Number.parseInt(requestRowIdRaw)
-  const check_access = await checkCompanySubadminAccess({
-    admin_row_id: Number.parseInt(String(admin.message.admin_row_id)),
-    admin_manager_type: admin.message.admin_manager_type,
-    sub_admin_type: Number.parseInt(String(admin.message.sub_admin_type)),
-    company_row_id,
-  })
-  if (!check_access.status) {
-    return { status: false, message: { alert_message: check_access.message } }
-  }
-
-  const checkApprovalQuery = await findPendingApprovalCompanyById(requestRowIdRaw)
-  if (!checkApprovalQuery) {
-    return { status: false, message: { alert_message: 'Sorry, This Company cannot be approved' } }
-  }
-
-  const updateFields = getUpdateTrackerFields(admin)
-  await updateCompanyApprovalFields(requestRowIdRaw, { approval_status: 1, ...updateFields, updated_date_n_time: new Date() })
-  await recordCompanyStatusChange({
-    documentId: company_row_id,
-    action: 'approve',
-    tracker: updateFields,
-    adminRowId: admin.message.admin_row_id,
-  })
-  await deleteKeysByPattern('app_company_individual_details_*')
-  await deleteKeysByPattern('app_company_list_*')
-
-  const company_name = checkApprovalQuery.company_name
-  const company_email_id = checkApprovalQuery.company_email_id
-
-  if (queryRun.user_row_id) {
-    await updateNotification({ user_row_id: queryRun.user_row_id, notify_type: 2, notify_type_row_id: company_row_id, message_row_id: 10, action_row_id: company_row_id })
-  }
-
-  const pass_subject = 'Your company ' + company_name + ' was Approved by the Admin. '
-  const pass_message = `
-    <p style="text-transform: capitalize;color:#000;font-weight: 500;font-size:22px;">Hello ${company_name},</p>
-    <p style="color:#000;font-weight: 400;font-size:17px;">Your Company <b style="text-transform: capitalize;">${company_name}</b> is reviewed and approved successfully by the admin. </p>
-    <p style="color:#000;font-weight: 400;font-size:17px;"> You can now list and manage your events, update company details, add tokens, and access all the exciting features on Coinpedia.</p>
-    <p style="color:#000;font-weight: 400;font-size:17px;"><a href="https://app.coinpedia.org/login/" style="color:#0029ff;">Login Now</a> </p>
-    `
-  await sendEmail(company_email_id, pass_subject, pass_message)
-
-  return { status: true, message: { alert_message: 'Company approved successfully' } }
-}
-
-export interface RejectCompanyRequestParams {
-  admin: Actor
-  requestRowIdRaw: string
-  reasonRejected: string
-}
-
-/** Ports company_approvals.js's POST /reject_request/:request_row_id (lines 387-484). */
-export async function rejectCompanyRequest({ admin, requestRowIdRaw, reasonRejected }: RejectCompanyRequestParams) {
-  const check_access = await checkCompanySubadminAccess({
-    admin_row_id: Number.parseInt(String(admin.message.admin_row_id)),
-    admin_manager_type: admin.message.admin_manager_type,
-    sub_admin_type: Number.parseInt(String(admin.message.sub_admin_type)),
-    company_row_id: Number.parseInt(requestRowIdRaw),
-  })
-  if (!check_access.status) {
-    return { status: false, message: { alert_message: check_access.message } }
-  }
-
-  let admin_row_id = 0
-  if (admin.message.admin_manager_type == 2) {
-    admin_row_id = Number(admin.message.admin_row_id)
-  }
-
-  const company_row_id = Number.parseInt(requestRowIdRaw)
-  if (Number.isNaN(company_row_id)) {
-    return { status: false, message: { alert_message: 'Oops! Invalid Company Row Id' } }
-  }
-
-  const queryRun = await findCompanyById(company_row_id)
-  if (!queryRun) {
-    return { status: false, message: { alert_message: 'Sorry! Invalid Request Row Id' } }
-  }
-
-  const checkApprovalQuery = await findPendingApprovalCompanyById(company_row_id)
-  if (!checkApprovalQuery) {
-    return { status: false, message: { alert_message: 'Sorry! This Company cannot be rejected' } }
-  }
-
-  const company_name = checkApprovalQuery.company_name
-  const company_email_id = checkApprovalQuery.company_email_id
-
-  const pass_subject = 'CoinPedia Company Profile Request Denied'
-  const pass_message = `
-    <p style="text-transform: capitalize;color:#000;font-weight: 500;font-size:22px;">Dear  ${company_name},</p>
-    <p style="color:#000;font-weight: 400;font-size:17px;">We regret to inform you that your CoinPedia Company Profile account application has been denied.</p>
-    <p style="color:#000;font-weight: 400;font-size:17px;"><b>Reject Reason : </b>${reasonRejected}</p>
-    <p style="color:#000;font-weight: 400;font-size:17px;">Your interest is appreciated, and we invite you to <a href="https://app.coinpedia.org/login/" style="color: #0029ff;font-weight: 400;">Register<a> to CoinPedia for more information!</p>
-    `
-  await sendEmail(company_email_id, pass_subject, pass_message)
-
-  const updateFields = getUpdateTrackerFields(admin)
-  const updateArray = {
-    approval_status: 2,
-    approval_sub_admin_row_id: admin_row_id,
-    reason_rejected: reasonRejected,
-    rejected_date_n_time: getPresentDateTime(),
-    ...updateFields,
-  }
-  await updateCompanyApprovalFields(company_row_id, updateArray)
-  await recordCompanyStatusChange({
-    documentId: company_row_id,
-    action: 'reject',
-    tracker: updateFields,
-    adminRowId: admin.message.admin_row_id,
-    reason: reasonRejected,
-  })
-  await deleteKeysByPattern('app_company_individual_details_*')
-  await deleteKeysByPattern('app_company_list_*')
-
-  if (queryRun.user_row_id) {
-    await updateNotification({ user_row_id: queryRun.user_row_id, notify_type: 2, notify_type_row_id: company_row_id, message_row_id: 11, action_row_id: company_row_id })
-  }
-
-  return { status: true, message: { alert_message: 'Company rejected successfully' } }
 }
 
 export interface DeleteCompanyRequestParams {

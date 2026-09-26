@@ -16,7 +16,8 @@ const { checkAdminLoginToken } = require('../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
-import { getApprovalsList, approveRequest, rejectRequest } from './professionals-approvals.service'
+import { getApprovalsList } from './professionals-approvals.service'
+import { submitApproveUserRequest, submitRejectUserRequest } from '../professionals/professionals.lifecycle-request.service'
 import { AdminAuthResult } from './professionals-approvals.types'
 
 export const professionalsApprovalsRouter: Router = express.Router()
@@ -47,7 +48,7 @@ professionalsApprovalsRouter.get(
   asyncRoute('Approve user request.', async (req: Request, res: Response) => {
     const auth: AdminAuthResult = checkAdminLoginToken(req.headers, APPROVALS_ACCESS_IDS)
     if (!auth.status) return res.json(auth)
-    res.json(await approveRequest(auth, Number.parseInt(req.params.request_row_id as string)))
+    res.json(await submitApproveUserRequest(auth, req.params.request_row_id as string))
   }),
 )
 
@@ -59,6 +60,7 @@ professionalsApprovalsRouter.post(
     const errObj = arrangeValidation(validationResult(req))
     const auth: AdminAuthResult = checkAdminLoginToken(req.headers, APPROVALS_ACCESS_IDS)
     if (!auth.status) return res.json(auth)
-    res.json(await rejectRequest(auth, Number.parseInt(req.params.request_row_id as string), req.body.reason_rejected, errObj))
+    if (Object.keys(errObj).length > 0) return res.json({ status: false, message: errObj })
+    res.json(await submitRejectUserRequest(auth, req.params.request_row_id as string, req.body.reason_rejected))
   }),
 )

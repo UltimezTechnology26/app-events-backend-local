@@ -1,11 +1,22 @@
 // modules/view-counts-30d/view-counts-30d.bigquery.ts
 //
-// ONE BigQuery scan backs both the Company and Professional "Views (Last 30 Days)" columns
-// (user-requested, 2026-09-22). Cost is dominated by scanning the last 30 days of raw GA4 events
-// (~1.05GB / ~3.3s measured directly against production data), not by how many distinct paths end
-// up in the grouped output - so this deliberately computes BOTH company slugs and root-level path
-// segments (candidate professional usernames + noise) from the SAME `base` CTE in one query,
-// instead of two separate queries that would each pay the same scan cost again.
+// ONE BigQuery scan backs the Company, Professional, AND Events "Views (Last 30 Days)" columns
+// (user-requested, 2026-09-22 for company/professional; extended 2026-09-23 for events, per the
+// Events migration plan's decision to reuse this exact module rather than build a separate one).
+// Cost is dominated by scanning the last 30 days of raw GA4 events (~1.05GB / ~3.3s measured
+// directly against production data), not by how many distinct paths end up in the grouped output
+// - so this deliberately computes company slugs, candidate professional usernames, AND candidate
+// event URL slugs from the SAME `base` CTE in one query, instead of separate queries that would
+// each pay the same scan cost again.
+//
+// Events pages live on a DIFFERENT domain than Company/Professional (confirmed via
+// utils/helpers/app_helper.js/events_helper.js's own hardcoded email links: public event pages
+// are `https://events.coinpedia.org/<event_url>`, not `app.coinpedia.org/...`). Root-level path
+// segments on events.coinpedia.org are ambiguous the same way professional usernames are on
+// app.coinpedia.org (frontend-events-typescript's own route list includes non-event pages at the
+// root: /all-events, /create-event, /organizers, /speakers, /my-events) - resolved against the
+// real event_url list from MongoDB in view-counts-30d.service.ts, same pattern as professional
+// username resolution.
 import { BigQuery } from '@google-cloud/bigquery'
 import { ViewCountBigQueryRow } from './view-counts-30d.types'
 
@@ -63,6 +74,13 @@ function buildQuery(): string {
       SELECT REGEXP_EXTRACT(page_location, r'app\\.coinpedia\\.org/([^/?]+)') AS segment
       FROM filtered
       WHERE NOT REGEXP_CONTAINS(page_location, r'app\\.coinpedia\\.org/company/')
+    ),
+    events_filtered AS (
+      SELECT page_location FROM base WHERE page_location LIKE '%events.coinpedia.org/%'
+    ),
+    event_paths AS (
+      SELECT REGEXP_EXTRACT(page_location, r'events\\.coinpedia\\.org/([^/?]+)') AS segment
+      FROM events_filtered
     )
     SELECT 'company' AS kind, slug AS key, COUNT(*) AS views
     FROM company_paths
@@ -71,6 +89,11 @@ function buildQuery(): string {
     UNION ALL
     SELECT 'root' AS kind, segment AS key, COUNT(*) AS views
     FROM root_paths
+    WHERE segment IS NOT NULL
+    GROUP BY segment
+    UNION ALL
+    SELECT 'event' AS kind, segment AS key, COUNT(*) AS views
+    FROM event_paths
     WHERE segment IS NOT NULL
     GROUP BY segment
   `

@@ -2,6 +2,7 @@ const DECIMAL_RADIX = 10
 const INVALID_REQUEST_ID_MESSAGE = 'Sorry, Invalid change request id'
 const INVALID_COMPANY_ID_MESSAGE = 'Sorry, Invalid Company row id'
 const INVALID_USER_ID_MESSAGE = 'Sorry, Invalid User Row ID'
+const INVALID_EVENT_ID_MESSAGE = 'Sorry, Invalid Event row id'
 const REASON_REQUIRED_MESSAGE = 'The Reason field is required'
 const PUBLISH_FORBIDDEN_MESSAGE = 'Sorry, you do not have permission to approve, reject, or publish changes'
 const RATING_MIN = 1
@@ -13,6 +14,7 @@ export const CHANGE_REQUEST_MESSAGES = {
   INVALID_REQUEST_ID: INVALID_REQUEST_ID_MESSAGE,
   INVALID_COMPANY_ID: INVALID_COMPANY_ID_MESSAGE,
   INVALID_USER_ID: INVALID_USER_ID_MESSAGE,
+  INVALID_EVENT_ID: INVALID_EVENT_ID_MESSAGE,
   REASON_REQUIRED: REASON_REQUIRED_MESSAGE,
   PUBLISH_FORBIDDEN: PUBLISH_FORBIDDEN_MESSAGE,
   NOTE_REQUIRED: NOTE_REQUIRED_MESSAGE,
@@ -43,6 +45,9 @@ export const validateCompanyRowId = (raw: string | undefined): NumericIdValidati
 
 export const validateUserRowId = (raw: string | undefined): NumericIdValidation =>
   parseId(raw, INVALID_USER_ID_MESSAGE)
+
+export const validateEventRowId = (raw: string | undefined): NumericIdValidation =>
+  parseId(raw, INVALID_EVENT_ID_MESSAGE)
 
 export const isMainAdmin = (adminManagerType: unknown): boolean =>
   Number(adminManagerType) === ADMIN_MANAGER_TYPE_MAIN

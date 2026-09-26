@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import logger from '../../../config/logger'
 import { ActorRef } from '../../common/status-audit/status-audit.types'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
-import { SECTION_REGISTRY, SECTION_BASIC_DETAILS, SECTION_PROFESSIONAL_BASIC_DETAILS, SECTION_FUNDING_ROUND, SECTION_ACQUISITIONS, SECTION_PROFESSIONAL_STATUS, SECTION_COMPANY_STATUS, SectionConfig, isKnownSection } from './change-request.registry'
+import { SECTION_REGISTRY, SECTION_BASIC_DETAILS, SECTION_PROFESSIONAL_BASIC_DETAILS, SECTION_FUNDING_ROUND, SECTION_ACQUISITIONS, SECTION_PROFESSIONAL_STATUS, SECTION_COMPANY_STATUS, SECTION_EVENT_STATUS, SectionConfig, isKnownSection } from './change-request.registry'
 import { findRequestById, markApplied, markApplyStarted, markChangeRequestFieldsPublished } from './change-request.queries'
 import { ApplyChangeRequestResult, ChangeRequestDoc, CHANGE_REQUEST_STATUS } from './change-request.types'
 import { applySectionWrite, SECTION_MODELS } from './change-request.apply.writers'
@@ -12,6 +12,7 @@ import { applyFundingRoundWrite } from '../../modules/funding/funding.service'
 import { applyAcquisitionWrite } from '../../modules/company_acquisitions/company_acquisitions.service'
 import { applyProfessionalStatusWrite, applyProfessionalStatusSideEffects } from '../../modules/professionals/professionals.lifecycle-apply'
 import { applyCompanyStatusWrite, applyCompanyStatusSideEffects } from '../../modules/company_admin/company_admin.lifecycle-apply'
+import { applyEventStatusWrite, applyEventStatusSideEffects } from '../../modules/events/events.lifecycle-apply'
 
 /**
  * Dispatches to the section-specific writer for every section that declared
@@ -34,6 +35,8 @@ async function applyCustomSectionWrite({
       return applyProfessionalStatusWrite({ request, session })
     case SECTION_COMPANY_STATUS:
       return applyCompanyStatusWrite({ request, session })
+    case SECTION_EVENT_STATUS:
+      return applyEventStatusWrite({ request, session })
     default:
       throw new Error(`change-request: no custom writer registered for section '${request.section}'`)
   }
@@ -305,6 +308,12 @@ export async function applyChangeRequest({
       await applyCompanyStatusSideEffects({ request: effectiveRequest, actor })
     } catch (err) {
       logger.error({ err, changeRequestId }, 'change-request: company status side effects failed')
+    }
+  } else if (request.section === SECTION_EVENT_STATUS) {
+    try {
+      await applyEventStatusSideEffects({ request: effectiveRequest, actor })
+    } catch (err) {
+      logger.error({ err, changeRequestId }, 'change-request: event status side effects failed')
     }
   }
 
