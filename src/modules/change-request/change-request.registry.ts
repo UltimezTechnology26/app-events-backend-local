@@ -17,6 +17,16 @@ const professionals_seo_detailsM = require('../../../models/app/professionals_se
 const professionals_social_linksM = require('../../../models/app/professionals_social_linksM')
 const professionals_awardsM = require('../../../models/app/users/professionals_awardsM')
 const professionals_faqM = require('../../../models/app/users/professionals_faqM')
+const eventM = require('../../../models/app/events/eventM')
+const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
+const ticketM = require('../../../models/app/events/ticketM')
+const couponM = require('../../../models/app/events/couponM')
+const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const event_contactsM = require('../../../models/app/events/event_contactsM')
+const event_speakersM = require('../../../models/app/events/event_speakersM')
+const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
+const event_attendeesM = require('../../../models/app/events/event_attendeesM')
 import { JOBS_LABEL_RESOLVERS } from '../../modules/jobs/jobs.label-resolvers'
 import { BASIC_DETAILS_LABEL_RESOLVERS } from '../../modules/company/settings/company.settings.label-resolvers'
 import { TEAM_MEMBERS_LABEL_RESOLVERS, TEAM_MEMBERS_FIELD_LABELS, TEAM_MEMBERS_DISPLAY_FIELDS } from '../../modules/team-members/team-members.label-resolvers'
@@ -26,6 +36,14 @@ import { OWNED_PRODUCTS_LABEL_RESOLVERS } from '../../modules/company_products/c
 import { HOLDING_CRYPTO_LABEL_RESOLVERS } from '../../modules/company_holdings/company_holdings.label-resolvers'
 import { REVENUE_LABEL_RESOLVERS } from '../../modules/company_revenue/company_revenue.label-resolvers'
 import { PROFESSIONAL_DETAILS_LABEL_RESOLVERS, PROFESSIONAL_DETAILS_FIELD_LABELS, PROFESSIONAL_DETAILS_DISPLAY_FIELDS } from '../../modules/work-experience/professional-details.label-resolvers'
+import {
+  EVENT_BASIC_DETAILS_LABEL_RESOLVERS,
+  EVENT_TICKET_LABEL_RESOLVERS,
+  EVENT_CONTACT_LABEL_RESOLVERS,
+  EVENT_SPEAKER_LABEL_RESOLVERS,
+  EVENT_SPONSOR_PARTNER_LABEL_RESOLVERS,
+  EVENT_ATTENDEE_LABEL_RESOLVERS,
+} from '../../modules/events/events.label-resolvers'
 
 /**
  * Every `invalidateCache` below requires its cache module LAZILY, inside the callback, never as
@@ -126,6 +144,18 @@ function invalidateCompanyStatusCaches(): Promise<void> {
   return require('../../modules/company/settings/company.settings.cache').invalidateBasicDetailsCaches()
 }
 
+/**
+ * None of the 10 Events sections below have a dedicated per-section cache module yet (unlike
+ * Company/Professionals, which each have one). `invalidateEventChangeRequestCaches` covers
+ * `individual_event_*` (the per-event detail cache every section's publish affects) plus every
+ * list-type section's own per-event Redis cache key (Contact/Speaker/Sponsor-Partner/Ticket/
+ * FAQ/Attendee each read through one - see events.cache.ts's own doc comment for the full list
+ * and why a document-scope-only invalidator isn't enough for these).
+ */
+function invalidateEventCaches(): Promise<void> {
+  return require('../../modules/events/events.cache').invalidateEventChangeRequestCaches()
+}
+
 export const SECTION_SEO = 'seo'
 export const SECTION_SOCIAL_MEDIA = 'social_media'
 export const SECTION_FAQ = 'faq'
@@ -152,6 +182,22 @@ export const SECTION_PROFESSIONAL_FAQ = 'professional_faq'
 // Manual Retrievals, Claim Requests, Delete-lifecycle) are untouched by this.
 export const SECTION_PROFESSIONAL_STATUS = 'professional_status'
 export const SECTION_COMPANY_STATUS = 'company_status'
+
+// Events sections (Phase 4, confirmed 2026-09-25) - gated: every section except Collaborations
+// (Collaborations isn't part of this migration's scope). Speaker/Sponsor-Partner/Attendee are
+// gated on TOP OF (not instead of) their own pre-existing `requested_status` accept/reject review
+// - see each section's own doc comment below.
+export const SECTION_EVENT_BASIC_DETAILS = 'event_basic_details'
+export const SECTION_EVENT_SEO = 'event_seo'
+export const SECTION_EVENT_SETTINGS = 'event_settings'
+export const SECTION_EVENT_TICKET = 'event_ticket'
+export const SECTION_EVENT_COUPON = 'event_coupon'
+export const SECTION_EVENT_FAQ = 'event_faq'
+export const SECTION_EVENT_CONTACT = 'event_contact'
+export const SECTION_EVENT_SPEAKER = 'event_speaker'
+export const SECTION_EVENT_SPONSOR_PARTNER = 'event_sponsor_partner'
+export const SECTION_EVENT_ATTENDEE = 'event_attendee'
+export const SECTION_EVENT_STATUS = 'event_status'
 
 export interface SectionConfig {
   collection: string
@@ -785,6 +831,182 @@ const PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS = [
 ] as const
 
 /**
+ * Every field the Basic Details tab actually edits (eventM.js) - excludes score/lifecycle/audit
+ * fields (`active_status`, `approval_status`, `*_score`, `reason_for_reject`,
+ * `rejected_date_n_time`, `disable_reason`, `disabled_date_n_time`, `created_by_admin_status`,
+ * `created_by_sub_admin_id`, `created_date_n_time`, `updated_by*`, `view_counts`) and the
+ * meta/SEO/robots/og/twitter fields also present on eventM's own schema (these are legacy/unused
+ * here - the live Basic Details form and the separate `event_seo` section below both read/write
+ * `cln_events_seo_details`, not these duplicate fields on the event document itself).
+ */
+const EVENT_BASIC_DETAILS_EDITABLE_FIELDS = [
+  'event_title',
+  'event_tags',
+  'event_type',
+  'event_image',
+  'event_image_type',
+  'alt_image_text',
+  'event_city',
+  'event_state',
+  'event_venue',
+  'event_url',
+  'event_link',
+  'ticket_link',
+  'start_date',
+  'end_date',
+  'event_description',
+  'event_brief',
+  'describe_in_one_line',
+  'contact_user_name',
+  'contact_mobile_number',
+  'contact_country_row_id',
+  'contact_email_id',
+  'webinar_meeting_type',
+  'webinar_meeting_link',
+  'list_event_type',
+  'longitude',
+  'latitude',
+  'utc_row_id',
+  'event_card_image',
+] as const
+
+const EVENT_BASIC_DETAILS_FIELD_LABELS: Record<string, string> = {
+  event_title: 'Event Title',
+  event_tags: 'Event Tags',
+  event_type: 'Event Type',
+  event_image: 'Event Image',
+  event_image_type: 'Event Image Type',
+  alt_image_text: 'Image Alt Text',
+  event_city: 'City',
+  event_state: 'State',
+  event_venue: 'Venue',
+  event_url: 'Event URL',
+  event_link: 'Event Link',
+  ticket_link: 'Ticket Link',
+  start_date: 'Start Date',
+  end_date: 'End Date',
+  event_description: 'Event Description',
+  event_brief: 'Event Brief',
+  describe_in_one_line: 'Describe In One Line',
+  contact_user_name: 'Contact Name',
+  contact_mobile_number: 'Contact Mobile Number',
+  contact_country_row_id: 'Contact Country',
+  contact_email_id: 'Contact Email',
+  webinar_meeting_type: 'Meeting Link Type',
+  webinar_meeting_link: 'Meeting Link',
+  list_event_type: 'Event Listing Type',
+  longitude: 'Longitude',
+  latitude: 'Latitude',
+  utc_row_id: 'Timezone',
+  event_card_image: 'Event Card Image',
+}
+
+const EVENT_SETTINGS_EDITABLE_FIELDS = [
+  'link_user_register_status',
+  'link_attendee_list_status',
+  'link_speaker_status',
+  'link_partner_status',
+  'link_sponsor_status',
+  'link_ticket_status',
+] as const
+
+const EVENT_SETTINGS_FIELD_LABELS: Record<string, string> = {
+  link_user_register_status: 'Show Register Link',
+  link_attendee_list_status: 'Show Attendee List',
+  link_speaker_status: 'Show Speakers',
+  link_partner_status: 'Show Partners',
+  link_sponsor_status: 'Show Sponsors',
+  link_ticket_status: 'Show Tickets',
+}
+
+const EVENT_TICKET_EDITABLE_FIELDS = ['title', 'benefits', 'ticket_type', 'price', 'sell_status', 'active_status'] as const
+
+const EVENT_TICKET_FIELD_LABELS: Record<string, string> = {
+  title: 'Ticket Title',
+  benefits: 'Benefits',
+  ticket_type: 'Ticket Type',
+  price: 'Price',
+  sell_status: 'Sell Status',
+  active_status: 'Active Status',
+}
+
+const EVENT_COUPON_EDITABLE_FIELDS = ['coupon_code', 'discount'] as const
+
+const EVENT_COUPON_FIELD_LABELS: Record<string, string> = {
+  coupon_code: 'Coupon Code',
+  discount: 'Discount',
+}
+
+const EVENT_CONTACT_EDITABLE_FIELDS = ['country_id', 'contact_number', 'email_id', 'contact_type', 'contact_reason'] as const
+
+const EVENT_CONTACT_FIELD_LABELS: Record<string, string> = {
+  country_id: 'Country',
+  contact_number: 'Contact Number',
+  email_id: 'Email',
+  contact_type: 'Contact Type',
+  contact_reason: 'Contact Reason',
+}
+
+/**
+ * `requested_status` is BOTH this section's own pre-existing accept/reject state (0: Pending,
+ * 1: Accepted, 2: Rejected, 3: Host added - see event_speakersM.js) AND, per user decision
+ * 2026-09-25, now also a change-request-gated field on top of that: adding/editing a speaker
+ * stages a pending request first, and its own accept/reject review happens independently once the
+ * add/edit itself is published live. The two states are orthogonal, not a conflict.
+ */
+const EVENT_SPEAKER_EDITABLE_FIELDS = ['user_type', 'user_row_id', 'requested_status'] as const
+
+const EVENT_SPEAKER_FIELD_LABELS: Record<string, string> = {
+  user_type: 'Speaker Type',
+  user_row_id: 'Speaker',
+  requested_status: 'Request Status',
+}
+
+/** Same `requested_status` reasoning as Speaker above (event_sponsors_partner_detailsM.js). */
+const EVENT_SPONSOR_PARTNER_EDITABLE_FIELDS = [
+  'category_row_id',
+  'sponsor_partner_type',
+  'account_type',
+  'registered_type',
+  'user_company_row_id',
+  'sponsorship_type_title',
+  'requested_status',
+  'sponsors_ids',
+] as const
+
+const EVENT_SPONSOR_PARTNER_FIELD_LABELS: Record<string, string> = {
+  category_row_id: 'Category',
+  sponsor_partner_type: 'Sponsor/Partner Type',
+  account_type: 'Account Type',
+  registered_type: 'Registered Type',
+  user_company_row_id: 'Sponsor/Partner',
+  sponsorship_type_title: 'Sponsorship Type',
+  requested_status: 'Request Status',
+  sponsors_ids: 'Sponsors',
+}
+
+/** Same `requested_status`-is-orthogonal reasoning as Speaker/Sponsor-Partner above (event_attendeesM.js's own `invitation_status`, not `requested_status` - Attendees never had that field, only Speaker/Sponsor-Partner do). */
+const EVENT_ATTENDEE_EDITABLE_FIELDS = [
+  'user_type',
+  'user_row_id',
+  'email_day_number',
+  'invitation_status',
+  'invitation_type',
+  'reminder_type',
+  'reminder_time',
+] as const
+
+const EVENT_ATTENDEE_FIELD_LABELS: Record<string, string> = {
+  user_type: 'Attendee Type',
+  user_row_id: 'Attendee',
+  email_day_number: 'Reminder Email Day',
+  invitation_status: 'Invitation Status',
+  invitation_type: 'Invitation Type',
+  reminder_type: 'Reminder Type',
+  reminder_time: 'Reminder Time',
+}
+
+/**
  * Section whitelist. Section names arrive from request input, so they resolve through this map —
  * never via a dynamic model lookup, per the backend CLAUDE.md.
  *
@@ -1089,6 +1311,138 @@ export const SECTION_REGISTRY = {
     // details_*/shared caches) - the exact same reads (company list, individual details) go stale
     // after an enable/disable/delete as after any other company field change.
     invalidateCache: () => invalidateCompanyStatusCaches(),
+  },
+  [SECTION_EVENT_STATUS]: {
+    // No field diffing here at all - the request's payload is a control instruction
+    // ({intended_action: 'enable'|'disable'|'approve'|'reject', reason?}), not a set of editable
+    // event fields, so editableFields/schemaPaths are never actually consulted (submission
+    // bypasses computeDiff, going straight through insertChangeRequest - see
+    // events.lifecycle-request.service.ts). customWriter routes the whole publish to
+    // applyEventStatusWrite, which reproduces the former enableEvent/disableEvent/approveEvent/
+    // rejectEvent's real side effects inside the publish transaction. Same shape as
+    // SECTION_COMPANY_STATUS/SECTION_PROFESSIONAL_STATUS above.
+    collection: 'cln_events',
+    keyField: '_id',
+    isList: false,
+    editableFields: [],
+    labelResolvers: {},
+    schemaPaths: (field: string) => eventM.schema.path(field),
+    customWriter: true,
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_BASIC_DETAILS]: {
+    // The event document IS the root document here, same as Company's own SECTION_BASIC_DETAILS
+    // - keyField '_id' lets the generic applyDocumentWrite update-or-create in one call.
+    collection: 'cln_events',
+    keyField: '_id',
+    isList: false,
+    editableFields: EVENT_BASIC_DETAILS_EDITABLE_FIELDS,
+    labelResolvers: EVENT_BASIC_DETAILS_LABEL_RESOLVERS,
+    fieldLabels: EVENT_BASIC_DETAILS_FIELD_LABELS,
+    schemaPaths: (field: string) => eventM.schema.path(field),
+    fieldGroups: {
+      location: ['event_venue', 'event_city', 'event_state', 'latitude', 'longitude'],
+    },
+    invalidateCache: () => invalidateEventCaches(),
+    fieldLevelApproval: true,
+  },
+  [SECTION_EVENT_SEO]: {
+    collection: 'cln_events_seo_details',
+    keyField: 'event_row_id',
+    isList: false,
+    // Same field set as Company/Professional SEO (SEO_EDITABLE_FIELDS/SEO_FIELD_LABELS above) -
+    // event_seo_detailsM.js's schema matches field-for-field, so it's reused rather than
+    // duplicated.
+    editableFields: SEO_EDITABLE_FIELDS,
+    labelResolvers: {},
+    fieldLabels: SEO_FIELD_LABELS,
+    schemaPaths: (field: string) => event_seo_detailsM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+    fieldLevelApproval: true,
+  },
+  [SECTION_EVENT_SETTINGS]: {
+    collection: 'cln_events_link_display_details',
+    keyField: 'event_row_id',
+    isList: false,
+    editableFields: EVENT_SETTINGS_EDITABLE_FIELDS,
+    labelResolvers: {},
+    fieldLabels: EVENT_SETTINGS_FIELD_LABELS,
+    schemaPaths: (field: string) => event_link_display_detailsM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+    // Each toggle is independent - no grouping needed, unlike Basic Details' location group.
+    fieldLevelApproval: true,
+  },
+  [SECTION_EVENT_TICKET]: {
+    collection: 'cln_event_tickets',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_TICKET_EDITABLE_FIELDS,
+    labelResolvers: EVENT_TICKET_LABEL_RESOLVERS,
+    fieldLabels: EVENT_TICKET_FIELD_LABELS,
+    schemaPaths: (field: string) => ticketM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_COUPON]: {
+    collection: 'cln_event_coupons',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_COUPON_EDITABLE_FIELDS,
+    labelResolvers: {},
+    fieldLabels: EVENT_COUPON_FIELD_LABELS,
+    schemaPaths: (field: string) => couponM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_FAQ]: {
+    collection: 'cln_events_faq_lists',
+    keyField: 'event_row_id',
+    isList: true,
+    // Same field set as Company/Professional FAQ (FAQ_EDITABLE_FIELDS/FAQ_FIELD_LABELS above) -
+    // event_faqM.js's schema matches field-for-field, so it's reused rather than duplicated.
+    editableFields: FAQ_EDITABLE_FIELDS,
+    labelResolvers: {},
+    fieldLabels: FAQ_FIELD_LABELS,
+    schemaPaths: (field: string) => event_faq_listsM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_CONTACT]: {
+    collection: 'cln_event_contacts',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_CONTACT_EDITABLE_FIELDS,
+    labelResolvers: EVENT_CONTACT_LABEL_RESOLVERS,
+    fieldLabels: EVENT_CONTACT_FIELD_LABELS,
+    schemaPaths: (field: string) => event_contactsM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_SPEAKER]: {
+    collection: 'cln_events_speakers',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_SPEAKER_EDITABLE_FIELDS,
+    labelResolvers: EVENT_SPEAKER_LABEL_RESOLVERS,
+    fieldLabels: EVENT_SPEAKER_FIELD_LABELS,
+    schemaPaths: (field: string) => event_speakersM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_SPONSOR_PARTNER]: {
+    collection: 'cln_event_sponsor_partner_details',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_SPONSOR_PARTNER_EDITABLE_FIELDS,
+    labelResolvers: EVENT_SPONSOR_PARTNER_LABEL_RESOLVERS,
+    fieldLabels: EVENT_SPONSOR_PARTNER_FIELD_LABELS,
+    schemaPaths: (field: string) => event_sponsors_partner_detailsM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
+  },
+  [SECTION_EVENT_ATTENDEE]: {
+    collection: 'cln_events_attendees',
+    keyField: 'event_row_id',
+    isList: true,
+    editableFields: EVENT_ATTENDEE_EDITABLE_FIELDS,
+    labelResolvers: EVENT_ATTENDEE_LABEL_RESOLVERS,
+    fieldLabels: EVENT_ATTENDEE_FIELD_LABELS,
+    schemaPaths: (field: string) => event_attendeesM.schema.path(field),
+    invalidateCache: () => invalidateEventCaches(),
   },
 } as const satisfies Record<string, SectionConfig>
 

@@ -14,6 +14,16 @@ const professionals_seo_detailsM = require('../../../models/app/professionals_se
 const professionals_social_linksM = require('../../../models/app/professionals_social_linksM')
 const professionals_awardsM = require('../../../models/app/users/professionals_awardsM')
 const professionals_faqM = require('../../../models/app/users/professionals_faqM')
+const eventM = require('../../../models/app/events/eventM')
+const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
+const ticketM = require('../../../models/app/events/ticketM')
+const couponM = require('../../../models/app/events/couponM')
+const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const event_contactsM = require('../../../models/app/events/event_contactsM')
+const event_speakersM = require('../../../models/app/events/event_speakersM')
+const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
+const event_attendeesM = require('../../../models/app/events/event_attendeesM')
 
 import { ChangeRequestDoc } from './change-request.types'
 import { SectionConfig } from './change-request.registry'
@@ -50,6 +60,16 @@ export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_professionals_social_links: professionals_social_linksM,
   cln_professionals_awards: professionals_awardsM,
   cln_professionals_faq_lists: professionals_faqM,
+  cln_events: eventM,
+  cln_events_seo_details: event_seo_detailsM,
+  cln_events_link_display_details: event_link_display_detailsM,
+  cln_event_tickets: ticketM,
+  cln_event_coupons: couponM,
+  cln_events_faq_lists: event_faq_listsM,
+  cln_event_contacts: event_contactsM,
+  cln_events_speakers: event_speakersM,
+  cln_event_sponsor_partner_details: event_sponsors_partner_detailsM,
+  cln_events_attendees: event_attendeesM,
 }
 
 async function applyDocumentWrite({

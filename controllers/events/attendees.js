@@ -530,6 +530,14 @@ router.post('/add_new_attendees', [
 
 
 
+                    // CONFIRMED BUG FIX: an admin-panel add used to stage through
+                    // submitChildChangeRequest (pending approval + publish) while the event's own
+                    // host added attendees directly below - legacy admin-coinpedia (and this same
+                    // route's own pre-existing direct-write path) never staged either actor's add;
+                    // both fall through to the same direct insert (user-confirmed 2026-09-26),
+                    // matching legacy business logic and the identical Speaker/Sponsor-Partner
+                    // reversal. The attendee's own invitation_status accept/reject review (0 by
+                    // default - the invited person still has to accept) is unaffected.
                     const guest_query = await event_attendeesM(insertArr).save()
 
                     await deleteKeysByPattern('event_attendees_list_*')

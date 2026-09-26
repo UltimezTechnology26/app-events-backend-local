@@ -12,6 +12,16 @@ const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { updateThreadNotification, updateNotification } = require('../../../utils/helpers/notification_helper')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
+const { submitChangeRequest } = require('../../../src/modules/change-request/change-request.service')
+const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../../src/common/status-audit/status-audit.registry')
+const {
+    SECTION_EVENT_BASIC_DETAILS,
+    SECTION_EVENT_SEO,
+    SECTION_EVENT_SETTINGS,
+    SECTION_EVENT_CONTACT,
+} = require('../../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../../src/modules/events/events.change-request-actor')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
@@ -324,6 +334,26 @@ router.post('/update_link_display_details', [
                 }
                 console.log(update_object, 'update_object');
 
+                // Publish gate applies to admin-panel edits only (design §2, same shape as every
+                // other Events section) - the event's own host keeps writing live immediately via
+                // the branches below, unchanged (2026-09-25 user decision). The event-card
+                // generation side effect above stays on this old code path regardless (same
+                // "side effects move to the publish step separately, not done here" tradeoff
+                // already accepted for Team Members - see that migration's own doc comment).
+                if (isAdminPanelActor(checkUserToken)) {
+                    const liveValues = get_query ? ((await event_link_display_detailsM.findOne({ event_row_id }).lean()) ?? {}) : {}
+                    const result = await submitChangeRequest({
+                        module: AUDIT_MODULE_EVENTS,
+                        section: SECTION_EVENT_SETTINGS,
+                        rootDocumentId: event_row_id,
+                        targetRowId: null,
+                        liveValues,
+                        submitted: update_object,
+                        actor: buildEventChangeRequestActor(checkUserToken),
+                    })
+                    return res.json(result)
+                }
+
                 if (!get_query) {
                     update_object['event_row_id'] = event_row_id
 
@@ -431,6 +461,14 @@ router.post('/add_speaker', [
                         user_type: user_type,
                         user_row_id: user_row_id,
                     }
+
+                    // CONFIRMED BUG FIX: an admin-panel add used to stage through
+                    // submitChildChangeRequest (pending approval + publish) while the event's own
+                    // host added speakers directly below - legacy admin-coinpedia (and this same
+                    // route's own pre-existing direct-write path) never staged either actor's add;
+                    // both fall through to the same direct insert (user-confirmed 2026-09-26),
+                    // matching legacy business logic. The speaker's own requested_status
+                    // accept/reject review (schema default 3, "Host Added") is unaffected.
                     await event_speakersM(insert_array).save()
                     await deleteKeysByPattern('event_speakers_list_*')
                     await deleteKeysByPattern('all_events_*')
@@ -1198,6 +1236,23 @@ router.post('/add_edit_contact_details', [
                     contact_type: contact_type,
                     contact_reason: sanitize(req.body.contact_reason)
                 }
+                // Publish gate applies to admin-panel edits only (design §2, same shape as every
+                // other Events section) - the event's own host keeps writing live immediately via
+                // the branches below, unchanged (2026-09-25 user decision).
+                if (isAdminPanelActor(checkUserToken)) {
+                    const liveValues = contact_row_id ? ((await event_contactsM.findOne({ _id: contact_row_id }).lean()) ?? {}) : {}
+                    const result = await submitChildChangeRequest({
+                        module: AUDIT_MODULE_EVENTS,
+                        section: SECTION_EVENT_CONTACT,
+                        rootDocumentId: event_row_id,
+                        targetRowId: contact_row_id ? Number(contact_row_id) : null,
+                        liveValues,
+                        submitted: insert_array,
+                        actor: buildEventChangeRequestActor(checkUserToken),
+                    })
+                    return res.json(result)
+                }
+
                 if (contact_row_id) {
                     await event_contactsM.updateOne({ _id: contact_row_id }, { $set: insert_array })
                     await deleteKeysByPattern('contacts_list_*')
@@ -1353,7 +1408,18 @@ router.get('/delete_contact/:contact_row_id', async (req, res) => {
                         }
                     }
 
-                    if (!Object.keys(errObj).length) {
+                    if (!Object.keys(errObj).length && isAdminPanelActor(checkUserToken)) {
+                        const result = await submitChildDeleteRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_CONTACT,
+                            rootDocumentId: check_contact_query.event_row_id,
+                            targetRowId: contact_row_id,
+                            rowSnapshot: check_contact_query.toObject ? check_contact_query.toObject() : check_contact_query,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        res.json(result)
+                    }
+                    else if (!Object.keys(errObj).length) {
                         await event_contactsM.deleteOne({ _id: contact_row_id })
                         await deleteKeysByPattern('contacts_list_*')
                         await deleteKeysByPattern('individual_event_*')
@@ -1902,12 +1968,18 @@ router.post('/submit_event', [
                 }
 
                 if (event_row_id) {
-                    // Get event data (non-SEO fields)
+                    // Get event data (non-SEO fields). CONFIRMED BUG FIX (user-requested,
+                    // 2026-09-26): this projection used to only select event_url/approval_status,
+                    // so the `liveValues` passed to submitChangeRequest below never actually
+                    // contained any Basic Details field (event_title, event_tags, event_type,
+                    // event_image_type, list_event_type, location, etc.) - every admin edit to an
+                    // existing event's Basic Details was diffed against a live document missing
+                    // those fields entirely, so EVERY field looked like a brand-new value (old
+                    // side blank) in the Pending Changes review, even fields the admin never
+                    // touched. No projection at all - the diff needs the real live value for
+                    // every editable field, not a hand-picked subset.
                     const eventData = await eventM.findOne(
-                        { _id: event_row_id },
-                        {
-                            event_url: 1, approval_status: 1
-                        }
+                        { _id: event_row_id }
                     );
 
                     // Get SEO data separately
@@ -1995,6 +2067,51 @@ router.post('/submit_event', [
                     // Update events table (non-SEO fields)
                     const updateFields = getUpdateTrackerFields(checkUserToken)
                     Object.assign(eventUpdateData, updateFields, { updated_date_n_time: new Date() })
+
+                    // Publish gate applies to admin-panel EDITS only (design §2, same shape as
+                    // every other Events section) - the event's own host keeps writing live
+                    // immediately below, unchanged (2026-09-25 user decision). Split into two
+                    // per-section requests (Basic Details + SEO), matching the "split into
+                    // per-section calls" decision (2026-09-25) - each reviews/publishes
+                    // independently, same as every other section here. Event CREATION (the `else`
+                    // branch below, no event_row_id yet) is deliberately NOT gated, mirroring
+                    // Company's own explicitly-reverted decision on this exact question (see
+                    // company.settings.service.ts's own "REVERTED" comment): a brand-new event has
+                    // no existing view page for an admin to review/publish a pending creation
+                    // against, so creation always saves live - only edits to an existing event go
+                    // through this gate. Also skips the seo_change_logsM audit-log write and the
+                    // event-card-generation side effect below entirely for a gated submission -
+                    // same reasoning as the standalone /update_seo endpoint (nothing is live yet
+                    // until approved and published).
+                    if (isAdminPanelActor(checkUserToken)) {
+                        const actor = buildEventChangeRequestActor(checkUserToken)
+                        const basicDetailsResult = await submitChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_BASIC_DETAILS,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: eventData ? (eventData.toObject ? eventData.toObject() : eventData) : {},
+                            submitted: eventUpdateData,
+                            actor,
+                        })
+                        if (!basicDetailsResult.status) {
+                            return res.json(basicDetailsResult)
+                        }
+                        const seoResult = await submitChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_SEO,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: seoData ? (seoData.toObject ? seoData.toObject() : seoData) : {},
+                            submitted: seoFields,
+                            actor,
+                        })
+                        if (!seoResult.status) {
+                            return res.json(seoResult)
+                        }
+                        return res.json({ status: true, message: { alert_message: 'Changes submitted for approval.', event_row_id: event_row_id } })
+                    }
+
                     await eventM.updateOne({ _id: event_row_id }, { $set: eventUpdateData });
 
                     // Update SEO details table (only SEO fields)
@@ -3149,6 +3266,33 @@ router.post('/update_seo', [
 
         // Get existing SEO data from the separated collection
         const seoData = await event_seo_detailsM.findOne({ event_row_id: module_id });
+
+        // Publish gate applies to admin-panel edits only (design §2, same shape as every other
+        // Events section) - the event's own host keeps writing live immediately below, unchanged
+        // (2026-09-25 user decision). Skips the seo_change_logsM audit-log write entirely for a
+        // gated submission too - that log is meant to record an actual live change, and nothing
+        // is live yet until this pending request is approved and published.
+        if (isAdminPanelActor(checkUserToken)) {
+            const result = await submitChangeRequest({
+                module: AUDIT_MODULE_EVENTS,
+                section: SECTION_EVENT_SEO,
+                rootDocumentId: Number(module_id),
+                targetRowId: null,
+                liveValues: seoData ? (seoData.toObject ? seoData.toObject() : seoData) : {},
+                submitted: {
+                    meta_title, meta_description, meta_keywords,
+                    robots_index: robots_index || 'index',
+                    robots_follow: robots_follow || 'follow',
+                    twitter_creator: twitter_creator || '',
+                    og_title: og_title || '',
+                    og_description: og_description || '',
+                    twitter_title: twitter_title || '',
+                    twitter_description: twitter_description || '',
+                },
+                actor: buildEventChangeRequestActor(checkUserToken),
+            })
+            return res.json(result)
+        }
 
         // CHANGE LOG CHECK - Compare with SEO data from the separated collection
         const seoChanged =

@@ -8,6 +8,10 @@ const eventM = require('../../../models/app/events/eventM')
 const { checkSubadminAccess } = require('../../../utils/helpers/events_helper')
 const couponM = require('../../../models/app/events/couponM')
 const { deleteKeysByPattern } = require('../../../config/cache_helper')
+const { submitChildChangeRequest } = require('../../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../../src/common/status-audit/status-audit.registry')
+const { SECTION_EVENT_COUPON } = require('../../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../../src/modules/events/events.change-request-actor')
 
 router.post('/create_edit_coupon', [
     check('event_row_id')
@@ -86,6 +90,23 @@ router.post('/create_edit_coupon', [
             insertArr['coupon_code'] = sanitize(req.body.coupon_code);
             insertArr['discount'] = Number.parseInt(req.body.discount);
             insertArr['updated_date_n_time'] = getPresentDateTime();
+
+            // Publish gate applies to admin-panel edits only (design §2, same shape as every
+            // other Events section) - the event's own host keeps writing live immediately via
+            // the branches below, unchanged (2026-09-25 user decision).
+            if (isAdminPanelActor(checkUserToken)) {
+                const liveValues = coupon_row_id ? ((await couponM.findOne({ _id: coupon_row_id }).lean()) ?? {}) : {};
+                const result = await submitChildChangeRequest({
+                    module: AUDIT_MODULE_EVENTS,
+                    section: SECTION_EVENT_COUPON,
+                    rootDocumentId: event_row_id,
+                    targetRowId: coupon_row_id ? Number(coupon_row_id) : null,
+                    liveValues,
+                    submitted: insertArr,
+                    actor: buildEventChangeRequestActor(checkUserToken),
+                });
+                return res.json(result);
+            }
 
             let alert_message = "";
             if (coupon_row_id) {

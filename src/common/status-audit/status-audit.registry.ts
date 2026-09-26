@@ -58,5 +58,8 @@ export const AUDIT_MODULE_COMPANY: AuditModule = 'company'
 /** Exported so the professionals change-request call sites never repeat the literal 'professional'. */
 export const AUDIT_MODULE_PROFESSIONALS: AuditModule = 'professional'
 
+/** Exported so the events change-request call sites never repeat the literal 'event'. */
+export const AUDIT_MODULE_EVENTS: AuditModule = 'event'
+
 export const DEFAULT_AUDIT_SKIP = 0
 export const DEFAULT_AUDIT_LIMIT = 25

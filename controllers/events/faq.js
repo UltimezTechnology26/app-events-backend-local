@@ -10,6 +10,10 @@ const event_faqM = require('../../models/app/events/event_faqM')
 const eventM = require('../../models/app/events/eventM')
 const { setCache, getCache, deleteKeysByPattern } = require('../../config/cache_helper')
 const { calculateEventScore } = require('../../utils/helpers/app_helper')
+const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../src/common/status-audit/status-audit.registry')
+const { SECTION_EVENT_FAQ } = require('../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../src/modules/events/events.change-request-actor')
 
 router.post('/update_faq_details', [
     check('event_row_id')
@@ -79,6 +83,23 @@ router.post('/update_faq_details', [
                 let update_object = {}
                 update_object['faq_question'] = req.body.faq_question
                 update_object['faq_answer'] = req.body.faq_answer
+
+                // Publish gate applies to admin-panel edits only (design §2, same shape as every
+                // other Events section) - the event's own host keeps writing live immediately via
+                // the branches below, unchanged (2026-09-25 user decision).
+                if (isAdminPanelActor(checkUserToken)) {
+                    const liveValues = faq_row_id ? ((await event_faqM.findOne({ _id: faq_row_id }).lean()) ?? {}) : {}
+                    const result = await submitChildChangeRequest({
+                        module: AUDIT_MODULE_EVENTS,
+                        section: SECTION_EVENT_FAQ,
+                        rootDocumentId: event_row_id,
+                        targetRowId: faq_row_id ? Number(faq_row_id) : null,
+                        liveValues,
+                        submitted: faq_row_id ? update_object : { ...update_object, event_row_id: req.body.event_row_id },
+                        actor: buildEventChangeRequestActor(checkUserToken),
+                    })
+                    return res.json(result)
+                }
 
                 if (faq_row_id) {
                     await event_faqM.updateOne({ _id: faq_row_id }, { $set: update_object })
@@ -264,6 +285,21 @@ router.get('/delete_faq/:faq_row_id', async (req, res) => {
 
             if (Object.keys(errObj).length) {
                 res.json({ status: false, message: errObj })
+            }
+            // Publish gate applies to admin-panel edits only (design §2), matching the
+            // create/update path above - the event's own host keeps deleting live immediately
+            // via the branch below, unchanged.
+            else if (isAdminPanelActor(checkUserToken)) {
+                const rowSnapshot = (await event_faqM.findOne({ _id: faq_row_id }).lean()) ?? {}
+                const result = await submitChildDeleteRequest({
+                    module: AUDIT_MODULE_EVENTS,
+                    section: SECTION_EVENT_FAQ,
+                    rootDocumentId: event_row_id,
+                    targetRowId: faq_row_id,
+                    rowSnapshot,
+                    actor: buildEventChangeRequestActor(checkUserToken),
+                })
+                res.json(result)
             }
             else {
                 await deleteFAQ({ type: 1, event_row_id: event_row_id, faq_row_id: faq_row_id })

@@ -4,7 +4,8 @@ const { check, validationResult } = require('express-validator')
 const { checkAdminLoginToken, requireAdminAccess } = require('../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
-import { getCompaniesList, approveCompanyRequest, rejectCompanyRequest, deleteCompanyRequest, getDeletedCompaniesList, getGlobalPendingChangeRequests, getGlobalRejectedChangeRequests, getGlobalApprovedChangeRequests } from './company_admin.approvals.service'
+import { getCompaniesList, deleteCompanyRequest, getDeletedCompaniesList, getGlobalPendingChangeRequests, getGlobalRejectedChangeRequests, getGlobalApprovedChangeRequests } from './company_admin.approvals.service'
+import { submitApproveCompanyRequest, submitRejectCompanyRequest } from './company_admin.lifecycle-request.service'
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { getEntityAudit } from '../../common/status-audit/status-audit.service'
 import { validateAuditRequest } from '../../common/status-audit/status-audit.validation'
@@ -63,7 +64,7 @@ companyAdminApprovalsRouter.get('/approve_request/:request_row_id', writeEndpoin
     return
   }
 
-  const result = await approveCompanyRequest({ admin: checkToken, requestRowIdRaw: req.params.request_row_id as string })
+  const result = await submitApproveCompanyRequest(checkToken, req.params.request_row_id as string)
   res.json(result)
 }))
 
@@ -83,7 +84,7 @@ companyAdminApprovalsRouter.post(
       return
     }
 
-    const result = await rejectCompanyRequest({ admin: checkToken, requestRowIdRaw: req.params.request_row_id as string, reasonRejected: req.body.reason_rejected })
+    const result = await submitRejectCompanyRequest(checkToken, req.params.request_row_id as string, req.body.reason_rejected)
     res.json(result)
   }),
 )
