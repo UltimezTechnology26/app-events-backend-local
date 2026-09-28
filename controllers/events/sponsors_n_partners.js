@@ -19,6 +19,10 @@ const { setCache, getCache, deleteKeysByPattern } = require('../../config/cache_
 const { calculateEventScore } = require('../../utils/helpers/app_helper')
 const { getPositionResolutionStages } = require('../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../src/modules/funding/funding.queries')
+const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../src/common/status-audit/status-audit.registry')
+const { SECTION_EVENT_SPONSOR_PARTNER } = require('../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../src/modules/events/events.change-request-actor')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
@@ -499,6 +503,26 @@ router.post('/update_sponsors_partners', [
                     // existing row's own accept/reject/pending state survives an edit unchanged.
                     insert_array['requested_status'] = 3
 
+                    // REVERSED (user-requested, 2026-09-28): an admin-panel add used to write
+                    // directly, matching legacy admin-coinpedia (2026-09-26 decision, see the
+                    // requested_status comment above) - reversed again, back to staged, since the
+                    // admin panel is expected to gate every create/edit/delete on Attendees/
+                    // Speakers/Sponsors-Partners through approval+publish, same as every other
+                    // Events section. The event's own host keeps adding sponsors/partners live,
+                    // unchanged.
+                    if (isAdminPanelActor(checkUserToken)) {
+                        const result = await submitChildChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_SPONSOR_PARTNER,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: {},
+                            submitted: insert_array,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        return res.json(result)
+                    }
+
                     const insert_query = await event_sponsors_partner_detailsM(insert_array).save()
 
                     // CONFIRMED BUG FIX: a manual company selected as an event sponsor/partner
@@ -602,6 +626,21 @@ router.post('/update_sponsors_partners', [
                     res.json({ status: true, message: insert_array })
                 }
                 else {
+
+                    // Same admin-panel-only staging as the create branch above.
+                    if (isAdminPanelActor(checkUserToken)) {
+                        const liveDoc = await event_sponsors_partner_detailsM.findOne({ _id: edit_sponsor_partner_row_id }).lean()
+                        const result = await submitChildChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_SPONSOR_PARTNER,
+                            rootDocumentId: event_row_id,
+                            targetRowId: edit_sponsor_partner_row_id,
+                            liveValues: liveDoc ?? {},
+                            submitted: insert_array,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        return res.json(result)
+                    }
 
                     await event_sponsors_partner_detailsM.updateOne({ _id: edit_sponsor_partner_row_id }, { $set: insert_array })
                     await deleteKeysByPattern('event_sponsor_list_*')
@@ -1643,6 +1682,23 @@ router.post('/accept_sponsor_request', [
             return res.json({ status: false, message: { alert_message: 'This sponsor request is already accepted.' } });
         }
 
+        // CONFIRMED BUG FIX (user-requested, 2026-09-28): approving a sponsor/partner request
+        // from the admin panel used to flip requested_status straight to 1 (and send the
+        // "accepted" email) with no review step - same fix as the already-staged
+        // accept_speaker_request. The event's own host keeps approving live below, unchanged.
+        if (isAdminPanelActor(checkUserToken)) {
+            const result = await submitChildChangeRequest({
+                module: AUDIT_MODULE_EVENTS,
+                section: SECTION_EVENT_SPONSOR_PARTNER,
+                rootDocumentId: requestData.event_row_id,
+                targetRowId: request_id,
+                liveValues: requestData.toObject ? requestData.toObject() : requestData,
+                submitted: { requested_status: 1 },
+                actor: buildEventChangeRequestActor(checkUserToken),
+            })
+            return res.json(result)
+        }
+
         await event_sponsors_partner_detailsM.updateOne(
             { _id: request_id },
             { $set: { requested_status: 1, created_date_n_time: new Date() } }
@@ -1768,6 +1824,20 @@ router.post('/reject_sponsor_request', [
             return res.json({ status: false, message: { alert_message: 'This sponsor request is already rejected.' } });
         }
 
+        // Same admin-panel-only staging as accept_sponsor_request above.
+        if (isAdminPanelActor(checkUserToken)) {
+            const result = await submitChildChangeRequest({
+                module: AUDIT_MODULE_EVENTS,
+                section: SECTION_EVENT_SPONSOR_PARTNER,
+                rootDocumentId: requestData.event_row_id,
+                targetRowId: request_id,
+                liveValues: requestData.toObject ? requestData.toObject() : requestData,
+                submitted: { requested_status: 2 },
+                actor: buildEventChangeRequestActor(checkUserToken),
+            })
+            return res.json(result)
+        }
+
         await event_sponsors_partner_detailsM.updateOne(
             { _id: request_id },
             { $set: { requested_status: 2, created_date_n_time: new Date() } }
@@ -1877,6 +1947,7 @@ router.get('/delete/:sponsor_partner_row_id', async (req, res) => {
             let sponsor_partner_type = 0
             let event_row_id = 0
             let errObj = {}
+            let check_query = null
             if (checkUserToken.message.user_type == 1) {
                 host_user_row_id = checkUserToken.message.user_row_id
             }
@@ -1886,7 +1957,7 @@ router.get('/delete/:sponsor_partner_row_id', async (req, res) => {
             }
             else {
                 sponsor_partner_row_id = Number.parseInt(req.params.sponsor_partner_row_id)
-                const check_query = await event_sponsors_partner_detailsM.findOne({ _id: sponsor_partner_row_id })
+                check_query = await event_sponsors_partner_detailsM.findOne({ _id: sponsor_partner_row_id })
                 if (!check_query) {
                     errObj['sponsor_partner_row_id'] = 'Invalid sponsor or partner row id.'
                 }
@@ -1915,6 +1986,20 @@ router.get('/delete/:sponsor_partner_row_id', async (req, res) => {
                 }
             }
 
+            // CONFIRMED BUG FIX (user-requested, 2026-09-28): an admin-panel sponsor/partner
+            // delete applied instantly with no review step - the event's own host keeps deleting
+            // live immediately below, unchanged.
+            if (!Object.keys(errObj).length && isAdminPanelActor(checkUserToken)) {
+                const result = await submitChildDeleteRequest({
+                    module: AUDIT_MODULE_EVENTS,
+                    section: SECTION_EVENT_SPONSOR_PARTNER,
+                    rootDocumentId: event_row_id,
+                    targetRowId: sponsor_partner_row_id,
+                    rowSnapshot: check_query.toObject ? check_query.toObject() : check_query,
+                    actor: buildEventChangeRequestActor(checkUserToken),
+                })
+                return res.json(result)
+            }
             if (Object.keys(errObj).length) {
                 res.json({ status: false, message: errObj })
             }

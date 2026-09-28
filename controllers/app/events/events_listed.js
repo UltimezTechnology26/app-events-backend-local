@@ -20,6 +20,7 @@ const {
     SECTION_EVENT_SEO,
     SECTION_EVENT_SETTINGS,
     SECTION_EVENT_CONTACT,
+    SECTION_EVENT_SPEAKER,
 } = require('../../../src/modules/change-request/change-request.registry')
 const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../../src/modules/events/events.change-request-actor')
 
@@ -462,13 +463,25 @@ router.post('/add_speaker', [
                         user_row_id: user_row_id,
                     }
 
-                    // CONFIRMED BUG FIX: an admin-panel add used to stage through
-                    // submitChildChangeRequest (pending approval + publish) while the event's own
-                    // host added speakers directly below - legacy admin-coinpedia (and this same
-                    // route's own pre-existing direct-write path) never staged either actor's add;
-                    // both fall through to the same direct insert (user-confirmed 2026-09-26),
-                    // matching legacy business logic. The speaker's own requested_status
-                    // accept/reject review (schema default 3, "Host Added") is unaffected.
+                    // REVERSED (user-requested, 2026-09-28): an admin-panel add used to write
+                    // directly, matching legacy admin-coinpedia (2026-09-26 decision, see prior
+                    // revision of this comment) - reversed again, back to staged, since the admin
+                    // panel is expected to gate every create/edit/delete on Attendees/Speakers/
+                    // Sponsors-Partners through approval+publish, same as every other Events
+                    // section. The event's own host keeps adding speakers live, unchanged.
+                    if (isAdminPanelActor(checkUserToken)) {
+                        const result = await submitChildChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_SPEAKER,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: {},
+                            submitted: insert_array,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        return res.json(result)
+                    }
+
                     await event_speakersM(insert_array).save()
                     await deleteKeysByPattern('event_speakers_list_*')
                     await deleteKeysByPattern('all_events_*')
@@ -638,6 +651,28 @@ router.post('/accept_speaker_request', [
             res.json({ status: false, message: { alert_message: 'Request not found or already handled.' } });
         }
 
+        // Publish gate applies to admin-panel edits only (design §2, same shape as every other
+        // Events section) - the event's own host keeps writing live immediately below, unchanged.
+        // CONFIRMED BUG FIX (user-reported, 2026-09-28): approving a speaker's own request from the
+        // admin panel used to flip requested_status straight to 1 (and send the "approved" email)
+        // with no review step at all - `requested_status` is already in SECTION_EVENT_SPEAKER's own
+        // editableFields (change-request.registry.ts), it just was never routed through staging
+        // here. The confirmation email is a real live side effect (nothing is live yet until this
+        // is approved and published), so it's skipped for a gated submission - same reasoning as
+        // every other staged section's own publish-time-only side effects.
+        if (isAdminPanelActor(checkUserToken)) {
+            const result = await submitChildChangeRequest({
+                module: AUDIT_MODULE_EVENTS,
+                section: SECTION_EVENT_SPEAKER,
+                rootDocumentId: event_row_id,
+                targetRowId: request._id,
+                liveValues: request.toObject ? request.toObject() : request,
+                submitted: { requested_status: 1 },
+                actor: buildEventChangeRequestActor(checkUserToken),
+            })
+            return res.json(result)
+        }
+
         await event_speakersM.updateOne(
             { _id: request._id },
             { $set: { requested_status: 1 } }
@@ -748,6 +783,21 @@ router.post('/reject_speakers_request', [
 
         if (!request) {
             res.json({ status: false, message: { alert_message: 'Request not found or already handled.' } });
+        }
+
+        // Same admin-panel-only publish gate as accept_speaker_request above - see its own doc
+        // comment.
+        if (isAdminPanelActor(checkUserToken)) {
+            const result = await submitChildChangeRequest({
+                module: AUDIT_MODULE_EVENTS,
+                section: SECTION_EVENT_SPEAKER,
+                rootDocumentId: event_row_id,
+                targetRowId: request._id,
+                liveValues: request.toObject ? request.toObject() : request,
+                submitted: { requested_status: 2 },
+                actor: buildEventChangeRequestActor(checkUserToken),
+            })
+            return res.json(result)
         }
 
         await event_speakersM.updateOne(
@@ -1075,7 +1125,21 @@ router.get('/delete_speaker/:speaker_row_id', async (req, res) => {
                         }
                     }
 
-                    if (!Object.keys(errObj).length) {
+                    // CONFIRMED BUG FIX (user-requested, 2026-09-28): an admin-panel speaker
+                    // delete applied instantly with no review step - the event's own host keeps
+                    // deleting live immediately below, unchanged.
+                    if (!Object.keys(errObj).length && isAdminPanelActor(checkUserToken)) {
+                        const result = await submitChildDeleteRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_SPEAKER,
+                            rootDocumentId: check_speaker.event_row_id,
+                            targetRowId: speaker_row_id,
+                            rowSnapshot: check_speaker.toObject ? check_speaker.toObject() : check_speaker,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        return res.json(result)
+                    }
+                    else if (!Object.keys(errObj).length) {
                         await event_speakersM.deleteOne({ _id: speaker_row_id })
                         await deleteKeysByPattern('event_speakers_list_*')
                         await deleteKeysByPattern('individual_event_*')
