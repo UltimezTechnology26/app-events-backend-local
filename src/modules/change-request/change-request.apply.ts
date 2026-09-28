@@ -138,8 +138,21 @@ export async function applyChangeRequest({
   // engaged for it).
   const hasFieldLevelStatuses = (request.changes ?? []).some((c) => c.status !== undefined)
   const usesFieldLevelApproval = Boolean(config.fieldLevelApproval) && request.action === ACTION_UPDATE && hasFieldLevelStatuses
+
+  // CONFIRMED BUG FIX (user-reported, 2026-09-28: publishing an already-approved field failed
+  // with NOT_APPROVED_MESSAGE): the reviewer's checkbox selects by GROUP key when a section
+  // declares `fieldGroups` (e.g. Events' `location` - `ChangeFieldDiffRows.tsx`'s own
+  // `group.key = change.group ?? change.field`), so `fieldKeys` here can legitimately contain
+  // 'location' while every real change entry's own `field` is 'event_venue'/'event_city'/etc -
+  // `fieldKeys.includes(c.field)` never matched, so a selected-and-approved group always looked
+  // unapproved. `approveChangeRequestFields`/`rejectChangeRequestFields` (change-request.approve.ts)
+  // already expand a group key to its member fields via the section's own `fieldGroups` before
+  // matching; publish now does the exact same expansion.
+  const expandedFieldKeys = fieldKeys
+    ? new Set(fieldKeys.flatMap((key) => config.fieldGroups?.[key] ?? [key]))
+    : undefined
   const approvedUnpublished = usesFieldLevelApproval
-    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published && (!fieldKeys || fieldKeys.includes(c.field)))
+    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published && (!expandedFieldKeys || expandedFieldKeys.has(c.field)))
     : []
 
   if (usesFieldLevelApproval) {
