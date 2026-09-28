@@ -44,6 +44,10 @@ const couponM = require('../../models/app/events/couponM')
 const event_link_display_detailsM = require('../../models/app/events/event_link_display_detailsM')
 
 const { calculateEventScore } = require('../../utils/helpers/app_helper')
+const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../src/common/status-audit/status-audit.registry')
+const { SECTION_EVENT_ATTENDEE } = require('../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../src/modules/events/events.change-request-actor')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
@@ -530,14 +534,25 @@ router.post('/add_new_attendees', [
 
 
 
-                    // CONFIRMED BUG FIX: an admin-panel add used to stage through
-                    // submitChildChangeRequest (pending approval + publish) while the event's own
-                    // host added attendees directly below - legacy admin-coinpedia (and this same
-                    // route's own pre-existing direct-write path) never staged either actor's add;
-                    // both fall through to the same direct insert (user-confirmed 2026-09-26),
-                    // matching legacy business logic and the identical Speaker/Sponsor-Partner
-                    // reversal. The attendee's own invitation_status accept/reject review (0 by
-                    // default - the invited person still has to accept) is unaffected.
+                    // REVERSED (user-requested, 2026-09-28): an admin-panel add used to write
+                    // directly, matching legacy admin-coinpedia (2026-09-26 decision, see prior
+                    // revision of this comment) - reversed again, back to staged, since the admin
+                    // panel is expected to gate every create/edit/delete on Attendees/Speakers/
+                    // Sponsors-Partners through approval+publish, same as every other Events
+                    // section. The event's own host keeps adding attendees live, unchanged.
+                    if (isAdminPanelActor(checkUserToken)) {
+                        const result = await submitChildChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_ATTENDEE,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: {},
+                            submitted: insertArr,
+                            actor: buildEventChangeRequestActor(checkUserToken),
+                        })
+                        return res.json(result)
+                    }
+
                     const guest_query = await event_attendeesM(insertArr).save()
 
                     await deleteKeysByPattern('event_attendees_list_*')
@@ -1639,6 +1654,8 @@ router.get('/delete_attendee/:attendee_row_id', async (req, res) => {
 
             let errObj = {}
 
+            let check_query = null
+
             if (checkUserToken.message.user_type == 1) {
 
                 host_user_row_id = checkUserToken.message.user_row_id
@@ -1657,7 +1674,7 @@ router.get('/delete_attendee/:attendee_row_id', async (req, res) => {
 
                 attendee_row_id = Number.parseInt(req.params.attendee_row_id)
 
-                const check_query = await event_attendeesM.findOne({ _id: attendee_row_id })
+                check_query = await event_attendeesM.findOne({ _id: attendee_row_id })
 
                 if (!check_query) {
 
@@ -1712,6 +1729,23 @@ router.get('/delete_attendee/:attendee_row_id', async (req, res) => {
 
 
 
+
+            // CONFIRMED BUG FIX (user-requested, 2026-09-28): an admin-panel attendee delete
+            // applied instantly with no review step - the event's own host keeps deleting live
+            // immediately below, unchanged.
+            if (!Object.keys(errObj).length && isAdminPanelActor(checkUserToken)) {
+
+                const result = await submitChildDeleteRequest({
+                    module: AUDIT_MODULE_EVENTS,
+                    section: SECTION_EVENT_ATTENDEE,
+                    rootDocumentId: event_row_id,
+                    targetRowId: attendee_row_id,
+                    rowSnapshot: check_query.toObject ? check_query.toObject() : check_query,
+                    actor: buildEventChangeRequestActor(checkUserToken),
+                })
+                return res.json(result)
+
+            }
 
             if (Object.keys(errObj).length) {
 
@@ -3680,6 +3714,27 @@ router.post('/add_multiple_attendees', [
 
 
 
+                                    // CONFIRMED BUG FIX (user-requested, 2026-09-28): an admin-panel
+                                    // bulk add from a previous event used to write every selected
+                                    // attendee directly, same gap as the single-add route above -
+                                    // stages each one as its own change request instead, skipping
+                                    // this row's own live side effects below (nothing is live yet
+                                    // until approved and published). The event's own host keeps
+                                    // adding these live, unchanged.
+                                    if (isAdminPanelActor(checkUserToken)) {
+                                        await submitChildChangeRequest({
+                                            module: AUDIT_MODULE_EVENTS,
+                                            section: SECTION_EVENT_ATTENDEE,
+                                            rootDocumentId: event_row_id,
+                                            targetRowId: null,
+                                            liveValues: {},
+                                            submitted: insertArr,
+                                            actor: buildEventChangeRequestActor(checkUserToken),
+                                        })
+                                        continue
+
+                                    }
+
                                     const guest_query = await event_attendeesM(insertArr).save()
 
                                     await deleteKeysByPattern('previous_unique_attendees_*')
@@ -3877,6 +3932,8 @@ router.post('/event_attendees_bulk/:event_row_id', async (req, res) => {
 
             let inserted_count = 0;
 
+            let submitted_for_approval_count = 0;
+
 
 
             for (const row of bulk_data) {
@@ -4053,6 +4110,25 @@ router.post('/event_attendees_bulk/:event_row_id', async (req, res) => {
 
 
 
+                    // CONFIRMED BUG FIX (user-requested, 2026-09-28): an admin-panel bulk CSV
+                    // upload used to write every row directly, same gap as the single-add route
+                    // above - stages each row as its own change request instead, skipping this
+                    // row's own live side effects below. The event's own host keeps bulk-uploading
+                    // live, unchanged.
+                    if (isAdminPanelActor(checkToken)) {
+                        await submitChildChangeRequest({
+                            module: AUDIT_MODULE_EVENTS,
+                            section: SECTION_EVENT_ATTENDEE,
+                            rootDocumentId: event_row_id,
+                            targetRowId: null,
+                            liveValues: {},
+                            submitted: insertObj,
+                            actor: buildEventChangeRequestActor(checkToken),
+                        })
+                        submitted_for_approval_count++;
+                        continue;
+                    }
+
                     const inserted_attendee = await event_attendeesM(insertObj).save();
 
                     await deleteKeysByPattern('event_attendees_list_*')
@@ -4168,17 +4244,29 @@ router.post('/event_attendees_bulk/:event_row_id', async (req, res) => {
 
             // const token_messages = checkToken.message
 
+            const anySucceeded = inserted_count > 0 || submitted_for_approval_count > 0;
+            let alert_message = 'No attendees added. All entries failed.';
+            if (submitted_for_approval_count > 0 && inserted_count === 0) {
+                alert_message = 'Event attendees have been submitted for approval.';
+            } else if (submitted_for_approval_count > 0) {
+                alert_message = 'Event attendees have been submitted successfully; some are pending approval.';
+            } else if (inserted_count > 0) {
+                alert_message = 'Event attendees have been submitted successfully.';
+            }
+
             return res.json({
 
-                status: inserted_count > 0,
+                status: anySucceeded,
 
                 message: {
 
-                    alert_message: inserted_count > 0 ? 'Event attendees have been submitted successfully.' : 'No attendees added. All entries failed.', checkToken,
+                    alert_message, checkToken,
 
                     total_submitted: bulk_data.length,
 
                     total_inserted: inserted_count,
+
+                    total_submitted_for_approval: submitted_for_approval_count,
 
                     total_failed: not_inserted_array.length,
 

@@ -87,6 +87,7 @@ export async function approveChangeRequest({
       actor,
       changes: request.changes,
       reason: note,
+      rating,
       snapshot: null,
     })
   } catch (err) {
@@ -153,6 +154,7 @@ export async function approveChangeRequestFields({
       actor,
       changes: request.changes.filter((c) => expanded.has(c.field)),
       reason: note ?? null,
+      rating,
       snapshot: null,
     })
   } catch (err) {
