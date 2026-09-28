@@ -879,7 +879,11 @@ const EVENT_BASIC_DETAILS_FIELD_LABELS: Record<string, string> = {
   alt_image_text: 'Image Alt Text',
   event_city: 'City',
   event_state: 'State',
-  event_venue: 'Venue',
+  // Matches frontend-events-typescript's own EventLocationCell header convention
+  // (events-approvals.columns.tsx: `header: "Location", accessor: "event_venue"`) - CONFIRMED
+  // BUG FIX (user-requested, 2026-09-28): this used to say "Venue", which is a different word
+  // from what every list page already calls this same field.
+  event_venue: 'Location',
   event_url: 'Event URL',
   event_link: 'Event Link',
   ticket_link: 'Ticket Link',
@@ -900,6 +904,26 @@ const EVENT_BASIC_DETAILS_FIELD_LABELS: Record<string, string> = {
   utc_row_id: 'Timezone',
   event_card_image: 'Event Card Image',
 }
+
+// The location picker (LocationField, frontend-events-typescript's create-event.tsx) submits ONE
+// place selection that fans out into 6 raw fields: `event_venue` (the full formatted address -
+// already a complete, human-readable summary on its own) plus `event_city`/`event_state`/
+// `latitude`/`longitude`/`contact_country_row_id` (derived pieces of that same address, kept only
+// so other features can query by city/state/geo/country later). CONFIRMED BUG FIX (user-reported,
+// 2026-09-28): showing all 6 as separate reviewer-facing rows was actively misleading, not just
+// noisy - `contact_country_row_id` resolves through `resolveCountryName`, which returns null for
+// the shared "unset" id 0 (see change-request.common-resolvers.ts), and its raw value then fell
+// back to the literal digit "0" as if the country had actually been "0" before, labeled "Contact
+// Country" (read out loud as "contact location", compounding the confusion with `event_venue`'s
+// own "Location" label above). Hiding the 5 derived fields here (via displayFields below) leaves
+// `event_venue` - labeled "Location" - as the one row a reviewer needs to read; every derived
+// field still gets applied on publish (still in EVENT_BASIC_DETAILS_EDITABLE_FIELDS) and still
+// gets approved/rejected atomically with it (still one unit in fieldGroups.location below), it
+// just isn't drawn as 5 more misleading rows underneath.
+const EVENT_BASIC_DETAILS_HIDDEN_LOCATION_FIELDS = ['event_city', 'event_state', 'latitude', 'longitude', 'contact_country_row_id']
+const EVENT_BASIC_DETAILS_DISPLAY_FIELDS = EVENT_BASIC_DETAILS_EDITABLE_FIELDS.filter(
+  (field) => !EVENT_BASIC_DETAILS_HIDDEN_LOCATION_FIELDS.includes(field),
+)
 
 const EVENT_SETTINGS_EDITABLE_FIELDS = [
   'link_user_register_status',
@@ -1339,9 +1363,15 @@ export const SECTION_REGISTRY = {
     editableFields: EVENT_BASIC_DETAILS_EDITABLE_FIELDS,
     labelResolvers: EVENT_BASIC_DETAILS_LABEL_RESOLVERS,
     fieldLabels: EVENT_BASIC_DETAILS_FIELD_LABELS,
+    displayFields: EVENT_BASIC_DETAILS_DISPLAY_FIELDS,
     schemaPaths: (field: string) => eventM.schema.path(field),
     fieldGroups: {
-      location: ['event_venue', 'event_city', 'event_state', 'latitude', 'longitude'],
+      // `contact_country_row_id` joined this group (was ungrouped) so approving/rejecting the one
+      // visible "Location" row also decides the country id atomically with it, even though the
+      // country id itself is no longer drawn as its own row (see EVENT_BASIC_DETAILS_DISPLAY_FIELDS'
+      // own doc comment above) - change-request.approve.ts's field-level approval expands a group
+      // key to every member regardless of what the reviewer was actually shown.
+      location: ['event_venue', 'event_city', 'event_state', 'latitude', 'longitude', 'contact_country_row_id'],
     },
     invalidateCache: () => invalidateEventCaches(),
     fieldLevelApproval: true,
