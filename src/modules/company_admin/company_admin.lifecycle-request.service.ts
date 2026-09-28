@@ -1,12 +1,12 @@
 // modules/company_admin/company_admin.lifecycle-request.service.ts
-// Gates the direct admin-panel actions (Enable/Disable) on a company's own record behind the same
-// pending -> approve -> publish flow every field edit already goes through (user-requested
-// 2026-09-20, mirrors professionals.lifecycle-request.service.ts field-for-field). Reuses the SAME
-// change_requestM collection/engine - no new table - via a lightweight "intended_action" control
-// payload instead of a field diff. Company has no direct one-click "Delete" action on its main
-// record today (confirmed earlier this session - deletion only happens via the Claim/Manual
-// Retrieval request-approval flows, already excluded from this scope), so only Enable/Disable are
-// gated here.
+// Gates the direct admin-panel actions (Enable/Disable/Approve/Reject/Delete) on a company's own
+// record behind the same pending -> approve -> publish flow every field edit already goes through
+// (user-requested 2026-09-20, mirrors professionals.lifecycle-request.service.ts field-for-field).
+// Reuses the SAME change_requestM collection/engine - no new table - via a lightweight
+// "intended_action" control payload instead of a field diff. Delete was originally excluded
+// (deletion via the Claim/Manual Retrieval request-approval flows stayed untouched, and still
+// does), then extended to cover the admin panel's own direct Delete action on the main record too
+// (user-requested 2026-09-28, matching Professional's Delete which already staged from the start).
 const { checkCompanySubadminAccess } = require('../../../utils/helpers/helper')
 const companyM = require('../../../models/app/company/companyM')
 const professionalsM = require('../../../models/app/professionalsM')
@@ -47,7 +47,7 @@ function subadminAccessParams(admin: AdminAuthResult & { status: true }, company
 interface SubmitLifecycleActionParams {
   admin: AdminAuthResult & { status: true }
   companyRowId: number
-  intendedAction: 'enable' | 'disable' | 'approve' | 'reject'
+  intendedAction: 'enable' | 'disable' | 'approve' | 'reject' | 'delete'
   // Named for its original Enable/Disable use case; a reject's reason is threaded through this
   // same param/payload key ('disable_reason') rather than adding a second one, since
   // applyCompanyStatusWrite/applyCompanyStatusSideEffects only ever need "the one reason string
@@ -200,4 +200,24 @@ export async function submitRejectCompanyRequest(admin: AdminAuthResult, request
   }
 
   return submitLifecycleAction({ admin, companyRowId, intendedAction: 'reject', reasonForDisable: reasonRejected, oldLabel: 'Pending', newLabel: 'Rejected' })
+}
+
+/**
+ * Stages the admin panel's direct Delete action behind the same pending -> approve -> publish
+ * flow as Enable/Disable/Approve/Reject above (user-requested 2026-09-28), instead of applying it
+ * immediately the way deleteCompanyRequest (company_admin.approvals.service.ts, now removed) used
+ * to. The actual cascade-delete only runs at publish time - see company_admin.lifecycle-apply.ts.
+ */
+export async function submitDeleteCompanyRequest(admin: AdminAuthResult, requestRowIdRaw: string) {
+  if (!admin.status) return admin
+  const companyRowId = Number.parseInt(requestRowIdRaw)
+  if (Number.isNaN(companyRowId)) return { status: false, message: { alert_message: 'Sorry, Invalid Request row id' } }
+
+  const queryRunCheck = await companyM.findOne({ _id: companyRowId })
+  if (!queryRunCheck) return { status: false, message: { alert_message: 'Sorry! Invalid Request Row Id' } }
+
+  const checkAccess = await checkCompanySubadminAccess(subadminAccessParams(admin, companyRowId))
+  if (!checkAccess.status) return { status: false, message: { alert_message: checkAccess.message } }
+
+  return submitLifecycleAction({ admin, companyRowId, intendedAction: 'delete', oldLabel: 'Active', newLabel: 'Deleted' })
 }

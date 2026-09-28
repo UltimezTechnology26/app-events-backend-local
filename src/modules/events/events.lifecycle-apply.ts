@@ -18,6 +18,7 @@ const INTENDED_ENABLE = 'enable'
 const INTENDED_DISABLE = 'disable'
 const INTENDED_APPROVE = 'approve'
 const INTENDED_REJECT = 'reject'
+const INTENDED_DELETE = 'delete'
 
 interface HostContactInfo {
   event_title: string
@@ -33,6 +34,90 @@ interface HostContactInfo {
 
 function trackerFrom(actor: ActorRef) {
   return { updated_by: actor.type, updated_by_row_id: actor.id }
+}
+
+/**
+ * Ports deleteEventCascade (formerly events.write.service.ts, now removed - that file existed
+ * solely for the old direct deleteEvent, superseded by submitDeleteEventRequest/this Delete case).
+ * Runs post-transaction, same as Company's deleteCompanyDetails call in
+ * company_admin.lifecycle-apply.ts's own INTENDED_DELETE case - none of these deletes are
+ * session-aware.
+ */
+async function deleteEventCascade(eventRowId: number, deletedReason: string) {
+  const eventM_legacy = require('../../../models/app/events/eventM')
+  const deleted_eventsM = require('../../../models/app/events/deleted_eventsM')
+  const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+  const event_speakersM = require('../../../models/app/events/event_speakersM')
+  const event_attendeesM = require('../../../models/app/events/event_attendeesM')
+  const event_faqM = require('../../../models/app/events/event_faqM')
+  const ticketM = require('../../../models/app/events/ticketM')
+  const notify_userM = require('../../../models/app/events/notify_userM')
+  const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
+  const event_watchlistsM = require('../../../models/app/watchlist/eventM')
+  const events_countM = require('../../../models/app/events/events_countM')
+  const { deleteAttendees, deleteFAQ, deleteTickets, deleteSponsorsPartners, deleteEventWatchlist } = require('../../../utils/helpers/events_helper')
+  const { getPresentDateTime } = require('../../../utils/helpers/helper')
+  const { deleteNotifications } = require('../../../utils/helpers/notification_helper')
+
+  const query = await eventM_legacy.findOne({ _id: eventRowId })
+
+  await deleted_eventsM({
+    user_row_id: query.user_row_id,
+    event_title: query.event_title,
+    company_row_id: query.company_row_id,
+    event_tags: query.event_tags,
+    event_type: query.event_type,
+    event_city: query.event_city,
+    event_state: query.event_state,
+    event_venue: query.event_venue,
+    event_url: query.event_url,
+    event_link: query.event_link,
+    start_date: query.start_date,
+    end_date: query.end_date,
+    event_description: query.event_description,
+    contact_user_name: query.contact_user_name,
+    contact_mobile_number: query.contact_mobile_number,
+    contact_country_row_id: query.contact_country_row_id,
+    contact_email_id: query.contact_email_id,
+    active_status: query.active_status,
+    approval_status: query.approval_status,
+    webinar_meeting_type: query.webinar_meeting_type,
+    webinar_meeting_link: query.webinar_meeting_link,
+    list_event_type: query.list_event_type,
+    created_by_admin_status: query.created_by_admin_status,
+    created_by_sub_admin_id: query.created_by_sub_admin_id,
+    created_date_n_time: query.created_date_n_time,
+    longitude: query.longitude,
+    latitude: query.latitude,
+    utc_row_id: query.utc_row_id,
+    deleted_reason: deletedReason || '',
+    deleted_date_n_time: getPresentDateTime(),
+  }).save()
+
+  // None of these 10 reads/writes depends on another's result (disjoint collections, all keyed by
+  // the same event_row_id) - batched in one Promise.all (CLAUDE.md: no DB calls inside loops),
+  // same perf fix events.write.service.ts's own deleteEventCascade already had.
+  const [, , , , , checkAttendee, checkFaq, checkTickets, checkSponsorsPartners, checkWatchlist] = await Promise.all([
+    eventM_legacy.deleteOne({ _id: eventRowId }),
+    event_seo_detailsM.deleteOne({ event_row_id: eventRowId }),
+    event_speakersM.deleteMany({ event_row_id: eventRowId }),
+    notify_userM.deleteMany({ event_row_id: eventRowId }),
+    events_countM.deleteOne({ event_row_id: eventRowId }),
+    event_attendeesM.findOne({ event_row_id: eventRowId }),
+    event_faqM.findOne({ event_row_id: eventRowId }),
+    ticketM.findOne({ event_row_id: eventRowId }),
+    event_sponsors_partner_detailsM.findOne({ event_row_id: eventRowId }),
+    event_watchlistsM.findOne({ event_row_id: eventRowId }),
+  ])
+
+  await Promise.all([
+    checkAttendee ? deleteAttendees({ type: 2, event_row_id: eventRowId, attendee_row_id: undefined }) : null,
+    checkFaq ? deleteFAQ({ type: 2, event_row_id: eventRowId, faq_row_id: undefined }) : null,
+    checkTickets ? deleteTickets({ type: 2, event_row_id: eventRowId, ticket_row_id: undefined }) : null,
+    checkSponsorsPartners ? deleteSponsorsPartners({ type: 2, event_row_id: eventRowId, sp_row_id: undefined, account_type: undefined, registered_type: undefined, user_company_row_id: undefined }) : null,
+    checkWatchlist ? deleteEventWatchlist({ type: 2, event_row_id: eventRowId, watchlist_row_id: undefined }) : null,
+    deleteNotifications({ notify_type: 3, notify_type_row_id: eventRowId }),
+  ])
 }
 
 /** Priority order matches events.approve-reject.service.ts's own sendHostEmail exactly: host email, then company email, then sub-admin email. */
@@ -104,6 +189,12 @@ export async function applyEventStatusWrite({ request, session: rawSession }: { 
   if (intendedAction === INTENDED_REJECT) {
     const reasonForReject = String((request.payload ?? {})['reason'] ?? '')
     await eventM.updateOne({ _id: eventRowId }, { $set: { approval_status: 2, reason_for_reject: reasonForReject, rejected_date_n_time: getPresentDateTime() } }, { session })
+    return { appliedFieldCount: 1 }
+  }
+
+  // Delete: the cascade-delete isn't session-aware, so nothing runs inside the transaction here -
+  // see applyEventStatusSideEffects (mirrors company_admin.lifecycle-apply.ts's own Delete case).
+  if (intendedAction === INTENDED_DELETE) {
     return { appliedFieldCount: 1 }
   }
 
@@ -200,6 +291,18 @@ export async function applyEventStatusSideEffects({ request, actor }: { request:
         <p style="color:#000;font-weight: 400;font-size:17px;"><a href="https://app.coinpedia.org/login/" style="color:#0029ff">Login Now </a>to your profile . </p>
         `,
       )
+      return
+    }
+
+    if (intendedAction === INTENDED_DELETE) {
+      const { invalidateEventDeleteCaches } = require('./events.cache')
+      const deletedReason = String((request.payload ?? {})['reason'] ?? '')
+      // `info` (fetched above) is the only surviving copy of the row once deleteEventCascade has
+      // removed it - recorded as the audit snapshot before deleting, same order as
+      // company_admin.lifecycle-apply.ts's own INTENDED_DELETE case.
+      await recordEventStatusChange({ documentId: eventRowId, action: 'delete', tracker, adminRowId: actor.id, reason: deletedReason, snapshot: info })
+      await deleteEventCascade(eventRowId, deletedReason)
+      await invalidateEventDeleteCaches()
     }
   } catch (err) {
     logger.error({ err, eventRowId, intendedAction }, 'events.lifecycle-apply: publish side effects failed')

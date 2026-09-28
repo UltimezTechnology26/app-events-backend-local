@@ -21,6 +21,7 @@ const INTENDED_ENABLE = 'enable'
 const INTENDED_DISABLE = 'disable'
 const INTENDED_APPROVE = 'approve'
 const INTENDED_REJECT = 'reject'
+const INTENDED_DELETE = 'delete'
 
 function trackerFrom(actor: ActorRef) {
   return { updated_by: actor.type, updated_by_row_id: actor.id }
@@ -85,6 +86,12 @@ export async function applyCompanyStatusWrite({ request, session: rawSession }: 
       },
       { session },
     )
+    return { appliedFieldCount: 1 }
+  }
+
+  // Delete: the cascade-delete isn't session-aware, so nothing runs inside the transaction here -
+  // see applyCompanyStatusSideEffects (mirrors professionals.lifecycle-apply.ts's own Delete case).
+  if (intendedAction === INTENDED_DELETE) {
     return { appliedFieldCount: 1 }
   }
 
@@ -164,6 +171,15 @@ export async function applyCompanyStatusSideEffects({ request, actor }: { reques
     <p style="color:#000;font-weight: 400;font-size:17px;">Your interest is appreciated, and we invite you to <a href="https://app.coinpedia.org/login/" style="color: #0029ff;font-weight: 400;">Register<a> to CoinPedia for more information!</p>
     `
       await sendEmail(company.company_email_id, passSubject, passMessage)
+      return
+    }
+
+    if (intendedAction === INTENDED_DELETE) {
+      const { deleteCompanyDetails } = require('../../../utils/helpers/app_helper')
+      // `company` (fetched above) is the only surviving copy of the row once deleteCompanyDetails
+      // has relocated it out of cln_company_lists - recorded as the audit snapshot before deleting.
+      await recordCompanyStatusChange({ documentId: companyRowId, action: 'delete', tracker, adminRowId: actor.id, snapshot: company })
+      await deleteCompanyDetails({ company_row_id: companyRowId })
     }
   } catch (err) {
     logger.error({ err, companyRowId, intendedAction }, 'company_admin.lifecycle-apply: publish side effects failed')

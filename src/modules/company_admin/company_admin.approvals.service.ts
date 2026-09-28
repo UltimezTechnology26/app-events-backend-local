@@ -1,9 +1,6 @@
 // modules/company_admin/company_admin.approvals.service.ts
 const companyM = require('../../../models/app/company/companyM')
 const company_deleted_historyM = require('../../../models/app/company/company_deleted_historyM')
-const { checkCompanySubadminAccess } = require('../../../utils/helpers/helper')
-const { deleteCompanyDetails } = require('../../../utils/helpers/app_helper')
-import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-library/auth'
 import {
   buildCompaniesListMatchQuery,
   buildCompaniesListPipeline,
@@ -11,11 +8,8 @@ import {
   buildDeletedListPipeline,
   extractDeletedListResult,
   buildDeletedListMatchQuery,
-  findCompanyById,
   findCompaniesDisplayInfoByIds,
 } from './company_admin.approvals.queries'
-import { Actor } from './company_admin.types'
-import { recordCompanyStatusChange } from './company_admin.audit'
 import { getPendingChangeRequestsAcrossEntities, getRejectedChangeRequestsAcrossEntities, getApprovedChangeRequestsAcrossEntities } from '../../modules/change-request/change-request.service'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 
@@ -46,47 +40,6 @@ export async function getCompaniesList({ approvalStatusRaw, activeStatusRaw, ski
   const { data, count } = extractCompaniesListResult(aggregateOutput)
 
   return { status: true, message: data, count }
-}
-
-export interface DeleteCompanyRequestParams {
-  admin: Actor
-  requestRowIdRaw: string
-}
-
-/** Ports company_approvals.js's GET /delete_company/:request_row_id (lines 486-528). */
-export async function deleteCompanyRequest({ admin, requestRowIdRaw }: DeleteCompanyRequestParams) {
-  const request_row_id = Number.parseInt(requestRowIdRaw)
-  if (Number.isNaN(request_row_id)) {
-    return { status: false, message: { alert_message: 'Sorry, Invalid Request row id' } }
-  }
-
-  const queryRun = await findCompanyById(request_row_id)
-  if (!queryRun) {
-    return { status: false, message: { alert_message: 'Sorry! Invalid Request Row Id' } }
-  }
-
-  const check_access = await checkCompanySubadminAccess({
-    admin_row_id: Number.parseInt(String(admin.message.admin_row_id)),
-    admin_manager_type: admin.message.admin_manager_type,
-    sub_admin_type: Number.parseInt(String(admin.message.sub_admin_type)),
-    company_row_id: request_row_id,
-  })
-  if (!check_access.status) {
-    return { status: false, message: { alert_message: check_access.message } }
-  }
-
-  await deleteCompanyDetails({ company_row_id: queryRun._id })
-  // `queryRun` was fetched before the delete, so it is the only surviving copy of the
-  // row once deleteCompanyDetails has relocated it out of cln_company_lists.
-  await recordCompanyStatusChange({
-    documentId: request_row_id,
-    action: 'delete',
-    tracker: getUpdateTrackerFields(admin),
-    adminRowId: admin.message.admin_row_id,
-    snapshot: queryRun,
-  })
-
-  return { status: true, message: { alert_message: 'Company Deleted successfully' } }
 }
 
 export interface GetGlobalPendingChangesParams {
