@@ -48,6 +48,10 @@ export interface FieldChange {
   reviewed_by?: ActorRef | null
   reviewed_at?: Date | null
   rating?: number | null
+  /** The reviewer's note from the same approve action that set `rating` - mirrors how `rating`
+   * already gets stamped onto every field a field-level approve action touches (see
+   * change-request.queries.ts's updateFieldStatuses). Absent on data written before this shipped. */
+  note?: string | null
   reject_reason?: string | null
   /** Group key from SectionConfig.fieldGroups (e.g. 'location') when this field belongs to one -
    * approving/rejecting any member field-key targets every entry sharing this group value. */

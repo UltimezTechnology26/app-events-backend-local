@@ -66,6 +66,12 @@ const changeSchema = mongoose.Schema({
         type: Number,
         default: null
     },
+    // The reviewer's note from the same approve action that set `rating` above - see
+    // status-audit.types.ts's FieldChange.note doc comment.
+    note: {
+        type: String,
+        default: null
+    },
     reject_reason: {
         type: String,
         default: null
