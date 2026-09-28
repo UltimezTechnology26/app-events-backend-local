@@ -2068,6 +2068,32 @@ router.post('/submit_event', [
                     const updateFields = getUpdateTrackerFields(checkUserToken)
                     Object.assign(eventUpdateData, updateFields, { updated_date_n_time: new Date() })
 
+                    // Real, admin-visible SEO diff - computed once and reused by both the gated
+                    // submit below and the seo_change_logsM audit write further down. CONFIRMED BUG
+                    // FIX (user-requested, 2026-09-28): the gated branch used to submit a
+                    // SECTION_EVENT_SEO change request unconditionally on every Basic Details edit,
+                    // even when the admin never touched the SEO tab - `seoFields` only carries
+                    // Basic Details' own auto-derived defaults (title/description copied in on first
+                    // save), so once real SEO values already existed, every field in `seoFields` was
+                    // `undefined` and got diffed against the live SEO doc as if the admin had
+                    // blanked out every field. Gating on the same real-change check the direct-write
+                    // (host) path below already uses stops that no-op section from ever appearing in
+                    // Pending Changes.
+                    const hasChanged = (oldVal, newVal) =>
+                        (newVal ?? "").trim() !== "" &&
+                        (oldVal ?? "").trim() !== (newVal ?? "").trim();
+
+                    const changed =
+                        hasChanged(combinedData?.meta_title, insertArr.meta_title) ||
+                        hasChanged(combinedData?.meta_description, insertArr.meta_description) ||
+                        hasChanged(combinedData?.meta_keywords, insertArr.meta_keywords) ||
+
+                        hasChanged(combinedData?.og_title, insertArr.og_title) ||
+                        hasChanged(combinedData?.og_description, insertArr.og_description) ||
+
+                        hasChanged(combinedData?.twitter_title, insertArr.twitter_title) ||
+                        hasChanged(combinedData?.twitter_description, insertArr.twitter_description);
+
                     // Publish gate applies to admin-panel EDITS only (design §2, same shape as
                     // every other Events section) - the event's own host keeps writing live
                     // immediately below, unchanged (2026-09-25 user decision). Split into two
@@ -2097,17 +2123,19 @@ router.post('/submit_event', [
                         if (!basicDetailsResult.status) {
                             return res.json(basicDetailsResult)
                         }
-                        const seoResult = await submitChangeRequest({
-                            module: AUDIT_MODULE_EVENTS,
-                            section: SECTION_EVENT_SEO,
-                            rootDocumentId: event_row_id,
-                            targetRowId: null,
-                            liveValues: seoData ? (seoData.toObject ? seoData.toObject() : seoData) : {},
-                            submitted: seoFields,
-                            actor,
-                        })
-                        if (!seoResult.status) {
-                            return res.json(seoResult)
+                        if (changed) {
+                            const seoResult = await submitChangeRequest({
+                                module: AUDIT_MODULE_EVENTS,
+                                section: SECTION_EVENT_SEO,
+                                rootDocumentId: event_row_id,
+                                targetRowId: null,
+                                liveValues: seoData ? (seoData.toObject ? seoData.toObject() : seoData) : {},
+                                submitted: seoFields,
+                                actor,
+                            })
+                            if (!seoResult.status) {
+                                return res.json(seoResult)
+                            }
                         }
                         return res.json({ status: true, message: { alert_message: 'Changes submitted for approval.', event_row_id: event_row_id } })
                     }
@@ -2129,20 +2157,6 @@ router.post('/submit_event', [
                     await deleteKeysByPattern('manage_events_list_*')
                     await deleteKeysByPattern('app_user_other_details_*')
 
-                    const hasChanged = (oldVal, newVal) =>
-                        (newVal ?? "").trim() !== "" &&
-                        (oldVal ?? "").trim() !== (newVal ?? "").trim();
-
-                    const changed =
-                        hasChanged(combinedData?.meta_title, insertArr.meta_title) ||
-                        hasChanged(combinedData?.meta_description, insertArr.meta_description) ||
-                        hasChanged(combinedData?.meta_keywords, insertArr.meta_keywords) ||
-
-                        hasChanged(combinedData?.og_title, insertArr.og_title) ||
-                        hasChanged(combinedData?.og_description, insertArr.og_description) ||
-
-                        hasChanged(combinedData?.twitter_title, insertArr.twitter_title) ||
-                        hasChanged(combinedData?.twitter_description, insertArr.twitter_description);
                     if (changed) {
                         await seo_change_logsM.create({
                             module_key: "event",
