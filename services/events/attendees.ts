@@ -113,7 +113,7 @@ export const getAttendeesList = async (req: any, skip: number, limit: number) =>
                         {
                             $project: {
                                 event_title: 1, event_image: 1, event_url: 1,
-                                alt_image_text: 1, list_event_type: 1,
+                                alt_image_text: 1, list_event_type: 1, event_type: 1,
                                 user_name: "$user_info.user_name",
                                 full_name: "$user_info.full_name",
                                 pro_batch: "$user_info.pro_batch",
@@ -252,6 +252,7 @@ export const getAttendeesList = async (req: any, skip: number, limit: number) =>
                                 event_image: "$event_info.event_image",
                                 event_url: 1,
                                 list_event_type: "$event_info.list_event_type",
+                                event_type: "$event_info.event_type",
                                 host_user_name: 1,
                                 host_full_name: 1,
                                 host_profile_image: "$event_info.profile_image",
