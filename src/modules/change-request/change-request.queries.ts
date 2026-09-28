@@ -415,13 +415,17 @@ async function updateFieldStatuses(params: FieldActionParams, perFieldSet: Parti
 export async function approveChangeRequestFields(
   params: FieldActionParams & { rating: number; note?: string }
 ): Promise<void> {
-  await updateFieldStatuses(params, { status: 'approved', rating: params.rating, reject_reason: null })
+  // CONFIRMED BUG FIX (user-reported, 2026-09-28): the reviewer's note was accepted here but
+  // never stamped onto the field(s) it was written for - only rating was, so a field-level
+  // approval's note existed nowhere the field itself could show it. Mirrors rating's own handling
+  // exactly (same note applies to every field this one approve action touches).
+  await updateFieldStatuses(params, { status: 'approved', rating: params.rating, note: params.note ?? null, reject_reason: null })
 }
 
 export async function rejectChangeRequestFields(
   params: FieldActionParams & { reason: string }
 ): Promise<void> {
-  await updateFieldStatuses(params, { status: 'rejected', reject_reason: params.reason, rating: null })
+  await updateFieldStatuses(params, { status: 'rejected', reject_reason: params.reason, rating: null, note: null })
 }
 
 /**

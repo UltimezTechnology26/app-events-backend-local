@@ -16,6 +16,9 @@ export interface ChangeLogInput {
   changes: FieldChange[]
   reason: string | null
   snapshot: unknown
+  /** The reviewer's star rating from the same approve action that produced this log entry (1-10).
+   * Absent/null for every action other than approve, and for data written before this shipped. */
+  rating?: number | null
 }
 
 // Explicit projections — CLAUDE.md forbids `SELECT *`. Listed once as constants so a
@@ -42,6 +45,7 @@ const CHANGE_LOG_PROJECTION = {
   actor: 1,
   changes: 1,
   reason: 1,
+  rating: 1,
   created_at: 1,
 } as const
 
