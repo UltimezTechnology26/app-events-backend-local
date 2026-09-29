@@ -14,16 +14,16 @@ const sendEmail = async (pass_email_id, pass_subject, pass_message) => {
         <h4 style="text-align:center;padding-top: 40px;">Follow us</h4>
         <section style="text-align:center;">
         <span><a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/app_uploads/emails/feed.png" style="margin-right: 5px;"></a></span>
-        <span><a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
-        <span><a href="https://twitter.com/Coinpedianews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
+        <span><a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
+        <span><a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/app_uploads/emails/pintrest.png"  style="margin-right: 5px;"></a></span>
-        <span><a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
-        <span><a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
+        <span><a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
+        <span><a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/app_uploads/emails/medium.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/app_uploads/emails/telegram.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/app_uploads/emails/steemit.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/app_uploads/emails/quora.png"  style="margin-right: 5px;"></a></span>
-        <span><a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
+        <span><a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
         <span><a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/app_uploads/emails/gettr.png"  style="margin-right: 5px;"></a></span>
         </section>     
 
@@ -171,16 +171,16 @@ const sendAcademyEmail = async (pass_email_id, pass_subject, pass_message, heade
                 <p style="font-size:16px; margin:0 0 10px 0; font-weight:bold;">Follow us</p>
                 <div style="margin-bottom:20px;">
                     <a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/static/common/bg-rss-feed.png" style="width:24px; margin:0 5px;" alt="RSS"></a>
-                    <a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
-                    <a href="https://x.com/Coinpedianews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
-                    <a href="https://in.pinterest.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
-                    <a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
-                    <a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
+                    <a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
+                    <a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
+                    <a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
+                    <a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
+                    <a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
                     <a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/static/common/bg-telegram.png" style="width:24px; margin:0 5px;" alt="Telegram"></a>
                     <a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/static/common/bg-medium.png" style="width:24px; margin:0 5px;" alt="Medium"></a>
                     <a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/static/common/bg-quora.png" style="width:24px; margin:0 5px;" alt="Quora"></a>
                     <a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/static/common/bg-steemit.png" style="width:24px; margin:0 5px;" alt="Steemit"></a>
-                    <a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
+                    <a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
                     <a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/static/common/bg-gettr.png" style="width:24px; margin:0 5px;" alt="Gettr"></a>
                 </div>
 
@@ -298,16 +298,16 @@ const sendCommunityEmail = async (pass_email_id, pass_subject, pass_message, hea
                 <p style="font-size:16px; margin:0 0 10px 0; font-weight:bold;">Follow us</p>
                 <div style="margin-bottom:20px;">
                     <a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/static/common/bg-rss-feed.png" style="width:24px; margin:0 5px;" alt="RSS"></a>
-                    <a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
-                    <a href="https://x.com/Coinpedianews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
-                    <a href="https://in.pinterest.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
-                    <a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
-                    <a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
+                    <a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
+                    <a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
+                    <a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
+                    <a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
+                    <a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
                     <a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/static/common/bg-telegram.png" style="width:24px; margin:0 5px;" alt="Telegram"></a>
                     <a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/static/common/bg-medium.png" style="width:24px; margin:0 5px;" alt="Medium"></a>
                     <a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/static/common/bg-quora.png" style="width:24px; margin:0 5px;" alt="Quora"></a>
                     <a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/static/common/bg-steemit.png" style="width:24px; margin:0 5px;" alt="Steemit"></a>
-                    <a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
+                    <a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
                     <a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/static/common/bg-gettr.png" style="width:24px; margin:0 5px;" alt="Gettr"></a>
                 </div>
 
@@ -393,16 +393,16 @@ const sendEventsEmail = async (pass_email_id, pass_subject, pass_message, attend
                     <h4 style="text-align:center;padding-top: 40px;color:#565362;">Follow us</h4>
                     <section style="text-align:center;">
                     <span><a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/app_uploads/emails/feed.png" style="margin-right: 5px;"></a></span>
-                    <span><a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://twitter.com/Coinpedianews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/app_uploads/emails/pintrest.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/app_uploads/emails/medium.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/app_uploads/emails/telegram.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/app_uploads/emails/steemit.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/app_uploads/emails/quora.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/app_uploads/emails/gettr.png"  style="margin-right: 5px;"></a></span>
                     </section>       
     
@@ -560,16 +560,16 @@ const sendNewsEventsEmail = async (pass_email_id, pass_subject, pass_message, he
                 <p style="font-size:16px; margin:0 0 10px 0; font-weight:bold; font-family: 'Figtree', sans-serif !important;">Follow us</p>
                 <div style="margin-bottom:20px;">
                     <a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/static/common/bg-rss-feed.png" style="width:24px; margin:0 5px;" alt="RSS"></a>
-                    <a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
-                    <a href="https://x.com/Coinpedianews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
-                    <a href="https://in.pinterest.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
-                    <a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
-                    
+                    <a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
+                    <a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
+                    <a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
+                    <a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
+                    <a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
                     <a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/static/common/bg-telegram.png" style="width:24px; margin:0 5px;" alt="Telegram"></a>
                     <a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/static/common/bg-medium.png" style="width:24px; margin:0 5px;" alt="Medium"></a>
                     <a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/static/common/bg-quora.png" style="width:24px; margin:0 5px;" alt="Quora"></a>
                     <a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/static/common/bg-steemit.png" style="width:24px; margin:0 5px;" alt="Steemit"></a>
-                    <a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
+                    <a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
                     <a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/static/common/bg-gettr.png" style="width:24px; margin:0 5px;" alt="Gettr"></a>
                 </div>
 
@@ -593,7 +593,6 @@ const sendNewsEventsEmail = async (pass_email_id, pass_subject, pass_message, he
             
             </body>
         </html>`
-        // <a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
 
         if (pass_email_id) {
             if (attendee_row_id && event_row_id) {
@@ -673,16 +672,16 @@ const weeklyNewsletterEmail = async (pass_email_id, pass_subject, pass_message, 
                   <h4 style="text-align:center;padding-top: 40px;">Follow us</h4>
                   <section style="text-align:center;">
                   <span><a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/app_uploads/emails/feed.png" style="margin-right: 5px;"></a></span>
-                  <span><a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
-                  <span><a href="https://twitter.com/Coinpedianews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
+                  <span><a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
+                  <span><a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/app_uploads/emails/pintrest.png"  style="margin-right: 5px;"></a></span>
-                  <span><a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
-                  <span><a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
+                  <span><a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
+                  <span><a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/app_uploads/emails/medium.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/app_uploads/emails/telegram.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/app_uploads/emails/steemit.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/app_uploads/emails/quora.png"  style="margin-right: 5px;"></a></span>
-                  <span><a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
+                  <span><a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
                   <span><a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/app_uploads/emails/gettr.png"  style="margin-right: 5px;"></a></span>
                   </section>     
 
@@ -873,16 +872,16 @@ const dailyNewsletterEmail = async (pass_email_id, pass_subject, pass_message, n
                     <h4 style="text-align:center;padding-top: 40px;">Follow us</h4>
                     <section style="text-align:center;">
                     <span><a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/app_uploads/emails/feed.png" style="margin-right: 5px;"></a></span>
-                    <span><a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://twitter.com/Coinpedianews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/app_uploads/emails/facebook.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/app_uploads/emails/twitter.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/app_uploads/emails/pintrest.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://www.instagram.com/coinpedianews/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/app_uploads/emails/linkedin.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/app_uploads/emails/instagram.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/app_uploads/emails/medium.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/app_uploads/emails/telegram.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/app_uploads/emails/steemit.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/app_uploads/emails/quora.png"  style="margin-right: 5px;"></a></span>
-                    <span><a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
+                    <span><a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/app_uploads/emails/substack.png"  style="margin-right: 5px;"></a></span>
                     <span><a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/app_uploads/emails/gettr.png"  style="margin-right: 5px;"></a></span>
                     </section>     
                     <h6 style="text-align:center; font-size:15px; color:#13002D; text-decoration: none;margin: 0px 110px;line-height:25.27px;font-weight: 400;">
