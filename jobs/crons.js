@@ -28,46 +28,46 @@ const JWT_ADMIN_SECRET_KEY = process.env.JWT_ADMIN_SECRET_KEY
 // Live Crons -------------------------------------------------------------------------------------------
 
 
-cron.schedule('0 1 * * 0', async () => {
-    try {
-        const userIds = await community_postsM.distinct("user_row_id", { post_status: true });
-        const users = await professionalsM.find(
-            { _id: { $in: userIds } },
-            { full_name: 1, email_id: 1 } // only required fields
-        ).lean();
-        const formattedUsers = users.map(user => ({
-            user_row_id: user._id,
-            full_name: user.full_name,
-            email_id: user.email_id
-        }));
-        console.log("weekly cron jobs");
+// cron.schedule('0 1 * * 0', async () => {
+//     try {
+//         const userIds = await community_postsM.distinct("user_row_id", { post_status: true });
+//         const users = await professionalsM.find(
+//             { _id: { $in: userIds } },
+//             { full_name: 1, email_id: 1 } // only required fields
+//         ).lean();
+//         const formattedUsers = users.map(user => ({
+//             user_row_id: user._id,
+//             full_name: user.full_name,
+//             email_id: user.email_id
+//         }));
+//         console.log("weekly cron jobs");
 
-        for (const user of users) {
-            const userData = {
-                user_row_id: user._id,
-                full_name: user.full_name,
-                email_id: user.email_id
-            };
+//         for (const user of users) {
+//             const userData = {
+//                 user_row_id: user._id,
+//                 full_name: user.full_name,
+//                 email_id: user.email_id
+//             };
 
-            await sendWeeklyReportEmail(userData);
-        }
+//             await sendWeeklyReportEmail(userData);
+//         }
 
-    } catch (err) {
-        console.error('[CRON] Error in weekly job:', err.message);
-    }
-}, {
-    timezone: 'Asia/Kolkata' // optional
-});
+//     } catch (err) {
+//         console.error('[CRON] Error in weekly job:', err.message);
+//     }
+// }, {
+//     timezone: 'Asia/Kolkata' // optional
+// });
 
-cron.schedule('0 */4 * * *', async () => {
-    try {
-        console.log('Running cron job to fetch email details...')
-        await fetchAndStoreEmailDetails()
-    }
-    catch (err) {
-        console.log('Store emails details cron job', err.message)
-    }
-})
+// cron.schedule('0 */4 * * *', async () => {
+//     try {
+//         console.log('Running cron job to fetch email details...')
+//         await fetchAndStoreEmailDetails()
+//     }
+//     catch (err) {
+//         console.log('Store emails details cron job', err.message)
+//     }
+// })
 
 
 cron.schedule('12 16 * * *', async () => {
@@ -321,16 +321,16 @@ cron.schedule('0 10 * * *', async () => {
 })
 
 
-cron.schedule('30 1 * * *', async () => {
-    // UTC Time : 1:30am
-    // Every day at 06:00 am O Clock 
-    await sendEmailsForPricePrediction()
-})
+// cron.schedule('30 1 * * *', async () => {
+//     // UTC Time : 1:30am
+//     // Every day at 06:00 am O Clock 
+//     await sendEmailsForPricePrediction()
+// })
 
 //At night 01:00 every day data 
-cron.schedule('0 1 * * *', async () => {
-    await send_quiz_not_complete_remainder()
-})
+// cron.schedule('0 1 * * *', async () => {
+//     await send_quiz_not_complete_remainder()
+// })
 
 
 //At night 01:00 every day data 
