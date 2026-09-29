@@ -20,11 +20,20 @@
 import { BigQuery } from '@google-cloud/bigquery'
 import { ViewCountBigQueryRow } from './view-counts-30d.types'
 
-const GA4_PROJECT_ID = 'for-ga4-bitquery-new'
-const GA4_EVENTS_TABLE = 'for-ga4-bitquery-new.analytics_308621177.events_*'
+// GOOGLE_CLOUD_PROJECT_ID, not a hardcoded literal - the GA4 export project differs per
+// environment (dev/staging/prod each have their own), same convention as
+// config/bigquery-tables.js's BIGQUERY_PROJECT_ID.
+const GA4_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID
 const WINDOW_DAYS = 30
 
 let cachedClient: BigQuery | null = null
+
+function getGa4EventsTable(): string {
+  if (!GA4_PROJECT_ID) {
+    throw new Error('GOOGLE_CLOUD_PROJECT_ID is not configured for the view-counts-30d module')
+  }
+  return `${GA4_PROJECT_ID}.analytics_308621177.events_*`
+}
 
 /**
  * Matches `config/bigquery-database-helper.js`'s own credential resolution exactly: on this
@@ -38,6 +47,9 @@ function getBigQueryClient(): BigQuery {
   const keyFilename = process.env.GOOGLE_APPLICATION_CREDENTIALS
   if (!keyFilename) {
     throw new Error('GOOGLE_APPLICATION_CREDENTIALS is not configured for the view-counts-30d module')
+  }
+  if (!GA4_PROJECT_ID) {
+    throw new Error('GOOGLE_CLOUD_PROJECT_ID is not configured for the view-counts-30d module')
   }
   cachedClient = new BigQuery({ projectId: GA4_PROJECT_ID, keyFilename })
   return cachedClient
@@ -58,7 +70,7 @@ function buildQuery(): string {
           (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location' LIMIT 1),
           (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_path' LIMIT 1)
         ) AS page_location
-      FROM \`${GA4_EVENTS_TABLE}\`
+      FROM \`${getGa4EventsTable()}\`
       WHERE _TABLE_SUFFIX BETWEEN '${formatDate(start)}' AND '${formatDate(today)}'
         AND event_name = 'page_view'
     ),

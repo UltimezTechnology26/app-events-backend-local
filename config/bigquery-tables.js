@@ -1,11 +1,18 @@
 const BigQueryDatabaseHelper = require('./bigquery-database-helper');
 
+// projectId varies per environment (dev/staging/prod each have their own GCP project) and
+// keyFilename accepts either a real file path or a direct JSON credential string (see
+// bigquery-database-helper.js) - GOOGLE_APPLICATION_CREDENTIALS already holds the latter
+// elsewhere in this codebase, so it's reused here instead of a checked-in key file.
+const BIGQUERY_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID;
+const BIGQUERY_KEY_FILENAME = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
 // Events table configuration
 const eventsConfig = {
     tableId: process.env.BIGQUERY_TABLE_ID || 'cln_events',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'user_row_id', type: 'INTEGER' },
@@ -77,9 +84,9 @@ const eventsConfig = {
 // Users table configuration
 const usersConfig = {
     tableId: 'cln_users_dummy',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'referral_row_id', type: 'INTEGER' },
@@ -125,9 +132,9 @@ const usersConfig = {
 // Companies table configuration
 const companiesConfig = {
     tableId: 'cln_company_lists_dummy',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'user_row_id', type: 'INTEGER' },
@@ -186,9 +193,9 @@ const companiesConfig = {
 // Company Other Details table configuration
 const companyOtherDetailsConfig = {
     tableId: 'cln_company_seo_details',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'company_row_id', type: 'INTEGER' },
@@ -222,9 +229,9 @@ const companyOtherDetailsConfig = {
 // Users Other Details table configuration
 const usersOtherDetailsConfig = {
     tableId: 'cln_professionals_seo_details',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'user_row_id', type: 'INTEGER' },
@@ -263,9 +270,9 @@ const usersOtherDetailsConfig = {
 // Academy Courses table configuration
 const academyCoursesConfig = {
     tableId: 'cln_academy_courses',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'course_name', type: 'STRING' },
@@ -283,9 +290,9 @@ const academyCoursesConfig = {
 // Event Attendees table configuration
 const eventAttendeesConfig = {
     tableId: 'cln_event_attendees',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'event_row_id', type: 'INTEGER' },
@@ -298,9 +305,9 @@ const eventAttendeesConfig = {
 // Event Collaboration Users Requests table configuration
 const eventCollaborationUsersRequestsConfig = {
     tableId: 'cln_events_collaboration_professionals_requests',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'user_row_id', type: 'INTEGER' },
@@ -315,9 +322,9 @@ const eventCollaborationUsersRequestsConfig = {
 // Event Coupons table configuration
 const eventCouponsConfig = {
     tableId: 'cln_event_coupons',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'event_row_id', type: 'INTEGER' },
@@ -331,9 +338,9 @@ const eventCouponsConfig = {
 // Deleted Events table configuration
 const deletedEventsConfig = {
     tableId: 'cln_deleted_events',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'user_row_id', type: 'INTEGER' },
@@ -372,9 +379,9 @@ const deletedEventsConfig = {
 // Events Attendees table configuration
 const eventsAttendeesConfig = {
     tableId: 'cln_events_attendees',
-    keyFilename: 'for-ga4-bitquery-new-e971719171c1.json',
+    keyFilename: BIGQUERY_KEY_FILENAME,
     datasetId: 'app_events_mongodb',
-    projectId: 'for-ga4-bitquery-new',
+    projectId: BIGQUERY_PROJECT_ID,
     schema: [
         { name: '_id', type: 'INTEGER' },
         { name: 'event_row_id', type: 'INTEGER' },
