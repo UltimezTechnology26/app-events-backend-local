@@ -10,8 +10,10 @@
 // lightweight "intended_action" control payload instead of a field diff (see
 // change-request.registry.ts's SECTION_EVENT_STATUS doc comment for the publish-side writer).
 //
-// Explicitly scoped to these four direct, one-click admin actions on the main record - Delete is
-// out of scope (matches the user's literal four actions, same exclusion Company already made).
+// Delete was originally out of scope (matched Company's own exclusion at the time), then extended
+// to match (user-requested 2026-09-28: bring Company's and Events' Delete in line with
+// Professional's, which already staged Delete from the start) - see submitDeleteEventRequest below
+// and events.lifecycle-apply.ts's own INTENDED_DELETE case.
 const eventM = require('../../../models/app/events/eventM')
 import { checkSubadminAccess } from '../../../utils/helpers/events_helper'
 import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-library/auth'
@@ -51,7 +53,7 @@ function subadminAccessParams(admin: AdminAuthResult & { status: true }, eventRo
 interface SubmitLifecycleActionParams {
   admin: AdminAuthResult & { status: true }
   eventRowId: number
-  intendedAction: 'enable' | 'disable' | 'approve' | 'reject'
+  intendedAction: 'enable' | 'disable' | 'approve' | 'reject' | 'delete'
   reason?: string
   oldLabel: string
   newLabel: string
@@ -172,4 +174,22 @@ export async function submitRejectEventRequest(admin: AdminAuthResult, requestRo
   if (!checkEvent) return { status: false, message: { alert_message: 'Invalid Request Row Id' } }
 
   return submitLifecycleAction({ admin, eventRowId, intendedAction: 'reject', reason: reasonForReject, oldLabel: 'Pending', newLabel: 'Rejected' })
+}
+
+/**
+ * Stages the admin panel's direct Delete action behind the same pending -> approve -> publish
+ * flow as Enable/Disable/Approve/Reject above (user-requested 2026-09-28), instead of applying it
+ * immediately the way deleteEvent (events.write.service.ts, now removed) used to. Matches that
+ * route's original auth shape exactly (no separate checkSubadminAccess call - deleteEvent never
+ * had one) - the actual cascade-delete only runs at publish time, see events.lifecycle-apply.ts.
+ */
+export async function submitDeleteEventRequest(admin: AdminAuthResult, requestRowIdRaw: string, deletedReason: string) {
+  if (!admin.status) return admin
+  const eventRowId = Number.parseInt(requestRowIdRaw)
+  if (Number.isNaN(eventRowId)) return { status: false, message: { alert_message: 'Sorry, Invalid Request row id' } }
+
+  const queryRunCheck = await eventM.findOne({ _id: eventRowId })
+  if (!queryRunCheck) return { status: false, message: { alert_message: 'Invalid Request Row Id' } }
+
+  return submitLifecycleAction({ admin, eventRowId, intendedAction: 'delete', reason: deletedReason, oldLabel: 'Active', newLabel: 'Deleted' })
 }

@@ -19,12 +19,11 @@ import { asyncRoute } from '../../../middleware/asyncRoute'
 import { getEventsList } from './events.list.service'
 import { getPublishedEventsOverview, getEventsEmployees } from './events.published-overview.service'
 import { getAttendeesInviteesList, getEventWatchlist } from './events.attendees-invitees.service'
-import { deleteEvent } from './events.write.service'
 import { editEvent } from './events.edit.service'
 import { getDeletedEventsList } from './events.deleted-list.service'
 import { getDisabledEventsList } from './events.disabled-list.service'
 import { getPendingEventsList } from './events.pending-list.service'
-import { submitEnableEventRequest, submitDisableEventRequest, submitApproveEventRequest, submitRejectEventRequest } from './events.lifecycle-request.service'
+import { submitEnableEventRequest, submitDisableEventRequest, submitApproveEventRequest, submitRejectEventRequest, submitDeleteEventRequest } from './events.lifecycle-request.service'
 import { getEventView } from './events.view.service'
 import { AdminAuthFailure } from './events.types'
 
@@ -157,11 +156,7 @@ eventsRouter.post(
     if (Object.keys(errObj).length > 0) {
       return res.json({ status: false, message: errObj })
     }
-    const requestRowId = Number.parseInt(req.params.request_row_id as string)
-    if (Number.isNaN(requestRowId)) {
-      return res.json({ status: false, message: { alert_message: 'Sorry, Invalid Request row id' } })
-    }
-    res.json(await deleteEvent(requestRowId, req.body.deleted_reason))
+    res.json(await submitDeleteEventRequest(checkAdminToken, req.params.request_row_id as string, req.body.deleted_reason))
   })
 )
 
