@@ -455,6 +455,11 @@ interface CompanyListItem {
   location?: string
   location_flag?: string
   category?: string
+  // Registered companies only - a company can belong to several extra
+  // categories beyond its primary one (business_model_id, an array field -
+  // see company.list.ts's own identical, un-unwound $lookup, which is what
+  // the public /companies/ page's own "+N" tag overflow reads from).
+  extra_categories?: string[]
 }
 
 interface OwnCompaniesListRawRow {
@@ -486,6 +491,8 @@ interface OwnCompaniesListItem {
   // cln_static_company_business_models) - present on both registered and
   // manually-added companies.
   category?: string
+  // See CompanyListItem's own comment - registered companies only.
+  extra_categories?: string[]
 }
 
 // createCompanyLookupHelpers' own getCompanyList/getManualCompanyList
@@ -499,7 +506,13 @@ async function getCompanyListWithLocationAndCategory(companyIds: number[]): Prom
   if (!companyIds?.length) return []
   const companyM = require('../../../models/app/company/companyM')
   return companyM.aggregate([
-    { $match: { _id: { $in: companyIds } } },
+    // Same active_status:1 gate getCompanySuggestions (services/app/settings.ts)
+    // already applies when searching for a company to add - a company disabled
+    // after being linked as an Owning Company was still resolving here (no
+    // status filter at all), so getOwnCompaniesList's own `if (company_details)`
+    // push never had a reason to skip it. Filtering it out of this lookup makes
+    // that existing guard do the skipping for free.
+    { $match: { _id: { $in: companyIds }, active_status: 1 } },
     {
       $lookup: {
         from: 'cln_static_countries',
@@ -520,6 +533,18 @@ async function getCompanyListWithLocationAndCategory(companyIds: number[]): Prom
       },
     },
     { $unwind: { path: '$business_info', preserveNullAndEmptyArrays: true } },
+    // Not unwound - business_model_id is an array field (extra categories
+    // beyond the primary one), same shape company.list.ts's own identical
+    // lookup leaves as an array for the public page's own "+N" tag list.
+    {
+      $lookup: {
+        from: 'cln_static_company_business_models',
+        localField: 'business_model_id',
+        foreignField: '_id',
+        as: 'extra_business_info',
+        pipeline: [{ $project: { _id: 1, business_name: 1 } }],
+      },
+    },
     {
       $project: {
         _id: 1,
@@ -532,6 +557,12 @@ async function getCompanyListWithLocationAndCategory(companyIds: number[]): Prom
         location: '$country_info.country_name',
         location_flag: '$country_info.country_flag',
         category: '$business_info.business_name',
+        extra_categories: {
+          $filter: {
+            input: '$extra_business_info.business_name',
+            cond: { $ne: ['$$this', '$business_info.business_name'] },
+          },
+        },
       },
     },
   ])
@@ -601,7 +632,8 @@ export async function getOwnCompaniesList(params: { product_type: number; produc
         description: company_details.description,
         location: company_details.location,
         location_flag: company_details.location_flag,
-        category: company_details.category
+        category: company_details.category,
+        extra_categories: company_details.extra_categories
       })
     }
   }
