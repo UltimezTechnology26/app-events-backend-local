@@ -1,7 +1,12 @@
 // modules/professionals-meetings/professionals-meetings.admin.service.ts
 // Ports admin_panel/app/meetings/meetings.js in full (4 routes): /journalist_interview/:skip/:limit,
 // /journalist_overview, /list/:skip/:limit, /status/:meeting_id.
-import { buildJournalistInterviewListPipeline, buildJournalistInterviewCountPipeline, buildAdminMeetingsListPipeline } from './professionals-meetings.admin.queries'
+import {
+  buildJournalistInterviewListPipeline,
+  buildJournalistInterviewCountPipeline,
+  buildAdminMeetingsListPipeline,
+  buildAdminMeetingsCountPipeline,
+} from './professionals-meetings.admin.queries'
 import type { AdminAuthResult, JournalistInterviewListQuery, AdminMeetingsListQuery, AdminUpdateMeetingStatusBody } from './professionals-meetings.admin.types'
 
 const MeetingM = require('../../../models/app/meetings/meetingM')
@@ -88,13 +93,6 @@ export async function getAdminMeetingsList(auth: AdminAuthResult, skipRaw: strin
   const meetingType = query.meeting_type ? query.meeting_type.toLowerCase() : null
 
   const statusFilter: Record<string, any> = {}
-  if (search) {
-    statusFilter.$or = [
-      { meeting_title: { $regex: search, $options: 'i' } },
-      { job_role: { $regex: search, $options: 'i' } },
-      { 'user_info.full_name': { $regex: search, $options: 'i' } },
-    ]
-  }
   if (startDate || endDate) {
     statusFilter.meeting_datetime = {}
     if (startDate) statusFilter.meeting_datetime.$gte = new Date(startDate)
@@ -110,8 +108,8 @@ export async function getAdminMeetingsList(auth: AdminAuthResult, skipRaw: strin
   const limit = !Number.isNaN(Number.parseInt(limitRaw)) ? Number.parseInt(limitRaw) : 50
 
   const [meetingDetails, countQueryAgg] = await Promise.all([
-    MeetingM.aggregate(buildAdminMeetingsListPipeline(statusFilter, skip, limit)),
-    MeetingM.aggregate([{ $match: statusFilter }, { $count: 'total' }]),
+    MeetingM.aggregate(buildAdminMeetingsListPipeline(statusFilter, search, skip, limit)),
+    MeetingM.aggregate(buildAdminMeetingsCountPipeline(statusFilter, search)),
   ])
 
   const countQuery = countQueryAgg.length ? countQueryAgg[0].total : 0

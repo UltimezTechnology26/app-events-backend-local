@@ -7,6 +7,18 @@ const { arrangeValidation, getPresentDateTime, validateAndSaveImage } = require(
 const { getCollectionID } = require('../../../../utils/helpers/database_helper')
 const community_groupsM = require('../../../../models/main/community/community_groupsM')
 
+// A freshly picked icon arrives as a base64 `data:image/...` URL, which is the only input
+// `validateAndSaveImage` can decode. On UPDATE the admin panel echoes the group's existing stored
+// FILENAME back as `icon` when no new file was picked (the route's own validator requires `icon`
+// to be non-empty on every call, so the client has nothing else to send). CONFIRMED BUG FIX:
+// that filename used to be pushed through `validateAndSaveImage` too, whose `decodeImage` returns
+// `false` for anything that isn't a data URL - so every rename/hashtag edit without a re-upload
+// was rejected with "Invalid group icon image", and the `delete saveObject.icon` keep-existing
+// branch below was unreachable. Now only a data URL is validated/uploaded; a non-data-URL icon on
+// an update means "keep the current icon", and on a create it is still rejected (a new group
+// needs a real image).
+const NEW_ICON_DATA_URL_PATTERN = /^data:image\//
+const INVALID_ICON_MESSAGE = 'Sorry, Invalid group icon image.'
 
 router.post('/add_n_update_details', [
     check('name').trim().notEmpty().withMessage('Group name is required.'),
@@ -24,13 +36,19 @@ router.post('/add_n_update_details', [
         if (!checkToken.status) errObj['alert_message'] = checkToken.message;
 
         let icon = "";
-        if (!Object.keys(errObj).length && req.body.icon) {
-            const validate_n_save_image = await validateAndSaveImage(req.body.icon, 10);
-            if (!validate_n_save_image.status) {
-                errObj['icon'] = 'Sorry, Invalid group icon image.';
-            } else {
-                icon = validate_n_save_image.webp_file_name;
+        if (!Object.keys(errObj).length) {
+            const isNewIcon = NEW_ICON_DATA_URL_PATTERN.test(req.body.icon);
+            if (isNewIcon) {
+                const validate_n_save_image = await validateAndSaveImage(req.body.icon, 10);
+                if (!validate_n_save_image.status) {
+                    errObj['icon'] = INVALID_ICON_MESSAGE;
+                } else {
+                    icon = validate_n_save_image.webp_file_name;
+                }
+            } else if (!req.body.group_id) {
+                errObj['icon'] = INVALID_ICON_MESSAGE;
             }
+            // else: update with the existing filename - `icon` stays "" so the current icon is kept below
         }
 
         if (Object.keys(errObj).length > 0) {

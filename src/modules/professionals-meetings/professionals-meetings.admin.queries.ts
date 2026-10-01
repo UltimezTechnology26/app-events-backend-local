@@ -10,7 +10,7 @@ export function buildJournalistInterviewListPipeline(filter: Record<string, any>
     { $unwind: { path: '$user_profile', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_sub_admins', localField: 'status_update_by', foreignField: '_id', as: 'sub_admin_info' } },
     { $unwind: { path: '$sub_admin_info', preserveNullAndEmptyArrays: true } },
-    { $sort: { meeting_datetime: 1 } },
+    { $sort: { createdAt: -1 } },
     { $skip: skip },
     { $limit: limit },
     {
@@ -37,13 +37,31 @@ export function buildJournalistInterviewCountPipeline(filter: Record<string, any
   ]
 }
 
-export function buildAdminMeetingsListPipeline(statusFilter: Record<string, any>, skip: number, limit: number) {
+/** `user_info.full_name` only exists after the `user_info` $lookup below, so the search $match must run after it, not in the initial $match. */
+function buildAdminMeetingsSearchMatch(search: string | undefined) {
+  return search
+    ? [
+        {
+          $match: {
+            $or: [
+              { meeting_title: { $regex: search, $options: 'i' } },
+              { job_role: { $regex: search, $options: 'i' } },
+              { 'user_info.full_name': { $regex: search, $options: 'i' } },
+            ],
+          },
+        },
+      ]
+    : []
+}
+
+export function buildAdminMeetingsListPipeline(filter: Record<string, any>, search: string | undefined, skip: number, limit: number) {
   return [
-    { $match: statusFilter },
+    { $match: filter },
     { $lookup: { from: 'cln_company_lists', localField: 'company_row_id', foreignField: '_id', as: 'company_details' } },
     { $unwind: { path: '$company_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
     { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    ...buildAdminMeetingsSearchMatch(search),
     { $lookup: { from: 'cln_professionals_profile_images', localField: 'user_row_id', foreignField: 'user_row_id', as: 'user_profile' } },
     { $unwind: { path: '$user_profile', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals', localField: 'requested_user_row_id', foreignField: '_id', as: 'requested_users' } },
@@ -51,7 +69,7 @@ export function buildAdminMeetingsListPipeline(statusFilter: Record<string, any>
     { $lookup: { from: 'cln_company_lists', localField: 'requested_company_row_id', foreignField: '_id', as: 'requested_companies' } },
     { $lookup: { from: 'cln_sub_admins', localField: 'status_update_by', foreignField: '_id', as: 'sub_admin_info' } },
     { $unwind: { path: '$sub_admin_info', preserveNullAndEmptyArrays: true } },
-    { $sort: { meeting_datetime: 1 } },
+    { $sort: { createdAt: -1 } },
     { $skip: skip },
     { $limit: limit },
     {
@@ -79,5 +97,16 @@ export function buildAdminMeetingsListPipeline(statusFilter: Record<string, any>
         company_logo: '$company_details.company_logo',
       },
     },
+  ]
+}
+
+/** Counts against the same post-lookup fields the list search matches against, so the total stays in sync with a name search. */
+export function buildAdminMeetingsCountPipeline(filter: Record<string, any>, search: string | undefined) {
+  return [
+    { $match: filter },
+    { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
+    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    ...buildAdminMeetingsSearchMatch(search),
+    { $count: 'total' },
   ]
 }

@@ -10,18 +10,35 @@ const { getPresentDateTime, validateAndSaveImage } = require('../../../utils/hel
 const { getCollectionID } = require('../../../utils/helpers/database_helper')
 import { SaveGroupInput } from './community-admin.groups.types'
 
+// A freshly picked icon arrives as a base64 `data:image/...` URL, which is the only input
+// `validateAndSaveImage` can decode. On UPDATE the admin panel echoes the group's existing stored
+// FILENAME back as `icon` when no new file was picked (the controller's validator requires `icon`
+// to be non-empty on every call, so the client has nothing else to send). CONFIRMED BUG FIX (same
+// fix applied to the legacy `groups.js` route): that filename used to be pushed through
+// `validateAndSaveImage` too, whose `decodeImage` returns `false` for anything that isn't a data
+// URL - so every rename/hashtag edit without a re-upload was rejected with "Invalid group icon
+// image", and the `delete saveObject.icon` keep-existing branch below was unreachable. Now only a
+// data URL is validated/uploaded; a non-data-URL icon on an update means "keep the current icon",
+// and on a create it is still rejected (a new group needs a real image).
+const NEW_ICON_DATA_URL_PATTERN = /^data:image\//
+const INVALID_ICON_MESSAGE = 'Sorry, Invalid group icon image.'
+
 export async function saveGroup(input: SaveGroupInput) {
   const errObj: Record<string, string> = {}
 
   let icon = ''
-  if (Object.keys(errObj).length === 0 && input.icon) {
+  const isNewIcon = NEW_ICON_DATA_URL_PATTERN.test(input.icon ?? '')
+  if (isNewIcon) {
     const validated = await validateAndSaveImage(input.icon, 10)
     if (!validated.status) {
-      errObj.icon = 'Sorry, Invalid group icon image.'
+      errObj.icon = INVALID_ICON_MESSAGE
     } else {
       icon = validated.webp_file_name
     }
+  } else if (!input.groupIdRaw) {
+    errObj.icon = INVALID_ICON_MESSAGE
   }
+  // else: update with the existing filename - `icon` stays '' so the current icon is kept below
 
   if (Object.keys(errObj).length > 0) {
     return { status: false, message: errObj }

@@ -85,7 +85,7 @@ router.get("/journalist_interview/:skip/:limit", async (req, res) => {
                     }
                 },
                 { $unwind: { path: "$sub_admin_info", preserveNullAndEmptyArrays: true } },
-                { $sort: { meeting_datetime: 1 } },
+                { $sort: { createdAt: -1 } },
                 { $skip: skip },
                 { $limit: limit },
 
@@ -252,13 +252,20 @@ router.get("/list/:skip/:limit", async (req, res) => {
 
         let statusFilter = {};
 
-        if (search) {
-            statusFilter.$or = [
-                { meeting_title: { $regex: search, $options: "i" } },
-                { job_role: { $regex: search, $options: "i" } },
-                { "user_info.full_name": { $regex: search, $options: "i" } } // optional
-            ];
-        }
+        // user_info.full_name only exists after the user_info $lookup further down the pipeline,
+        // so the search match on it is injected there instead of here.
+        const searchMatchStage = search
+            ? [{
+                $match: {
+                    $or: [
+                        { meeting_title: { $regex: search, $options: "i" } },
+                        { job_role: { $regex: search, $options: "i" } },
+                        { "user_info.full_name": { $regex: search, $options: "i" } }
+                    ]
+                }
+            }]
+            : [];
+
         if (start_date || end_date) {
             statusFilter.meeting_datetime = {};
             if (start_date) {
@@ -305,6 +312,7 @@ router.get("/list/:skip/:limit", async (req, res) => {
                 }
             },
             { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+            ...searchMatchStage,
 
             {
                 $lookup: {
@@ -350,7 +358,7 @@ router.get("/list/:skip/:limit", async (req, res) => {
             },
             { $unwind: { path: "$sub_admin_info", preserveNullAndEmptyArrays: true } },
 
-            { $sort: { meeting_datetime: 1 } },
+            { $sort: { createdAt: -1 } },
             { $skip: skip },
             { $limit: limit },
 
@@ -434,6 +442,16 @@ router.get("/list/:skip/:limit", async (req, res) => {
 
         const countQueryAgg = await meetingM.aggregate([
             { $match: statusFilter },
+            {
+                $lookup: {
+                    from: "cln_professionals",
+                    localField: "user_row_id",
+                    foreignField: "_id",
+                    as: "user_info"
+                }
+            },
+            { $unwind: { path: "$user_info", preserveNullAndEmptyArrays: true } },
+            ...searchMatchStage,
             { $count: "total" }
         ]);
 
