@@ -21,7 +21,7 @@ import { getEntityAudit } from '../../common/status-audit/status-audit.service'
 import { validateAuditRequest } from '../../common/status-audit/status-audit.validation'
 import { AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-audit.registry'
 import { getPendingChangeRequests, getApprovedChangeRequests, publishAllChangeRequests } from '../../modules/change-request/change-request.service'
-import { getGlobalPendingChangeRequestsForProfessionals, getGlobalRejectedChangeRequestsForProfessionals } from './professionals.approvals.service'
+import { getGlobalPendingChangeRequestsForProfessionals, getGlobalRejectedChangeRequestsForProfessionals, getGlobalApprovedChangeRequestsForProfessionals } from './professionals.approvals.service'
 import { applyChangeRequest } from '../../modules/change-request/change-request.apply'
 import { approveChangeRequest, approveChangeRequestFields } from '../../modules/change-request/change-request.approve'
 import { rejectChangeRequest, cancelChangeRequest, rejectChangeRequestFields } from '../../modules/change-request/change-request.review'
@@ -71,6 +71,16 @@ professionalsChangeApprovalsRouter.get('/pending_changes_all/:skip/:limit', asyn
 /** Same shape as '/pending_changes_all' above, but for rejected requests. */
 professionalsChangeApprovalsRouter.get('/rejected_changes_all/:skip/:limit', asyncRoute('Global professional rejected changes queue.', async (req, res) => {
   const result = await getGlobalRejectedChangeRequestsForProfessionals({ skipRaw: req.params.skip as string, limitRaw: req.params.limit as string })
+  res.json(result)
+}))
+
+/**
+ * Global cross-entity queue: every professional's approved-but-not-yet-published changes
+ * together, paginated — mirrors '/pending_changes_all'/'/rejected_changes_all' above
+ * (user-requested Approved Changes queue, 2026-09-22).
+ */
+professionalsChangeApprovalsRouter.get('/approved_changes_all/:skip/:limit', asyncRoute('Global professional approved changes queue.', async (req, res) => {
+  const result = await getGlobalApprovedChangeRequestsForProfessionals({ skipRaw: req.params.skip as string, limitRaw: req.params.limit as string })
   res.json(result)
 }))
 
@@ -136,6 +146,39 @@ professionalsChangeApprovalsRouter.post('/publish_change/:change_request_id', wr
   }
 
   const result = await applyChangeRequest({ changeRequestId: requestId.value, actor: adminActorOf(checkToken) })
+  res.json(result)
+}))
+
+const FIELD_KEYS_REQUIRED_FOR_PUBLISH_MESSAGE = 'Select at least one field to publish'
+
+/**
+ * Field-level selective publish (user-requested, 2026-09-22): publishes only the given subset of
+ * this request's approved-and-unpublished fields, leaving the rest approved-but-unpublished for a
+ * later publish — mirrors company_admin.approvals.controller.ts's own '/publish_change_fields'.
+ * '/publish_change' above (no body) still publishes every approved-and-unpublished field on the
+ * request, unchanged.
+ */
+professionalsChangeApprovalsRouter.post('/publish_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Publish individual professional change request fields.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, PROFESSIONALS_ACCESS_IDS)
+
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
+    res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
+    return
+  }
+
+  const requestId = validateChangeRequestId(req.params.change_request_id as string)
+  if (!requestId.valid || requestId.value === null) {
+    res.json({ status: false, message: { alert_message: requestId.message } })
+    return
+  }
+
+  const fieldKeys = validateFieldKeys(req.body.field_keys)
+  if (!fieldKeys) {
+    res.json({ status: false, message: { field_keys: FIELD_KEYS_REQUIRED_FOR_PUBLISH_MESSAGE } })
+    return
+  }
+
+  const result = await applyChangeRequest({ changeRequestId: requestId.value, actor: adminActorOf(checkToken), fieldKeys })
   res.json(result)
 }))
 

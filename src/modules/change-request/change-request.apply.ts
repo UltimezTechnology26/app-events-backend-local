@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import logger from '../../../config/logger'
 import { ActorRef } from '../../common/status-audit/status-audit.types'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
-import { SECTION_REGISTRY, SECTION_BASIC_DETAILS, SECTION_PROFESSIONAL_BASIC_DETAILS, SECTION_FUNDING_ROUND, SECTION_ACQUISITIONS, SECTION_PROFESSIONAL_STATUS, SECTION_COMPANY_STATUS, SectionConfig, isKnownSection } from './change-request.registry'
+import { SECTION_REGISTRY, SECTION_BASIC_DETAILS, SECTION_PROFESSIONAL_BASIC_DETAILS, SECTION_FUNDING_ROUND, SECTION_ACQUISITIONS, SECTION_PROFESSIONAL_STATUS, SECTION_COMPANY_STATUS, SECTION_EVENT_STATUS, SectionConfig, isKnownSection } from './change-request.registry'
 import { findRequestById, markApplied, markApplyStarted, markChangeRequestFieldsPublished } from './change-request.queries'
 import { ApplyChangeRequestResult, ChangeRequestDoc, CHANGE_REQUEST_STATUS } from './change-request.types'
 import { applySectionWrite, SECTION_MODELS } from './change-request.apply.writers'
@@ -12,6 +12,7 @@ import { applyFundingRoundWrite } from '../../modules/funding/funding.service'
 import { applyAcquisitionWrite } from '../../modules/company_acquisitions/company_acquisitions.service'
 import { applyProfessionalStatusWrite, applyProfessionalStatusSideEffects } from '../../modules/professionals/professionals.lifecycle-apply'
 import { applyCompanyStatusWrite, applyCompanyStatusSideEffects } from '../../modules/company_admin/company_admin.lifecycle-apply'
+import { applyEventStatusWrite, applyEventStatusSideEffects } from '../../modules/events/events.lifecycle-apply'
 
 /**
  * Dispatches to the section-specific writer for every section that declared
@@ -34,6 +35,8 @@ async function applyCustomSectionWrite({
       return applyProfessionalStatusWrite({ request, session })
     case SECTION_COMPANY_STATUS:
       return applyCompanyStatusWrite({ request, session })
+    case SECTION_EVENT_STATUS:
+      return applyEventStatusWrite({ request, session })
     default:
       throw new Error(`change-request: no custom writer registered for section '${request.section}'`)
   }
@@ -91,9 +94,18 @@ const APPLIED_MESSAGE = 'Changes published successfully'
 export async function applyChangeRequest({
   changeRequestId,
   actor,
+  fieldKeys,
 }: {
   changeRequestId: number
   actor: ActorRef
+  /**
+   * Field-level selective publish (user-requested, 2026-09-22): when given, only these field
+   * names are published from the request's approved-and-unpublished set, leaving the rest
+   * approved-but-still-unpublished for a later publish. Omitted entirely (undefined) preserves
+   * the original behavior — every approved-and-unpublished field on the request gets published,
+   * unchanged for existing callers (publish_change/:id, publishAllChangeRequests).
+   */
+  fieldKeys?: string[]
 }): Promise<ApplyChangeRequestResult> {
   const request = await findRequestById(changeRequestId)
   if (!request) {
@@ -126,8 +138,21 @@ export async function applyChangeRequest({
   // engaged for it).
   const hasFieldLevelStatuses = (request.changes ?? []).some((c) => c.status !== undefined)
   const usesFieldLevelApproval = Boolean(config.fieldLevelApproval) && request.action === ACTION_UPDATE && hasFieldLevelStatuses
+
+  // CONFIRMED BUG FIX (user-reported, 2026-09-28: publishing an already-approved field failed
+  // with NOT_APPROVED_MESSAGE): the reviewer's checkbox selects by GROUP key when a section
+  // declares `fieldGroups` (e.g. Events' `location` - `ChangeFieldDiffRows.tsx`'s own
+  // `group.key = change.group ?? change.field`), so `fieldKeys` here can legitimately contain
+  // 'location' while every real change entry's own `field` is 'event_venue'/'event_city'/etc -
+  // `fieldKeys.includes(c.field)` never matched, so a selected-and-approved group always looked
+  // unapproved. `approveChangeRequestFields`/`rejectChangeRequestFields` (change-request.approve.ts)
+  // already expand a group key to its member fields via the section's own `fieldGroups` before
+  // matching; publish now does the exact same expansion.
+  const expandedFieldKeys = fieldKeys
+    ? new Set(fieldKeys.flatMap((key) => config.fieldGroups?.[key] ?? [key]))
+    : undefined
   const approvedUnpublished = usesFieldLevelApproval
-    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published)
+    ? (request.changes ?? []).filter((c) => c.status === 'approved' && !c.published && (!expandedFieldKeys || expandedFieldKeys.has(c.field)))
     : []
 
   if (usesFieldLevelApproval) {
@@ -296,6 +321,12 @@ export async function applyChangeRequest({
       await applyCompanyStatusSideEffects({ request: effectiveRequest, actor })
     } catch (err) {
       logger.error({ err, changeRequestId }, 'change-request: company status side effects failed')
+    }
+  } else if (request.section === SECTION_EVENT_STATUS) {
+    try {
+      await applyEventStatusSideEffects({ request: effectiveRequest, actor })
+    } catch (err) {
+      logger.error({ err, changeRequestId }, 'change-request: event status side effects failed')
     }
   }
 

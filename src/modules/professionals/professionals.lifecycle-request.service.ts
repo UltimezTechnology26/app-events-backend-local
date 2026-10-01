@@ -53,7 +53,7 @@ function subadminAccessParams(admin: AdminAuthResult & { status: true }, userRow
 interface SubmitLifecycleActionParams {
   admin: AdminAuthResult & { status: true }
   userRowId: number
-  intendedAction: 'enable' | 'disable' | 'delete'
+  intendedAction: 'enable' | 'disable' | 'delete' | 'approve' | 'reject'
   reasonForDisable?: string
   oldLabel: string
   newLabel: string
@@ -146,6 +146,38 @@ export async function submitDisableUserRequest(admin: AdminAuthResult, userRowId
   }
 
   return submitLifecycleAction({ admin, userRowId, intendedAction: 'disable', reasonForDisable, oldLabel: 'Enabled', newLabel: 'Disabled' })
+}
+
+export async function submitApproveUserRequest(admin: AdminAuthResult, requestRowIdRaw: string) {
+  if (!admin.status) return admin
+  const userRowId = Number.parseInt(requestRowIdRaw)
+  if (Number.isNaN(userRowId)) return { status: false, message: { alert_message: 'Sorry, Invalid Request row id' } }
+
+  const queryRunCheck = await ProfessionalM.findOne({ _id: userRowId })
+  if (!queryRunCheck) return { status: false, message: { alert_message: 'Sorry, invalid request row id' } }
+
+  const checkAccess = await checkUserSubadminAccess(subadminAccessParams(admin, userRowId))
+  if (!checkAccess.status) return { status: false, message: { alert_message: checkAccess.message } }
+
+  if (queryRunCheck.approval_status === 1) {
+    return { status: false, message: { alert_message: 'Sorry, this user cannot be approved' } }
+  }
+
+  return submitLifecycleAction({ admin, userRowId, intendedAction: 'approve', oldLabel: 'Pending', newLabel: 'Approved' })
+}
+
+export async function submitRejectUserRequest(admin: AdminAuthResult, requestRowIdRaw: string, reasonRejected: string) {
+  if (!admin.status) return admin
+  const userRowId = Number.parseInt(requestRowIdRaw)
+  if (Number.isNaN(userRowId)) return { status: false, message: { alert_message: 'Sorry, Invalid Request row id' } }
+
+  const checkAccess = await checkUserSubadminAccess(subadminAccessParams(admin, userRowId))
+  if (!checkAccess.status) return { status: false, message: { alert_message: checkAccess.message } }
+
+  const checkApprovalQuery = await ProfessionalM.findOne({ _id: userRowId, approval_status: 0 })
+  if (!checkApprovalQuery) return { status: false, message: { alert_message: 'Sorry, this user cannot be rejected' } }
+
+  return submitLifecycleAction({ admin, userRowId, intendedAction: 'reject', reasonForDisable: reasonRejected, oldLabel: 'Pending', newLabel: 'Rejected' })
 }
 
 export async function submitDeleteUserRequest(admin: AdminAuthResult, userRowIdRaw: string) {

@@ -1,7 +1,7 @@
 // modules/company_products/company_products.queries.ts
 import { buildPaginatedFacetStages, extractPaginatedResult } from '../common/common.pagination'
 import { buildProfessionalEnrichmentStages } from '../common/common.enrichment'
-import { createCompanyLookupHelpers, separateManualRegisterCompany } from '@ultimez-interview/coinpedia-backend-library/companies'
+import { separateManualRegisterCompany } from '@ultimez-interview/coinpedia-backend-library/companies'
 
 interface CountryDetailEntry {
   country_id?: number
@@ -451,6 +451,15 @@ interface CompanyListItem {
   company_id?: string
   company_email_id?: string
   company_logo?: string
+  description?: string
+  location?: string
+  location_flag?: string
+  category?: string
+  // Registered companies only - a company can belong to several extra
+  // categories beyond its primary one (business_model_id, an array field -
+  // see company.list.ts's own identical, un-unwound $lookup, which is what
+  // the public /companies/ page's own "+N" tag overflow reads from).
+  extra_categories?: string[]
 }
 
 interface OwnCompaniesListRawRow {
@@ -470,13 +479,124 @@ interface OwnCompaniesListItem {
   company_id?: string
   company_email_id?: string
   company_logo?: string
+  // Resolved from companyM's own country_id (via cln_static_countries) -
+  // registered companies only, a manually-added one has no location field
+  // at all (see company_manual_retrievalsM's own schema).
+  location?: string
+  location_flag?: string
+  // Registered companies only (describe_in_one_line - see companyM's own
+  // schema, company_manual_retrievalsM has no equivalent field).
+  description?: string
+  // Resolved from main_business_model_id (via
+  // cln_static_company_business_models) - present on both registered and
+  // manually-added companies.
+  category?: string
+  // See CompanyListItem's own comment - registered companies only.
+  extra_categories?: string[]
+}
+
+// createCompanyLookupHelpers' own getCompanyList/getManualCompanyList
+// (the shared coinpedia-backend-library helper) don't project
+// location/category - these two do the same _id-in lookup directly
+// against the real models, joined to the same static lookup collections
+// company.compare.ts's own business-model/country $lookups already use,
+// so the admin Owning Companies table can show a real location/category
+// per row instead of just name+logo.
+async function getCompanyListWithLocationAndCategory(companyIds: number[]): Promise<CompanyListItem[]> {
+  if (!companyIds?.length) return []
+  const companyM = require('../../../models/app/company/companyM')
+  return companyM.aggregate([
+    // Same active_status:1 gate getCompanySuggestions (services/app/settings.ts)
+    // already applies when searching for a company to add - a company disabled
+    // after being linked as an Owning Company was still resolving here (no
+    // status filter at all), so getOwnCompaniesList's own `if (company_details)`
+    // push never had a reason to skip it. Filtering it out of this lookup makes
+    // that existing guard do the skipping for free.
+    { $match: { _id: { $in: companyIds }, active_status: 1 } },
+    {
+      $lookup: {
+        from: 'cln_static_countries',
+        localField: 'country_id',
+        foreignField: '_id',
+        as: 'country_info',
+        pipeline: [{ $project: { _id: 1, country_name: 1, country_flag: 1 } }],
+      },
+    },
+    { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'cln_static_company_business_models',
+        localField: 'main_business_model_id',
+        foreignField: '_id',
+        as: 'business_info',
+        pipeline: [{ $project: { _id: 1, business_name: 1 } }],
+      },
+    },
+    { $unwind: { path: '$business_info', preserveNullAndEmptyArrays: true } },
+    // Not unwound - business_model_id is an array field (extra categories
+    // beyond the primary one), same shape company.list.ts's own identical
+    // lookup leaves as an array for the public page's own "+N" tag list.
+    {
+      $lookup: {
+        from: 'cln_static_company_business_models',
+        localField: 'business_model_id',
+        foreignField: '_id',
+        as: 'extra_business_info',
+        pipeline: [{ $project: { _id: 1, business_name: 1 } }],
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        approval_status: 1,
+        company_name: 1,
+        company_id: 1,
+        company_email_id: 1,
+        company_logo: 1,
+        description: '$describe_in_one_line',
+        location: '$country_info.country_name',
+        location_flag: '$country_info.country_flag',
+        category: '$business_info.business_name',
+        extra_categories: {
+          $filter: {
+            input: '$extra_business_info.business_name',
+            cond: { $ne: ['$$this', '$business_info.business_name'] },
+          },
+        },
+      },
+    },
+  ])
+}
+
+async function getManualCompanyListWithCategory(companyIds: number[]): Promise<CompanyListItem[]> {
+  if (!companyIds?.length) return []
+  const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
+  return company_manual_retrievalsM.aggregate([
+    { $match: { _id: { $in: companyIds } } },
+    {
+      $lookup: {
+        from: 'cln_static_company_business_models',
+        localField: 'main_business_model_id',
+        foreignField: '_id',
+        as: 'business_info',
+        pipeline: [{ $project: { _id: 1, business_name: 1 } }],
+      },
+    },
+    { $unwind: { path: '$business_info', preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        _id: 1,
+        company_name: 1,
+        company_email_id: 1,
+        company_logo: 1,
+        category: '$business_info.business_name',
+      },
+    },
+  ])
 }
 
 export async function getOwnCompaniesList(params: { product_type: number; product_row_id: number }): Promise<OwnCompaniesListItem[]> {
   const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
-  const companyM = require('../../../models/app/company/companyM')
-  const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
-  const { getCompanyList, getManualCompanyList } = createCompanyLookupHelpers(companyM, company_manual_retrievalsM)
   const { product_type, product_row_id } = params
 
   const get_query: OwnCompaniesListRawRow[] = await company_productsM.aggregate([
@@ -486,8 +606,8 @@ export async function getOwnCompaniesList(params: { product_type: number; produc
   ])
 
   const { manual_array, register_array } = await separateManualRegisterCompany(get_query, 'company_row_id')
-  const company_list: CompanyListItem[] = await getCompanyList(register_array as number[])
-  const manual_list: CompanyListItem[] = await getManualCompanyList(manual_array as number[])
+  const company_list: CompanyListItem[] = await getCompanyListWithLocationAndCategory(register_array as number[])
+  const manual_list: CompanyListItem[] = await getManualCompanyListWithCategory(manual_array as number[])
 
   const result: OwnCompaniesListItem[] = []
   for (const run of get_query) {
@@ -508,7 +628,12 @@ export async function getOwnCompaniesList(params: { product_type: number; produc
         company_name: company_details.company_name,
         company_id: company_details.company_id,
         company_email_id: company_details.company_email_id,
-        company_logo: company_details.company_logo
+        company_logo: company_details.company_logo,
+        description: company_details.description,
+        location: company_details.location,
+        location_flag: company_details.location_flag,
+        category: company_details.category,
+        extra_categories: company_details.extra_categories
       })
     }
   }

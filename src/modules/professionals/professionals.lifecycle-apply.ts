@@ -19,6 +19,8 @@ import logger from '../../../config/logger'
 
 const { sendEmail } = require('../../../config/email')
 const { deleteUserDetais } = require('../../../utils/helpers/app_helper')
+const { updateNotification } = require('../../../utils/helpers/notification_helper')
+const { getPresentDateTime } = require('../../../utils/helpers/helper')
 const companyM = require('../../../models/app/company/companyM')
 const eventM = require('../../../models/app/events/eventM')
 const userPodcastsM = require('../../../models/app/podcast/userPodcastsM')
@@ -27,6 +29,11 @@ const companyPodcastsM = require('../../../models/app/podcast/companyPodcastsM')
 const INTENDED_ENABLE = 'enable'
 const INTENDED_DISABLE = 'disable'
 const INTENDED_DELETE = 'delete'
+const INTENDED_APPROVE = 'approve'
+const INTENDED_REJECT = 'reject'
+const NOTIFY_TYPE_ACCOUNT_STATUS = 1
+const NOTIFY_MESSAGE_ROW_APPROVE = 4
+const NOTIFY_MESSAGE_ROW_REJECT = 5
 
 function trackerFrom(actor: ActorRef) {
   return { updated_by: actor.type, updated_by_row_id: actor.id }
@@ -78,6 +85,21 @@ export async function applyProfessionalStatusWrite({ request, session: rawSessio
     return { appliedFieldCount: 1 }
   }
 
+  if (intendedAction === INTENDED_APPROVE) {
+    await ProfessionalM.updateOne({ _id: userRowId }, { $set: { approval_status: 1, updated_date_n_time: new Date() } }, { session })
+    return { appliedFieldCount: 1 }
+  }
+
+  if (intendedAction === INTENDED_REJECT) {
+    const reasonRejected = (request.payload ?? {})['reason_for_disable']
+    await ProfessionalM.updateOne(
+      { _id: userRowId },
+      { $set: { approval_status: 2, reason_rejected: reasonRejected, rejected_date_n_time: getPresentDateTime() } },
+      { session },
+    )
+    return { appliedFieldCount: 1 }
+  }
+
   // Delete: nothing to write inside the transaction — see applyProfessionalStatusSideEffects.
   return { appliedFieldCount: 1 }
 }
@@ -118,6 +140,36 @@ export async function applyProfessionalStatusSideEffects({ request, actor }: { r
              <p style="color:#000;font-weight: 400;font-size:17px;">DO NOT REPLY TO THIS EMAIL. </p>
          </div>`,
       )
+      return
+    }
+
+    if (intendedAction === INTENDED_APPROVE) {
+      await recordProfessionalStatusChange({ documentId: userRowId, action: 'approve', tracker, adminRowId: actor.id })
+      await sendEmail(
+        professional.email_id,
+        'Your Coinpedia User Account is Approved',
+        `<p style="margin: 24px 0;font-weight: 500;font-size:22px;text-transform: capitalize;color:#000;">Hello ${professional.full_name},</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;">We are delighted to inform you that your user profile has been reviewed and approved by our admin.</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;">You are now able to access all the features of Coinpedia to manage your account, create and list your event, add wallet to track your portfolio, gain insights from the Crypto experts, learn from scratch the crypto industry, and stay updated with Coinpedia's latest news on Fintech and Crypto.</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;">Get started with your account by logging in.</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;"><a href="https://app.coinpedia.org/login/" style="color: #0029ff;font-weight: 400;">Login Here</a></p>`,
+      )
+      await updateNotification({ user_row_id: userRowId, notify_type: NOTIFY_TYPE_ACCOUNT_STATUS, notify_type_row_id: 0, message_row_id: NOTIFY_MESSAGE_ROW_APPROVE, action_row_id: userRowId })
+      return
+    }
+
+    if (intendedAction === INTENDED_REJECT) {
+      const reasonRejected = String((request.payload ?? {})['reason_for_disable'] ?? '')
+      await recordProfessionalStatusChange({ documentId: userRowId, action: 'reject', tracker, adminRowId: actor.id, reason: reasonRejected })
+      await sendEmail(
+        professional.email_id,
+        'CoinPedia User Profile Request Denied ',
+        `<p style="margin: 24px 0;font-weight: 500;font-size:22px;text-transform: capitalize;color:#000;">Dear ${professional.full_name},</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;">We regret to inform you that your CoinPedia user account application has been denied.</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;"><b>Reject Reason : </b>${reasonRejected}</p>
+         <p style="color:#000;font-weight: 400;font-size:17px;">Your interest is appreciated, and we invite you to <a href="https://app.coinpedia.org/login/" style="color: #0029ff;font-weight: 400;">Register<a> to CoinPedia for more information!</p>`,
+      )
+      await updateNotification({ user_row_id: userRowId, notify_type: NOTIFY_TYPE_ACCOUNT_STATUS, notify_type_row_id: 0, message_row_id: NOTIFY_MESSAGE_ROW_REJECT, action_row_id: userRowId })
       return
     }
 

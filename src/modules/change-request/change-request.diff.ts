@@ -216,13 +216,27 @@ export async function computeDiff({
     }
 
     const resolver = labelResolvers[field]
+    const oldLabel = resolver ? await resolver(before[field], before) : null
+    const newLabel = resolver ? await resolver(submitted[field], submitted) : null
     changes.push({
       field,
       field_label: fieldLabels[field] ?? null,
-      old_value: before[field] ?? null,
-      old_label: resolver ? await resolver(before[field], before) : null,
-      new_value: submitted[field] ?? null,
-      new_label: resolver ? await resolver(submitted[field], submitted) : null,
+      // CONFIRMED BUG FIX (user-requested, 2026-09-28, reported for an Events Basic Details
+      // field): a resolver-backed field whose raw value is the shared "unset" foreign-key
+      // sentinel (0, or NaN for an absent value) has no real label to resolve - every resolver in
+      // this codebase (change-request.common-resolvers.ts) returns null for exactly that reason -
+      // but the raw bare number "0" still fell through to the reviewer's diff as if it meant
+      // something (previously: `old_value: before[field] ?? null` keeps 0 as-is, since `??` only
+      // replaces null/undefined). The frontend's own DiffRow falls back to the raw value whenever
+      // no label exists (ChangeFieldDiffRows.tsx), so that "0" then rendered literally instead of
+      // "-". Nulls the raw value out too in exactly this one case - a resolver exists, it found
+      // nothing, AND the raw id is falsy - so the frontend's existing blank-value handling shows
+      // "-" instead. A resolver that fails to match a genuinely non-zero id (a deleted lookup row)
+      // is untouched: the raw id still shows, unchanged from before.
+      old_value: resolver !== undefined && oldLabel === null && !Number(before[field]) ? null : before[field] ?? null,
+      old_label: oldLabel,
+      new_value: resolver !== undefined && newLabel === null && !Number(submitted[field]) ? null : submitted[field] ?? null,
+      new_label: newLabel,
       status: 'pending',
       group: fieldToGroup[field] ?? null,
     })

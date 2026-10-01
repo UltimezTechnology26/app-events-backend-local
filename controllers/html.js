@@ -153,16 +153,16 @@ const htmlCode = `<html>
                 <p style="font-size:16px; margin:0 0 10px 0; font-weight:bold; font-family: 'Figtree', sans-serif !important;">Follow us</p>
                 <div style="margin-bottom:20px;">
                     <a href="https://coinpedia.org/feed/"><img src="https://image.coinpedia.org/static/common/bg-rss-feed.png" style="width:24px; margin:0 5px;" alt="RSS"></a>
-                    <a href="https://www.facebook.com/Coinpedia.org/"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
-                    <a href="https://x.com/Coinpedianews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
-                    <a href="https://in.pinterest.com/coinpedianews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
-                    <a href="https://in.linkedin.com/company/coinpedia"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
-                    
+                    <a href="https://www.facebook.com/Coinpedia.org"><img src="https://image.coinpedia.org/static/common/bg-facebook.png" style="width:24px; margin:0 5px;" alt="Facebook"></a>
+                    <a href="https://x.com/CoinpediaNews"><img src="https://image.coinpedia.org/static/common/bg-x.png" style="width:24px; margin:0 5px;" alt="X"></a>
+                    <a href="https://in.pinterest.com/CoinpediaNews/"><img src="https://image.coinpedia.org/static/common/bg-pinterest.png" style="width:24px; margin:0 5px;" alt="Pinterest"></a>
+                    <a href="https://www.linkedin.com/in/coinpedia/"><img src="https://image.coinpedia.org/static/common/bg-linkedin.png" style="width:24px; margin:0 5px;" alt="LinkedIn"></a>
+                    <a href="https://www.instagram.com/coinpediamemes/"><img src="https://image.coinpedia.org/static/common/bg-instagram.png" style="width:24px; margin:0 5px;" alt="Instagram"></a>
                     <a href="https://t.me/CoinpediaMarket"><img src="https://image.coinpedia.org/static/common/bg-telegram.png" style="width:24px; margin:0 5px;" alt="Telegram"></a>
                     <a href="https://coinpediasfintechnews.medium.com/"><img src="https://image.coinpedia.org/static/common/bg-medium.png" style="width:24px; margin:0 5px;" alt="Medium"></a>
                     <a href="https://www.quora.com/profile/Coinpedia-Fintech-News"><img src="https://image.coinpedia.org/static/common/bg-quora.png" style="width:24px; margin:0 5px;" alt="Quora"></a>
                     <a href="https://steemit.com/@coinpediacrypto"><img src="https://image.coinpedia.org/static/common/bg-steemit.png" style="width:24px; margin:0 5px;" alt="Steemit"></a>
-                    <a href="https://coinpedian.substack.com/"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
+                    <a href="https://substack.com/@coinpedian"><img src="https://image.coinpedia.org/static/common/bg-substack.png" style="width:24px; margin:0 5px;" alt="Substack"></a>
                     <a href="https://gettr.com/user/coinpediafintechnews"><img src="https://image.coinpedia.org/static/common/bg-gettr.png" style="width:24px; margin:0 5px;" alt="Gettr"></a>
                 </div>
 

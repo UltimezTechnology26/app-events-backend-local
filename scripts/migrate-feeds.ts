@@ -14,14 +14,18 @@
 //
 // Usage: npx ts-node scripts/migrate-feeds.ts [--dry-run]
 //
-// Requires: the BigQuery credentials file already present in this repo's root
-// (for-ga4-bitquery-new-e971719171c1.json, same one migrate-sources-urls.ts uses) and
-// LIVE_MAIN_DB_URL in .env pointing at the target MongoDB.
+// Requires: GOOGLE_CLOUD_PROJECT_ID in .env (project differs per environment - dev/staging/prod
+// each have their own), the BigQuery credentials file already present in this repo's root
+// (same one migrate-sources-urls.ts uses, gitignored - see .gitignore's `for-ga4-bitquery-*.json`
+// pattern), and LIVE_MAIN_DB_URL in .env pointing at the target MongoDB.
 import path from 'path'
 import { BigQuery } from '@google-cloud/bigquery'
 import type mongooseType from 'mongoose'
 
-const PROJECT_ID = 'for-ga4-bitquery-new'
+if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+  throw new Error('GOOGLE_CLOUD_PROJECT_ID is not configured - required to run this migration script')
+}
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID
 const DATASET = 'qd_cp_app_events'
 const KEY_FILE = path.join(__dirname, '..', 'for-ga4-bitquery-new-e971719171c1.json')
 

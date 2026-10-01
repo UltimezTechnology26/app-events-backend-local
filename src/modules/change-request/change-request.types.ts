@@ -74,6 +74,11 @@ export interface ApprovedChangeSummary {
   changes: FieldChange[]
   // See PendingChangeSummary's own comment on why 'delete' needs this field.
   action: ChangeRequestAction
+  // Field-level approval only (see PendingChangeSummary's own comment) - lets the Approved
+  // Changes queue distinguish "every field resolved (published)" from "still has more approved
+  // fields waiting to be published, or some fields still pending review" (user-requested Approved
+  // Changes queue, 2026-09-22).
+  derived_status?: 'pending' | 'partially_completed' | 'resolved'
 }
 
 export interface RejectedChangeSummary {

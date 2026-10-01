@@ -34,6 +34,7 @@ import { getUsersPages, getPublicStatusList, createNewUser, updateUser } from '.
 // 2026-09-20) instead of writing live immediately — see professionals.lifecycle-request.service.ts.
 import { submitEnableUserRequest, submitDisableUserRequest } from './professionals.lifecycle-request.service'
 import { getProfessionalDetail, getProfessionalDetailBySlug } from './professionals.detail.service'
+import { checkProfessionalNameForDuplicates } from './professionals.duplicate-check'
 import { AdminAuthFailure } from './professionals.types'
 
 export const professionalsRouter: Router = express.Router()
@@ -163,6 +164,26 @@ professionalsRouter.get(
     const guard = requireProfessionalsAdmin(req)
     if (guard) return res.json(guard)
     res.json(await getProfessionalDetailBySlug(req.params.user_name as string))
+  }),
+)
+
+/**
+ * Advisory-only duplicate-name check for the admin "Create New Professional" form (user-requested,
+ * 2026-09-22) - mirrors company_admin.controller.ts's own '/check_company_name' exactly, never
+ * restricts creation, only surfaces exact/similar existing professionals so the admin can make an
+ * informed call. `exclude_user_row_id` lets the same check run harmlessly while editing an
+ * existing professional's own name without it matching itself.
+ */
+professionalsRouter.get(
+  '/check_professional_name',
+  asyncRoute('Check professional name for duplicates.', async (req, res) => {
+    const guard = requireProfessionalsAdmin(req)
+    if (guard) return res.json(guard)
+
+    const name = typeof req.query.name === 'string' ? req.query.name : ''
+    const excludeUserRowId = typeof req.query.exclude_user_row_id === 'string' ? Number.parseInt(req.query.exclude_user_row_id) : undefined
+    const result = await checkProfessionalNameForDuplicates(name, Number.isNaN(excludeUserRowId as number) ? undefined : excludeUserRowId)
+    res.json({ status: true, message: result })
   }),
 )
 

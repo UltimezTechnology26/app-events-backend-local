@@ -150,6 +150,29 @@ router.use('/funding_investor_types_v2', fundingInvestorTypesRouter)
 router.use('/dashboard', dashboard)
 router.use('/event', admin_event)
 
+// modules/events/events.controller.ts's eventsRouter — ports event.js's GET
+// /list/:active_status/:skip/:limit (line 6439) out of the legacy admin Events controller.
+// Mounted at a temporary '/event_v2' prefix to avoid colliding with the still-live legacy '/event'
+// mount above until this port is verified over real traffic and the cutover is explicitly
+// confirmed (remaining routes in this module's scope are ported in follow-up slices).
+const { eventsRouter } = require('../src/modules/events/events.controller')
+router.use('/event_v2', eventsRouter)
+const { eventsOrganisersRouter } = require('../src/modules/events-organisers/events-organisers.controller')
+router.use('/event_v2', eventsOrganisersRouter)
+const { eventsSpeakersRouter } = require('../src/modules/events-speakers/events-speakers.controller')
+router.use('/event_v2', eventsSpeakersRouter)
+const { eventsLocationRouter } = require('../src/modules/events-location/events-location.controller')
+router.use('/event_v2', eventsLocationRouter)
+const { eventsSeoRouter } = require('../src/modules/events-seo/events-seo.controller')
+router.use('/event_v2', eventsSeoRouter)
+const { eventsOverviewRouter } = require('../src/modules/events-overview/events-overview.controller')
+router.use('/event_v2', eventsOverviewRouter)
+// modules/events-change-approvals/events.change-approvals.controller.ts's eventsChangeApprovalsRouter
+// - change-request approve/reject/publish review routes for Events, mirroring
+// professionals.approvals.controller.ts's own '/professionals_change_approvals_v2' mount below.
+const { eventsChangeApprovalsRouter } = require('../src/modules/events-change-approvals/events.change-approvals.controller')
+router.use('/events_change_approvals_v2', eventsChangeApprovalsRouter)
+
 router.use('/event_tags', category_tag_event_tags)
 router.use('/experience_level', category_tag_experience_level)
 router.use('/funding_rounds', category_funding_rounds)

@@ -1,6 +1,18 @@
 // modules/company_admin/company_admin.list.service.ts
 const companyM = require('../../../models/app/company/companyM')
 import { buildCompanyListMatchQuery, buildCompanyListPipeline, extractCompanyListResult } from './company_admin.list.queries'
+import { getViewCounts30d } from '../view-counts-30d/view-counts-30d.service'
+
+/**
+ * Merges real `view_count_30d` onto each row from BigQuery GA4 data (user-requested, 2026-09-22) -
+ * replaces the previous MongoDB `view_counts` column shown on the Disabled list (confirmed
+ * incorrect/stale per the user) and adds the same real column to the main Companies list.
+ */
+async function withCompanyViewCounts30d<T extends { company_id?: string }>(rows: T[]): Promise<(T & { view_count_30d: number })[]> {
+  const companyIds = rows.map((row) => row.company_id).filter((id): id is string => Boolean(id))
+  const counts = companyIds.length > 0 ? await getViewCounts30d('company', companyIds) : {}
+  return rows.map((row) => ({ ...row, view_count_30d: row.company_id ? (counts[row.company_id.toLowerCase()] ?? 0) : 0 }))
+}
 
 export interface GetCompanyListParams {
   activeStatus: number
@@ -82,5 +94,5 @@ export async function getCompanyList({
   const aggregateOutput = await companyM.aggregate(buildCompanyListPipeline({ matchQuery, categoryStatus, partnerStatus, skip, limit, sortBy }))
   const { data, count } = extractCompanyListResult(aggregateOutput)
 
-  return { status: true, message: data, count, start_date, end_date }
+  return { status: true, message: await withCompanyViewCounts30d(data), count, start_date, end_date }
 }

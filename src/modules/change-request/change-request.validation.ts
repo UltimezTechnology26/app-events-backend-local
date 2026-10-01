@@ -2,6 +2,7 @@ const DECIMAL_RADIX = 10
 const INVALID_REQUEST_ID_MESSAGE = 'Sorry, Invalid change request id'
 const INVALID_COMPANY_ID_MESSAGE = 'Sorry, Invalid Company row id'
 const INVALID_USER_ID_MESSAGE = 'Sorry, Invalid User Row ID'
+const INVALID_EVENT_ID_MESSAGE = 'Sorry, Invalid Event row id'
 const REASON_REQUIRED_MESSAGE = 'The Reason field is required'
 const PUBLISH_FORBIDDEN_MESSAGE = 'Sorry, you do not have permission to approve, reject, or publish changes'
 const RATING_MIN = 1
@@ -13,6 +14,7 @@ export const CHANGE_REQUEST_MESSAGES = {
   INVALID_REQUEST_ID: INVALID_REQUEST_ID_MESSAGE,
   INVALID_COMPANY_ID: INVALID_COMPANY_ID_MESSAGE,
   INVALID_USER_ID: INVALID_USER_ID_MESSAGE,
+  INVALID_EVENT_ID: INVALID_EVENT_ID_MESSAGE,
   REASON_REQUIRED: REASON_REQUIRED_MESSAGE,
   PUBLISH_FORBIDDEN: PUBLISH_FORBIDDEN_MESSAGE,
   NOTE_REQUIRED: NOTE_REQUIRED_MESSAGE,
@@ -21,17 +23,6 @@ export const CHANGE_REQUEST_MESSAGES = {
 
 /** admin_manager_type 1 is a main admin; 2 is a sub-admin. */
 export const ADMIN_MANAGER_TYPE_MAIN = 1
-const ADMIN_MANAGER_TYPE_SUB = 2
-
-/**
- * sub_admin_type ground truth (confirmed against the legacy admin panel's own dropdown, and the
- * already-fixed `frontend-appcp-typescript` SUB_ADMIN_TYPE enum): 1 = Marketing Team - Restricted
- * Access, 2 = Developer Team, 3 = Marketing Team - Full Access. Only Developer and Marketing Full
- * may approve/reject/publish change requests - Marketing Restricted can still create/edit/enable/
- * disable companies and professionals like every other sub-admin type, just not this maker-checker
- * step (user-requested, 2026-09-22).
- */
-const APPROVER_SUB_ADMIN_TYPES = [2, 3]
 
 export interface NumericIdValidation {
   valid: boolean
@@ -55,21 +46,25 @@ export const validateCompanyRowId = (raw: string | undefined): NumericIdValidati
 export const validateUserRowId = (raw: string | undefined): NumericIdValidation =>
   parseId(raw, INVALID_USER_ID_MESSAGE)
 
+export const validateEventRowId = (raw: string | undefined): NumericIdValidation =>
+  parseId(raw, INVALID_EVENT_ID_MESSAGE)
+
 export const isMainAdmin = (adminManagerType: unknown): boolean =>
   Number(adminManagerType) === ADMIN_MANAGER_TYPE_MAIN
 
 /**
  * Maker-checker gate for approve/reject/publish (and their field-level and publish-all variants)
- * on change requests, shared by both the Company and Professionals modules. A main admin always
- * passes; a sub-admin passes only if their `sub_admin_type` is Developer or Marketing Full - never
- * Marketing Restricted, and never based on any dynamic `create_type_row_id` grant (that access
- * model is unrelated to this specific maker-checker decision).
+ * on change requests, shared by both the Company and Professionals modules.
+ *
+ * REVERTED (user-requested, 2026-09-22): this briefly also allowed a Developer or Marketing-Full
+ * sub-admin to approve/reject/publish, alongside the main admin. Per explicit follow-up request,
+ * that's reverted - only the main admin may approve, reject, or publish a change request; every
+ * sub-admin type is excluded from this specific maker-checker step (they can still create/edit/
+ * enable/disable companies and professionals like before, just never approve their own or anyone
+ * else's changes).
  */
-export const canApproveChangeRequests = (adminManagerType: unknown, subAdminType: unknown): boolean => {
-  if (isMainAdmin(adminManagerType)) return true
-  if (Number(adminManagerType) !== ADMIN_MANAGER_TYPE_SUB) return false
-  return APPROVER_SUB_ADMIN_TYPES.includes(Number(subAdminType))
-}
+export const canApproveChangeRequests = (adminManagerType: unknown, _subAdminType?: unknown): boolean =>
+  isMainAdmin(adminManagerType)
 
 export interface RatingValidation {
   valid: boolean

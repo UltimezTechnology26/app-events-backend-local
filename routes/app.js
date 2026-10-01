@@ -133,6 +133,16 @@ router.use('/feedback_v2', professionalsFeedbackRouter)
 router.use('/ticket', event_ticket)
 router.use('/coupon', event_coupon)
 router.use('/event', user_event)
+
+// modules/events/events.app.controller.ts's eventsAppRouter — ports events_listed.js's POST
+// /submit_event out of the legacy app-side Events controller. Mounted at a temporary '/event_v2'
+// prefix to avoid colliding with the still-live legacy '/event' mount above until this port is
+// verified over real traffic and the cutover is explicitly confirmed.
+const { eventsAppRouter } = require('../src/modules/events/events.app.controller')
+router.use('/event_v2', eventsAppRouter)
+const { eventsTagsRouter } = require('../src/modules/events-tags/events-tags.controller')
+router.use('/event_v2', eventsTagsRouter)
+
 router.use('/front_event', front_page_events)
 router.use('/funding', fundingRouter)
 router.use('/company_acquisitions', companyAcquisitionsRouter)

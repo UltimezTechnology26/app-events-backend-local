@@ -19,6 +19,10 @@ const { getCache, setCache, deleteKeysByPattern } = require('../../../config/cac
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
+const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../../src/modules/change-request/change-request.child.service')
+const { AUDIT_MODULE_EVENTS } = require('../../../src/common/status-audit/status-audit.registry')
+const { SECTION_EVENT_TICKET } = require('../../../src/modules/change-request/change-request.registry')
+const { isAdminPanelActor, buildEventChangeRequestActor } = require('../../../src/modules/events/events.change-request-actor')
 
 /**
  * Extracted nested `cln_professionals_work_experiences` sub-pipeline for the
@@ -204,6 +208,23 @@ router.post('/create_edit_ticket', [
                 insertArr['price'] = price
                 insertArr['updated_date_n_time'] = getPresentDateTime()
                 insertArr['sell_status'] = Number.parseInt(req.body.sell_status) === 1 ? 1 : 0
+
+                // Publish gate applies to admin-panel edits only (design §2, same shape as every
+                // other Events section) - the event's own host keeps writing live immediately via
+                // the branches below, unchanged (2026-09-25 user decision).
+                if (isAdminPanelActor(checkUserToken)) {
+                    const liveValues = ticket_row_id ? ((await ticketM.findOne({ _id: ticket_row_id }).lean()) ?? {}) : {}
+                    const result = await submitChildChangeRequest({
+                        module: AUDIT_MODULE_EVENTS,
+                        section: SECTION_EVENT_TICKET,
+                        rootDocumentId: event_row_id,
+                        targetRowId: ticket_row_id ? Number(ticket_row_id) : null,
+                        liveValues,
+                        submitted: insertArr,
+                        actor: buildEventChangeRequestActor(checkUserToken),
+                    })
+                    return res.json(result)
+                }
 
                 let alert_message = ""
                 if (ticket_row_id) {
@@ -428,7 +449,7 @@ router.get('/delete_ticket/:ticket_row_id', async (req, res) => {
                 errObj['ticket_row_id'] = "Invalid Ticket Row ID."
             }
             else {
-                const checkTicket = await ticketM.findOne({ _id: ticket_row_id }, { _id: 1, event_row_id: 1 })
+                const checkTicket = await ticketM.findOne({ _id: ticket_row_id })
                 event_row_id = checkTicket.event_row_id
                 if (!checkTicket) {
                     errObj['ticket_row_id'] = "Invalid Ticket Row ID."
@@ -463,7 +484,25 @@ router.get('/delete_ticket/:ticket_row_id', async (req, res) => {
                 }
             }
 
-            if (!Object.keys(errObj).length) {
+            // Publish gate applies to admin-panel edits only (design §2, same shape as every
+            // other Events section) - the event's own host keeps deleting live immediately
+            // below, unchanged. CONFIRMED BUG FIX (user-reported, 2026-09-28): this route's own
+            // sibling create/update route already stages admin-panel edits via
+            // submitChildChangeRequest, but delete was never wired to submitChildDeleteRequest
+            // (imported here now, previously unused) - an admin's ticket delete applied instantly
+            // with no review step at all.
+            if (!Object.keys(errObj).length && isAdminPanelActor(checkUserToken)) {
+                const result = await submitChildDeleteRequest({
+                    module: AUDIT_MODULE_EVENTS,
+                    section: SECTION_EVENT_TICKET,
+                    rootDocumentId: event_row_id,
+                    targetRowId: ticket_row_id,
+                    rowSnapshot: checkTicket.toObject ? checkTicket.toObject() : checkTicket,
+                    actor: buildEventChangeRequestActor(checkUserToken),
+                })
+                return res.json(result)
+            }
+            else if (!Object.keys(errObj).length) {
 
                 deleteTickets({ type: 1, event_row_id: event_row_id, ticket_row_id: ticket_row_id })
                 await deleteKeysByPattern('ticket_list_*')

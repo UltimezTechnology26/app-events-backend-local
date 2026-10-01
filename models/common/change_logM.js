@@ -97,6 +97,12 @@ const saveSchema = mongoose.Schema({
         type: String,
         default: null
     },
+    // The reviewer's star rating (1-10) from the same approve action that produced this log entry -
+    // see status-audit.queries.ts's ChangeLogInput.rating doc comment.
+    rating: {
+        type: Number,
+        default: null
+    },
     // Required on delete (the only surviving record of the row); optional elsewhere.
     snapshot: {
         type: mongoose.Schema.Types.Mixed,

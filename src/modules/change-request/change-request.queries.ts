@@ -215,6 +215,46 @@ export async function findRejectedRequestsPaginated({
   return { data: facetResult.data, count: facetResult.totalCount[0]?.count ?? 0 }
 }
 
+/**
+ * Global cross-entity queue: every APPROVED-but-not-yet-published request for a module, across
+ * every root document — same shape as findPendingRequestsPaginated/findRejectedRequestsPaginated
+ * above (user-requested Approved Changes queue, 2026-09-22). Same field-level `$or` fallback as
+ * findApprovedRequestsForEntity above: a field-level request never flips its own top-level
+ * `status` to APPROVED, so it's matched here via `changes[].status === 'approved' && !published`
+ * instead, alongside every whole-request-APPROVED request from other sections.
+ */
+export async function findApprovedRequestsPaginated({
+  module,
+  skip,
+  limit,
+}: {
+  module: string
+  skip: number
+  limit: number
+}): Promise<{ data: (ChangeRequestDoc & { reviewed_by: ActorRef | null; reviewed_at: Date | null })[]; count: number }> {
+  const aggregateOutput = await change_requestM.aggregate([
+    {
+      $match: {
+        module,
+        $or: [
+          { status: CHANGE_REQUEST_STATUS.APPROVED },
+          { changes: { $elemMatch: { status: 'approved', published: { $ne: true } } } },
+        ],
+      },
+    },
+    { $sort: { requested_at: -1 } },
+    {
+      $facet: {
+        data: [{ $skip: skip }, { $limit: limit }, { $project: APPROVED_REQUEST_PROJECTION }],
+        totalCount: [{ $count: 'count' }],
+      },
+    },
+  ])
+
+  const facetResult = aggregateOutput[0] || { data: [], totalCount: [] }
+  return { data: facetResult.data, count: facetResult.totalCount[0]?.count ?? 0 }
+}
+
 /** `create()` triggers the model's pre('save') hook, which assigns the numeric _id. */
 export async function insertChangeRequest(doc: ChangeRequestInput): Promise<number> {
   const created = await change_requestM.create({ ...doc, status: CHANGE_REQUEST_STATUS.PENDING })
@@ -375,13 +415,17 @@ async function updateFieldStatuses(params: FieldActionParams, perFieldSet: Parti
 export async function approveChangeRequestFields(
   params: FieldActionParams & { rating: number; note?: string }
 ): Promise<void> {
-  await updateFieldStatuses(params, { status: 'approved', rating: params.rating, reject_reason: null })
+  // CONFIRMED BUG FIX (user-reported, 2026-09-28): the reviewer's note was accepted here but
+  // never stamped onto the field(s) it was written for - only rating was, so a field-level
+  // approval's note existed nowhere the field itself could show it. Mirrors rating's own handling
+  // exactly (same note applies to every field this one approve action touches).
+  await updateFieldStatuses(params, { status: 'approved', rating: params.rating, note: params.note ?? null, reject_reason: null })
 }
 
 export async function rejectChangeRequestFields(
   params: FieldActionParams & { reason: string }
 ): Promise<void> {
-  await updateFieldStatuses(params, { status: 'rejected', reject_reason: params.reason, rating: null })
+  await updateFieldStatuses(params, { status: 'rejected', reject_reason: params.reason, rating: null, note: null })
 }
 
 /**

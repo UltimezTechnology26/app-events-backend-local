@@ -4,7 +4,8 @@ const { check, validationResult } = require('express-validator')
 const { checkAdminLoginToken, requireAdminAccess } = require('../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
-import { getCompaniesList, approveCompanyRequest, rejectCompanyRequest, deleteCompanyRequest, getDeletedCompaniesList, getGlobalPendingChangeRequests, getGlobalRejectedChangeRequests } from './company_admin.approvals.service'
+import { getCompaniesList, getDeletedCompaniesList, getGlobalPendingChangeRequests, getGlobalRejectedChangeRequests, getGlobalApprovedChangeRequests } from './company_admin.approvals.service'
+import { submitApproveCompanyRequest, submitRejectCompanyRequest, submitDeleteCompanyRequest } from './company_admin.lifecycle-request.service'
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { getEntityAudit } from '../../common/status-audit/status-audit.service'
 import { validateAuditRequest } from '../../common/status-audit/status-audit.validation'
@@ -63,7 +64,7 @@ companyAdminApprovalsRouter.get('/approve_request/:request_row_id', writeEndpoin
     return
   }
 
-  const result = await approveCompanyRequest({ admin: checkToken, requestRowIdRaw: req.params.request_row_id as string })
+  const result = await submitApproveCompanyRequest(checkToken, req.params.request_row_id as string)
   res.json(result)
 }))
 
@@ -83,7 +84,7 @@ companyAdminApprovalsRouter.post(
       return
     }
 
-    const result = await rejectCompanyRequest({ admin: checkToken, requestRowIdRaw: req.params.request_row_id as string, reasonRejected: req.body.reason_rejected })
+    const result = await submitRejectCompanyRequest(checkToken, req.params.request_row_id as string, req.body.reason_rejected)
     res.json(result)
   }),
 )
@@ -95,7 +96,7 @@ companyAdminApprovalsRouter.get('/delete_company/:request_row_id', writeEndpoint
     return
   }
 
-  const result = await deleteCompanyRequest({ admin: checkToken, requestRowIdRaw: req.params.request_row_id as string })
+  const result = await submitDeleteCompanyRequest(checkToken, req.params.request_row_id as string)
   res.json(result)
 }))
 
@@ -171,6 +172,22 @@ companyAdminApprovalsRouter.get('/rejected_changes_all/:skip/:limit', asyncRoute
   }
 
   const result = await getGlobalRejectedChangeRequests({ skipRaw: req.params.skip as string, limitRaw: req.params.limit as string })
+  res.json(result)
+}))
+
+/**
+ * Global cross-entity queue: every company's approved-but-not-yet-published changes together,
+ * paginated — mirrors '/pending_changes_all'/'/rejected_changes_all' above (user-requested
+ * Approved Changes queue, 2026-09-22).
+ */
+companyAdminApprovalsRouter.get('/approved_changes_all/:skip/:limit', asyncRoute('Global approved changes queue.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (!checkToken.status) {
+    res.json(checkToken)
+    return
+  }
+
+  const result = await getGlobalApprovedChangeRequests({ skipRaw: req.params.skip as string, limitRaw: req.params.limit as string })
   res.json(result)
 }))
 
@@ -256,6 +273,44 @@ companyAdminApprovalsRouter.post('/publish_all_changes/:company_row_id', writeEn
   }
 
   const result = await publishAllChangeRequests({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyId.value, actor: adminActorOf(checkToken) })
+  res.json(result)
+}))
+
+const FIELD_KEYS_REQUIRED_FOR_PUBLISH_MESSAGE = 'Select at least one field to publish'
+
+/**
+ * Field-level selective publish (user-requested, 2026-09-22): publishes only the given subset of
+ * this request's approved-and-unpublished fields, leaving the rest approved-but-unpublished for a
+ * later publish — mirrors '/approve_change_fields' below, but for the publish step instead of the
+ * review step. '/publish_change' above (no body) still publishes every approved-and-unpublished
+ * field on the request, unchanged.
+ */
+companyAdminApprovalsRouter.post('/publish_change_fields/:change_request_id', writeEndpointRateLimiter, asyncRoute('Publish individual change request fields.', async (req, res) => {
+  const checkToken = checkAdminLoginToken(req.headers, [7])
+  if (!checkToken.status) {
+    res.json(checkToken)
+    return
+  }
+
+  // Maker-checker: a sub-admin submits but may never publish (design §13.1 item 3).
+  if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
+    res.json({ status: false, message: { alert_message: CHANGE_REQUEST_MESSAGES.PUBLISH_FORBIDDEN } })
+    return
+  }
+
+  const requestId = validateChangeRequestId(req.params.change_request_id as string)
+  if (!requestId.valid || requestId.value === null) {
+    res.json({ status: false, message: { alert_message: requestId.message } })
+    return
+  }
+
+  const fieldKeys = validateFieldKeys(req.body.field_keys)
+  if (!fieldKeys) {
+    res.json({ status: false, message: { field_keys: FIELD_KEYS_REQUIRED_FOR_PUBLISH_MESSAGE } })
+    return
+  }
+
+  const result = await applyChangeRequest({ changeRequestId: requestId.value, actor: adminActorOf(checkToken), fieldKeys })
   res.json(result)
 }))
 
