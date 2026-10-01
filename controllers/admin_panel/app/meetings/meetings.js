@@ -252,15 +252,17 @@ router.get("/list/:skip/:limit", async (req, res) => {
 
         let statusFilter = {};
 
-        // user_info.full_name only exists after the user_info $lookup further down the pipeline,
-        // so the search match on it is injected there instead of here.
+        // user_info.full_name / company_details.company_name only exist after their own
+        // $lookups further down the pipeline, so the search match on them is injected there
+        // instead of here.
         const searchMatchStage = search
             ? [{
                 $match: {
                     $or: [
                         { meeting_title: { $regex: search, $options: "i" } },
                         { job_role: { $regex: search, $options: "i" } },
-                        { "user_info.full_name": { $regex: search, $options: "i" } }
+                        { "user_info.full_name": { $regex: search, $options: "i" } },
+                        { "company_details.company_name": { $regex: search, $options: "i" } }
                     ]
                 }
             }]
@@ -442,6 +444,15 @@ router.get("/list/:skip/:limit", async (req, res) => {
 
         const countQueryAgg = await meetingM.aggregate([
             { $match: statusFilter },
+            {
+                $lookup: {
+                    from: "cln_company_lists",
+                    localField: "company_row_id",
+                    foreignField: "_id",
+                    as: "company_details"
+                }
+            },
+            { $unwind: { path: "$company_details", preserveNullAndEmptyArrays: true } },
             {
                 $lookup: {
                     from: "cln_professionals",

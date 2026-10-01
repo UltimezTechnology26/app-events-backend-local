@@ -37,7 +37,7 @@ export function buildJournalistInterviewCountPipeline(filter: Record<string, any
   ]
 }
 
-/** `user_info.full_name` only exists after the `user_info` $lookup below, so the search $match must run after it, not in the initial $match. */
+/** `user_info.full_name`/`company_details.company_name` only exist after their $lookups, so the search $match must run after both, not in the initial $match. */
 function buildAdminMeetingsSearchMatch(search: string | undefined) {
   return search
     ? [
@@ -47,6 +47,7 @@ function buildAdminMeetingsSearchMatch(search: string | undefined) {
               { meeting_title: { $regex: search, $options: 'i' } },
               { job_role: { $regex: search, $options: 'i' } },
               { 'user_info.full_name': { $regex: search, $options: 'i' } },
+              { 'company_details.company_name': { $regex: search, $options: 'i' } },
             ],
           },
         },
@@ -54,13 +55,21 @@ function buildAdminMeetingsSearchMatch(search: string | undefined) {
     : []
 }
 
+const ADMIN_MEETINGS_COMPANY_LOOKUP = [
+  { $lookup: { from: 'cln_company_lists', localField: 'company_row_id', foreignField: '_id', as: 'company_details' } },
+  { $unwind: { path: '$company_details', preserveNullAndEmptyArrays: true } },
+]
+
+const ADMIN_MEETINGS_USER_LOOKUP = [
+  { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
+  { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+]
+
 export function buildAdminMeetingsListPipeline(filter: Record<string, any>, search: string | undefined, skip: number, limit: number) {
   return [
     { $match: filter },
-    { $lookup: { from: 'cln_company_lists', localField: 'company_row_id', foreignField: '_id', as: 'company_details' } },
-    { $unwind: { path: '$company_details', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
-    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    ...ADMIN_MEETINGS_COMPANY_LOOKUP,
+    ...ADMIN_MEETINGS_USER_LOOKUP,
     ...buildAdminMeetingsSearchMatch(search),
     { $lookup: { from: 'cln_professionals_profile_images', localField: 'user_row_id', foreignField: 'user_row_id', as: 'user_profile' } },
     { $unwind: { path: '$user_profile', preserveNullAndEmptyArrays: true } },
@@ -104,8 +113,8 @@ export function buildAdminMeetingsListPipeline(filter: Record<string, any>, sear
 export function buildAdminMeetingsCountPipeline(filter: Record<string, any>, search: string | undefined) {
   return [
     { $match: filter },
-    { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info' } },
-    { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
+    ...ADMIN_MEETINGS_COMPANY_LOOKUP,
+    ...ADMIN_MEETINGS_USER_LOOKUP,
     ...buildAdminMeetingsSearchMatch(search),
     { $count: 'total' },
   ]
