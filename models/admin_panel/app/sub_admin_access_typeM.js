@@ -12,6 +12,21 @@ const saveSchema = mongoose.Schema({
     type_status: {
         type: Number,
         required: true
+    },
+    // Presentation-only text for the "Manager Roles" admin reference page -
+    // never read by any permission check. What an access type actually grants
+    // is governed entirely by each route's own checkAdminLoginToken call.
+    description: {
+        type: String
+    },
+    responsibilities: {
+        type: [String]
+    },
+    can_extra: {
+        type: [String]
+    },
+    cant_extra: {
+        type: [String]
     }
 })
 
