@@ -9,6 +9,15 @@ const { checkAdminLoginToken } = require('../../middleware/authorization')
 const sub_adminM = require('../../models/admin_panel/app/sub_adminM')
 const sub_admin_access_typeM = require('../../models/admin_panel/app/sub_admin_access_typeM')
 const sub_admin_emailsM = require('../../models/admin_panel/app/sub_admin_emailsM')
+const path = require('path')
+const {
+    MODULE_SOURCE_FILES,
+    buildCodeExcerpt,
+    buildRefreshPrompt,
+    callGeminiForRefresh
+} = require('../../utils/helpers/manager_role_refresh_helper')
+
+const PROJECT_ROOT = path.join(__dirname, '../../')
 
 router.get('/list/:skip/:limit', async (req, res) => {
     const checkToken = checkAdminLoginToken(req.headers, [0])
@@ -419,6 +428,53 @@ router.post('/update_access_type/:request_row_id', [
     }
     catch (err) {
         console.log('Update access type.', err.message)
+        res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+    }
+})
+
+// Re-derives description/responsibilities/can_extra/cant_extra from this
+// module's OWN actual permission code (checkAdminLoginToken calls, route
+// declarations) via Gemini, then persists it the same way update_access_type
+// does - a super admin's "Refresh" button, not a scheduled job.
+router.post('/refresh_access_type/:request_row_id', async (req, res) => {
+    try {
+        const checkToken = checkAdminLoginToken(req.headers, [0])
+        if (!checkToken.status) {
+            res.json(checkToken)
+            return
+        }
+
+        const request_row_id = Number.parseInt(req.params.request_row_id)
+        const module = MODULE_SOURCE_FILES[request_row_id]
+        if (!module) {
+            res.json({ status: false, message: 'This access type is not managed by this backend.' })
+            return
+        }
+
+        const codeExcerpt = buildCodeExcerpt(PROJECT_ROOT, module.files)
+        const prompt = buildRefreshPrompt(module.label, codeExcerpt)
+        const parsed = await callGeminiForRefresh(prompt)
+
+        await sub_admin_access_typeM.updateOne({ _id: request_row_id }, {
+            description: sanitize(parsed.description),
+            responsibilities: sanitize(parsed.responsibilities),
+            can_extra: sanitize(parsed.can_extra),
+            cant_extra: sanitize(parsed.cant_extra)
+        })
+
+        res.json({
+            status: true,
+            message: {
+                alert_message: 'Role refreshed from source.',
+                description: parsed.description,
+                responsibilities: parsed.responsibilities,
+                can_extra: parsed.can_extra,
+                cant_extra: parsed.cant_extra
+            }
+        })
+    }
+    catch (err) {
+        console.log('Refresh access type.', err.message)
         res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
     }
 })
