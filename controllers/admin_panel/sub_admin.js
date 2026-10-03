@@ -9,6 +9,15 @@ const { checkAdminLoginToken } = require('../../middleware/authorization')
 const sub_adminM = require('../../models/admin_panel/app/sub_adminM')
 const sub_admin_access_typeM = require('../../models/admin_panel/app/sub_admin_access_typeM')
 const sub_admin_emailsM = require('../../models/admin_panel/app/sub_admin_emailsM')
+const path = require('path')
+const {
+    MODULE_SOURCE_FILES,
+    buildCodeExcerpt,
+    buildRefreshPrompt,
+    callGeminiForRefresh
+} = require('../../utils/helpers/manager_role_refresh_helper')
+
+const PROJECT_ROOT = path.join(__dirname, '../../')
 
 router.get('/list/:skip/:limit', async (req, res) => {
     const checkToken = checkAdminLoginToken(req.headers, [0])
@@ -366,7 +375,10 @@ router.get('/access_types', async (req, res) => {
     try {
         const checkToken = checkAdminLoginToken(req.headers, [0])
         if (checkToken.status) {
-            const queryRun = await sub_admin_access_typeM.find({ type_status: 1 }, { _id: 1, create_type_name: 1 })
+            const queryRun = await sub_admin_access_typeM.find(
+                { type_status: 1 },
+                { _id: 1, create_type_name: 1, description: 1, responsibilities: 1, can_extra: 1, cant_extra: 1 }
+            )
 
             res.json({ status: true, message: queryRun })
         }
@@ -377,6 +389,92 @@ router.get('/access_types', async (req, res) => {
     }
     catch (err) {
         console.log('Access types list.', err.message)
+        res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+    }
+})
+
+// Presentation-only text for the "Manager Roles" admin reference page - never
+// read by any permission check. Does not touch create_type_name/type_status.
+router.post('/update_access_type/:request_row_id', [
+    check('description').optional({ nullable: true }).isString(),
+    check('responsibilities').optional({ nullable: true }).isArray(),
+    check('can_extra').optional({ nullable: true }).isArray(),
+    check('cant_extra').optional({ nullable: true }).isArray()
+], async (req, res) => {
+    try {
+        const errors = validationResult(req)
+        const errObj = arrangeValidation(errors)
+
+        const checkToken = checkAdminLoginToken(req.headers, [0])
+        if (checkToken.status) {
+            if (Object.keys(errObj).length > 0) {
+                res.json({ status: false, message: errObj })
+            }
+            else {
+                const request_row_id = Number.parseInt(req.params.request_row_id)
+                await sub_admin_access_typeM.updateOne({ _id: request_row_id }, {
+                    description: sanitize(req.body.description),
+                    responsibilities: sanitize(req.body.responsibilities),
+                    can_extra: sanitize(req.body.can_extra),
+                    cant_extra: sanitize(req.body.cant_extra)
+                })
+
+                res.json({ status: true, message: { alert_message: "Role updated successfully." }, tokenStatus: true })
+            }
+        }
+        else {
+            res.json(checkToken)
+        }
+    }
+    catch (err) {
+        console.log('Update access type.', err.message)
+        res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
+    }
+})
+
+// Re-derives description/responsibilities/can_extra/cant_extra from this
+// module's OWN actual permission code (checkAdminLoginToken calls, route
+// declarations) via Gemini, then persists it the same way update_access_type
+// does - a super admin's "Refresh" button, not a scheduled job.
+router.post('/refresh_access_type/:request_row_id', async (req, res) => {
+    try {
+        const checkToken = checkAdminLoginToken(req.headers, [0])
+        if (!checkToken.status) {
+            res.json(checkToken)
+            return
+        }
+
+        const request_row_id = Number.parseInt(req.params.request_row_id)
+        const module = MODULE_SOURCE_FILES[request_row_id]
+        if (!module) {
+            res.json({ status: false, message: 'This access type is not managed by this backend.' })
+            return
+        }
+
+        const codeExcerpt = buildCodeExcerpt(PROJECT_ROOT, module.files)
+        const prompt = buildRefreshPrompt(module.label, codeExcerpt)
+        const parsed = await callGeminiForRefresh(prompt)
+
+        await sub_admin_access_typeM.updateOne({ _id: request_row_id }, {
+            description: sanitize(parsed.description),
+            responsibilities: sanitize(parsed.responsibilities),
+            can_extra: sanitize(parsed.can_extra),
+            cant_extra: sanitize(parsed.cant_extra)
+        })
+
+        res.json({
+            status: true,
+            message: {
+                alert_message: 'Role refreshed from source.',
+                description: parsed.description,
+                responsibilities: parsed.responsibilities,
+                can_extra: parsed.can_extra,
+                cant_extra: parsed.cant_extra
+            }
+        })
+    }
+    catch (err) {
+        console.log('Refresh access type.', err.message)
         res.json({ status: false, message: 'An unexpected error occurred. Please try again later.' })
     }
 })
