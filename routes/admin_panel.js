@@ -50,6 +50,7 @@ const { communityGroupsRouter } = require('../src/modules/community-admin/commun
 const { communityPostsRouter } = require('../src/modules/community-admin/community-admin.posts.controller')
 const { communityChallengeRouter } = require('../src/modules/community-admin/community-admin.challenge.controller')
 const { communityRequestArticleRouter } = require('../src/modules/community-admin/community-admin.request-article.controller')
+const { communityOverviewRouter } = require('../src/modules/community-admin/community-admin.overview.controller')
 const admin_user_approvals = require('../controllers/admin_panel/app/user_approvals')
 const { professionalsApprovalsRouter } = require('../src/modules/professionals-approvals/professionals-approvals.controller')
 const { professionalsRouter } = require('../src/modules/professionals/professionals.controller')
@@ -335,6 +336,9 @@ router.use('/community/groups_v2', communityGroupsRouter)
 router.use('/community/posts', community_posts)
 router.use('/community/posts_v2', communityPostsRouter)
 router.use('/community/overview', community_overview)
+// Final slice of the Community migration (Overview page) - temporary `_v2` parallel mount,
+// legacy '/community/overview' above stays live and untouched.
+router.use('/community/overview_v2', communityOverviewRouter)
 router.use('/community/challenge', community_21days_challenge)
 router.use('/community/challenge_v2', communityChallengeRouter)
 router.use('/community/request_article', community_request_article)

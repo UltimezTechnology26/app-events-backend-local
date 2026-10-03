@@ -17,7 +17,8 @@ const pro_batch = require('../controllers/main/community/pro_batch')
 const request_article = require('../controllers/main/community/request_articles')
 const benefits = require('../controllers/main/community/benefits')
 const { professionalsAcademyRouter } = require('../src/modules/professionals-academy/professionals-academy.controller')
-const { professionalsCommunityRouter } = require('../src/modules/professionals-community/professionals-community.controller')
+const { communityRouter } = require('../src/modules/community/community.controller')
+const { benefitsRouter } = require('../src/modules/benefits/benefits.controller')
 const { communityRequestArticleSelfServiceRouter } = require('../src/modules/community-admin/community-admin.request-article.self-service.controller')
 
 
@@ -55,9 +56,14 @@ router.use('/benefits', benefits)
 router.use('/academy_v2', professionalsAcademyRouter)
 
 // Professionals migration, Phase K: pro_batch.js's GET /details ported into
-// src/modules/professionals-community/**. Same `_v2` parallel-mount pattern as academy_v2 above —
+// src/modules/community/**. Same `_v2` parallel-mount pattern as academy_v2 above —
 // legacy '/pro_batch' stays live and unmodified until verified.
-router.use('/pro_batch_v2', professionalsCommunityRouter)
+router.use('/pro_batch_v2', communityRouter)
+
+// New `benefits` module - ports controllers/main/community/benefits.js's GET /details, reusing
+// getProfileScores/getPostDates/calculateStreaks from the community module above rather than
+// redeclaring them. Legacy '/benefits' stays live and unmodified until verified.
+router.use('/benefits_v2', benefitsRouter)
 
 
 

@@ -9,7 +9,7 @@
 //
 // `community_postsM` is NOT colocated here - confirmed generic/shared across the whole app
 // (wired into index.js's own change-stream setup), matching the same "required directly, not
-// owned" precedent already documented in professionals-community.models.ts for this exact model.
+// owned" precedent already documented in community.models.ts for this exact model.
 const community_postsM = require('../../../models/main/community/community_postsM')
 import { buildPostsBaseMatchQuery, buildPostsListPipeline, extractPostsListResult } from './community-admin.posts.queries'
 import { GetPostsListParams } from './community-admin.posts.types'

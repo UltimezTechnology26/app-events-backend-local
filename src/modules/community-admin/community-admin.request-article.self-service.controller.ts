@@ -35,7 +35,7 @@ communityRequestArticleSelfServiceRouter.post(
     } catch (err) {
       // Matches legacy's own catch block exactly (including leaking err.message) - FLAGGED, NOT
       // FIXED, same class of deviation-needs-sign-off already documented in
-      // professionals-community.controller.ts for the identical legacy pattern.
+      // community.controller.ts for the identical legacy pattern.
       return res.json({ status: false, message: 'An unexpected error occurred. Please try again later.', err: err instanceof Error ? err.message : String(err) })
     }
   },

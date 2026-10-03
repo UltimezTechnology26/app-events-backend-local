@@ -1,4 +1,4 @@
-// modules/professionals-community/professionals-community.types.ts
+// modules/community/community.types.ts
 
 export interface EngagementStats {
   total_likes: number
