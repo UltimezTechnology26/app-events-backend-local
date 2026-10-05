@@ -2631,13 +2631,18 @@ router.get('/get_user_seo/:user_row_id', checkApiKey, async (req, res) => {
       },
       { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
 
+      // cln_app_faqs is a shared, module-discriminated collection (see
+      // src/common/app-faq/app-faq.model.ts), so the join matches on module + root_document_id
+      // via `let`/pipeline rather than a plain foreignField equality.
       {
         $lookup: {
-          from: "cln_professionals_faq_lists",
-          localField: "_id",
-          foreignField: "user_row_id",
-          as: "faq",
-          pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }]
+          from: "cln_app_faqs",
+          let: { userId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $and: [{ $eq: ["$module", "professional"] }, { $eq: ["$root_document_id", "$$userId"] }] } } },
+            { $project: { _id: 0, faq_question: "$question", faq_answer: "$answer" } }
+          ],
+          as: "faq"
         }
       },
       {
@@ -2754,14 +2759,18 @@ router.get('/get_company_seo/:company_id', checkApiKey, async (req, res) => {
       },
       { $unwind: { path: "$social_links", preserveNullAndEmptyArrays: true } },
 
-      // Company FAQ
+      // Company FAQ — cln_app_faqs is a shared, module-discriminated collection (see
+      // src/common/app-faq/app-faq.model.ts), so the join matches on module + root_document_id
+      // via `let`/pipeline rather than a plain foreignField equality.
       {
         $lookup: {
-          from: "cln_company_faq_lists",
-          localField: "_id",
-          foreignField: "company_row_id",
-          as: "faq",
-          pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }]
+          from: "cln_app_faqs",
+          let: { companyId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $and: [{ $eq: ["$module", "company"] }, { $eq: ["$root_document_id", "$$companyId"] }] } } },
+            { $project: { _id: 0, faq_question: "$question", faq_answer: "$answer" } }
+          ],
+          as: "faq"
         }
       },
 

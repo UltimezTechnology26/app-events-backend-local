@@ -47,8 +47,7 @@ const events_attendeesM = require('../../models/app/events/event_attendeesM')
 const event_speakersM = require('../../models/app/events/event_speakersM')
 const company_revenue_growthM = require('../../models/app/company/company_revenue_growthM')
 const added_to_partnersM = require('../../models/app/company/added_to_partnersM')
-const company_faqM = require('../../models/app/company/company_faqM')
-const professionals_faqM = require('../../models/app/users/professionals_faqM')
+const { deleteFaqById: deleteAppFaqById, deleteFaqsByRoot: deleteAppFaqsByRoot, countFaqsByRoot: countAppFaqsByRoot } = require('../../src/common/app-faq/app-faq.repository')
 const professionals_awardsM = require('../../models/app/users/professionals_awardsM')
 const tokensM = require('../../models/markets/tokensM')
 
@@ -776,10 +775,10 @@ export const deleteCompanyWatchlist = async ({ type, company_row_id, user_row_id
 export const deleteFAQ = async ({ type, company_row_id, faq_row_id }) => {
   try {
     if (type == 1) {
-      await company_faqM.deleteOne({ company_row_id: company_row_id, _id: faq_row_id })
+      await deleteAppFaqById({ module: 'company', faqRowId: faq_row_id })
     }
     else {
-      await company_faqM.deleteMany({ company_row_id: company_row_id })
+      await deleteAppFaqsByRoot({ module: 'company', rootDocumentId: company_row_id })
     }
   }
   catch {
@@ -1039,10 +1038,10 @@ export const deleteUserDetais = async ({ user_row_id, token }) => {
 export const deleteUserFAQ = async ({ type, user_row_id, faq_row_id }) => {
   try {
     if (type == 1) {
-      await professionals_faqM.deleteOne({ user_row_id: user_row_id, _id: faq_row_id })
+      await deleteAppFaqById({ module: 'professional', faqRowId: faq_row_id })
     }
     else {
-      await professionals_faqM.deleteMany({ user_row_id: user_row_id })
+      await deleteAppFaqsByRoot({ module: 'professional', rootDocumentId: user_row_id })
     }
   }
   catch {
@@ -1338,11 +1337,11 @@ export async function calculateUserProfileScore(user_row_id, fieldsToUpdate = ["
   // -----------------------------------------------------
   if (fullUpdate || fieldsToUpdate.includes("faq")) {
 
-    const hasFAQ = await professionals_faqM.exists({
-      user_row_id,
-      faq_question: { $exists: true, $ne: "" },
-      faq_answer: { $exists: true, $ne: "" }
-    });
+    // Every row in cln_app_faqs always has a non-empty question/answer (write-side validation
+    // requires both, same as before this migration) - a plain existence count is equivalent to
+    // the old $exists/$ne:"" check without needing to re-assert what's already guaranteed.
+    const faqCount = await countAppFaqsByRoot({ module: 'professional', rootDocumentId: user_row_id });
+    const hasFAQ = faqCount > 0;
 
     const faqScore = hasFAQ ? 5 : 0;
 
@@ -1656,7 +1655,7 @@ export async function calculateCompanyProfileScore(company_row_id, fieldsToUpdat
   // ✅ 9. FAQ (5%)
   // ---------------------------------------------------------
   if (fullUpdate || fieldsToUpdate.includes("faq")) {
-    const faqCount = await company_faqM.countDocuments({ company_row_id });
+    const faqCount = await countAppFaqsByRoot({ module: 'company', rootDocumentId: company_row_id });
 
     updateObject.faq_score = faqCount >= 3 ? 5 : 0;
     total += updateObject.faq_score;

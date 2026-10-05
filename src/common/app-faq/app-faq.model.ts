@@ -5,10 +5,9 @@
 // Named cln_app_faqs (not cln_faqs) since this backend already has its own cln_* namespace and
 // to avoid any confusion with markets' identically-shaped but physically separate collection.
 //
-// PILOT (2026-10-05): only `event` writes here so far - company/professionals keep their own
-// dedicated cln_company_faq_lists/cln_professionals_faq_lists collections (src/modules/company/faq,
-// src/modules/professionals-faq) until each is migrated onto this collection the same way, per
-// the user's "pilot one domain, then replicate" direction.
+// Events was the pilot domain (2026-10-05); Company and Professionals both migrated onto this same
+// collection afterward (src/modules/company/faq, src/modules/professionals-faq) - all three now
+// share this one physical collection, discriminated by `module`.
 import mongoose from 'mongoose'
 import { getCollectionID } from '../../../utils/helpers/database_helper'
 

@@ -68,7 +68,6 @@ const search = require('../controllers/app/search')
 
 //mobile app
 const mobile_settings = require('../controllers/app/mobile_app/settings')
-const users_faq = require('../controllers/app/users/faq')
 const users_awards = require('../controllers/app/users/awards')
 const { professionalsAwardsRouter } = require('../src/modules/professionals-awards/professionals-awards.controller')
 const { professionalsFaqRouter } = require('../src/modules/professionals-faq/professionals-faq.controller')
@@ -81,7 +80,14 @@ router.use('/points', points)
 router.use('/link_page', link_page)
 router.use('/search', search)
 
-router.use('/users/faq', users_faq)
+// modules/professionals-faq/professionals-faq.controller.ts's professionalsFaqRouter — now onto
+// the shared cln_app_faqs collection (src/common/app-faq), Professionals' own leg of the
+// FAQ-unification migration (Events was the pilot, Company the second). Kept at '/users/faq_v2'
+// (NOT '/users/faq') - frontend-appcp-typescript's own appEPS.ts/professional-faq proxy routes
+// already migrated onto `app/users/faq_v2` before this change (see that file's own 2026-09-17
+// comment), so that is the real live path; the legacy '/users/faq' controller this replaced had no
+// remaining caller and is simply gone now, not repointed.
+router.use('/users/faq_v2', professionalsFaqRouter)
 router.use('/users/awards', users_awards)
 router.use('/setting', setting)
 router.use('/setting', appWorkExperienceRouter)
@@ -110,10 +116,6 @@ router.use('/setting_profile_v2', professionalsSelfServiceRouter)
 // src/modules/professionals-awards/**. Mounted at a temporary `_v2` prefix, parallel to the
 // untouched legacy '/users/awards' mount above.
 router.use('/users/awards_v2', professionalsAwardsRouter)
-// Professionals migration gap-audit backlog: controllers/app/users/faq.js ported into
-// src/modules/professionals-faq/**. Mounted at a temporary `_v2` prefix, parallel to the
-// untouched legacy '/users/faq' mount above.
-router.use('/users/faq_v2', professionalsFaqRouter)
 // Professionals migration gap-audit backlog: controllers/app/users/points.js ported into
 // src/modules/professionals-points/**. Mounted at a temporary `_v2` prefix, parallel to the
 // untouched legacy '/points' mount above.

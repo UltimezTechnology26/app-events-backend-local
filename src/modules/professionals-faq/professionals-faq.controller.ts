@@ -1,13 +1,14 @@
 // modules/professionals-faq/professionals-faq.controller.ts
-// Ports controllers/app/users/faq.js. Mounted at a `_v2` suffix parallel to the untouched legacy
-// '/users/faq' mount.
+// Ports controllers/app/users/faq.js (now deleted - this router replaced it). Mounted at
+// '/users/faq_v2' (see routes/app.js's own comment on why that's the real live path, not
+// '/users/faq').
 import express, { Router, Request, Response } from 'express'
 const { check, validationResult } = require('express-validator')
 const { checkAllLoginToken } = require('../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
-import { updateFaqDetails, getFaqList, deleteFaq } from './professionals-faq.service'
+import { updateFaqDetails, getFaqList, deleteFaq, reorderFaqDetails } from './professionals-faq.service'
 import { UserAuthResult } from './professionals-faq.types'
 
 export const professionalsFaqRouter: Router = express.Router()
@@ -34,4 +35,13 @@ professionalsFaqRouter.get('/list/:skip/:limit', asyncRoute('FAQ list.', async (
 professionalsFaqRouter.get('/delete_faq/:faq_row_id', asyncRoute('Delete FAQ Details.', async (req: Request, res: Response) => {
   const auth: UserAuthResult = await checkAllLoginToken(req.headers, [1])
   res.json(await deleteFaq(auth, req.params.faq_row_id as string, req.query.user_row_id))
+}))
+
+// New - no frontend consumer yet (Professionals had no reorder route before this migration). Body
+// shape ({ ordered_ids }, user_row_id via query like the other admin-capable routes above) matches
+// markets' own buildAdminReorderFaqs convention since there's no existing contract here to stay
+// backward-compatible with.
+professionalsFaqRouter.post('/reorder', writeEndpointRateLimiter, asyncRoute('Reorder FAQ Details.', async (req: Request, res: Response) => {
+  const auth: UserAuthResult = await checkAllLoginToken(req.headers, [1])
+  res.json(await reorderFaqDetails(auth, req.query.user_row_id, req.body.ordered_ids))
 }))

@@ -592,7 +592,21 @@ export function buildGetCompanySeoPipeline(condition: Record<string, any>): obje
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_company_social_links', localField: '_id', foreignField: 'company_row_id', as: 'social_links' } },
     { $unwind: { path: '$social_links', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_faq_lists', localField: '_id', foreignField: 'company_row_id', as: 'faq', pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }] } },
+    // cln_app_faqs is a shared, module-discriminated collection (src/common/app-faq) - the join
+    // matches on module + root_document_id via `let`/pipeline rather than a plain foreignField
+    // equality, and the $project renames question/answer back to faq_question/faq_answer for
+    // this endpoint's unchanged response contract.
+    {
+      $lookup: {
+        from: 'cln_app_faqs',
+        let: { companyId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$module', 'company'] }, { $eq: ['$root_document_id', '$$companyId'] }] } } },
+          { $project: { _id: 0, faq_question: '$question', faq_answer: '$answer' } },
+        ],
+        as: 'faq',
+      },
+    },
     {
       $addFields: {
         created_by_status: {

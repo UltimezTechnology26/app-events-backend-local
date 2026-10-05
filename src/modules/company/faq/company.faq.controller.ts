@@ -6,7 +6,7 @@ const { checkAllLoginToken } = require('../../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
 import logger from '../../../../config/logger'
 import { writeEndpointRateLimiter } from '../../../../middleware/rateLimiter'
-import { saveOrUpdateFaqDetails, getFaqList, deleteFaqDetail } from './company.faq.service'
+import { saveOrUpdateFaqDetails, getFaqList, deleteFaqDetail, reorderFaqDetails } from './company.faq.service'
 import { updateFaqDetailsValidation } from './company.faq.validation'
 import { asyncRoute } from '../../../../middleware/asyncRoute'
 
@@ -64,3 +64,12 @@ companyFaqRouter.get('/delete_faq/:faq_row_id', async (req: Request, res: Respon
     res.json({ status: false, message: { alert_message: 'An unexpected error occurred. Please try again later.' } })
   }
 })
+
+// New - no frontend consumer yet (Company had no reorder route before this migration). Body shape
+// ({ company_row_id, ordered_ids }) matches markets' own buildAdminReorderFaqs convention since
+// there's no existing contract here to stay backward-compatible with.
+companyFaqRouter.post('/reorder', writeEndpointRateLimiter, asyncRoute('Reorder FAQ Details.', async (req, res) => {
+  const actor = await checkAllLoginToken(req.headers, [7])
+  const result = await reorderFaqDetails({ actor, companyRowIdRaw: req.body.company_row_id as string, orderedIdsRaw: req.body.ordered_ids })
+  res.json(result)
+}))

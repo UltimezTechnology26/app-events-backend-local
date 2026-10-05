@@ -76,13 +76,18 @@ export async function getUserSeoAggregate(userRowId: number) {
       },
     },
     { $unwind: { path: '$info_work', preserveNullAndEmptyArrays: true } },
+    // cln_app_faqs is a shared, module-discriminated collection (see
+    // src/common/app-faq/app-faq.model.ts), so the join matches on module + root_document_id via
+    // `let`/pipeline rather than a plain foreignField equality.
     {
       $lookup: {
-        from: 'cln_professionals_faq_lists',
-        localField: '_id',
-        foreignField: 'user_row_id',
+        from: 'cln_app_faqs',
+        let: { userId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$module', 'professional'] }, { $eq: ['$root_document_id', '$$userId'] }] } } },
+          { $project: { _id: 0, faq_question: '$question', faq_answer: '$answer' } },
+        ],
         as: 'faq',
-        pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }],
       },
     },
     { $addFields: { created_by_status: { $cond: [{ $gt: [{ $size: '$sub_admin_info' }, 0] }, 2, 0] } } },
