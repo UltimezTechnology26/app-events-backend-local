@@ -3,7 +3,8 @@ import { ActorRef, FieldChange } from '../../common/status-audit/status-audit.ty
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
 import { computeDiff, filterDisplayChanges, mergeFieldChanges } from './change-request.diff'
 import { resolveActorName, withFieldChangeActorNames } from '../../common/status-audit/status-audit.actor'
-import { applyChangeRequest } from './change-request.apply'
+import { applyChangeRequest, applyEditDirectly } from './change-request.apply'
+import { isPendingRootRecord } from './change-request.pending-gate'
 import { SECTION_REGISTRY, isKnownSection, SectionConfig } from './change-request.registry'
 import {
   amendPendingRequest,
@@ -83,7 +84,10 @@ export async function submitChangeRequest({
   }
 
   const config = SECTION_REGISTRY[section] as SectionConfig
-  const existing = await findPendingRequest({ module, rootDocumentId, section })
+  // A record still pending its first approval isn't live, so its edits are saved straight to it
+  // (no approve/publish step) - see change-request.pending-gate.ts.
+  const saveDirectly = await isPendingRootRecord(module, rootDocumentId)
+  const existing = saveDirectly ? null : await findPendingRequest({ module, rootDocumentId, section })
   const effective = existing?.payload ? { ...liveValues, ...existing.payload } : liveValues
 
   const changes = await computeDiff({
@@ -106,6 +110,20 @@ export async function submitChangeRequest({
   }
 
   const displayChanges = filterDisplayChanges(changes, config.displayFields)
+
+  if (saveDirectly) {
+    return applyEditDirectly({
+      module,
+      section,
+      scope: SCOPE_DOCUMENT,
+      action,
+      rootDocumentId,
+      targetRowId,
+      payload,
+      changes: displayChanges.map((change) => ({ ...change, changed_by: actor })),
+      actor,
+    })
+  }
 
   let changeRequestId: number
   let logAction: string

@@ -14,6 +14,8 @@ import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-lib
 import { insertChangeRequest, findPendingRequest } from '../../modules/change-request/change-request.queries'
 import { CHANGE_REQUEST_ACTION } from '../../modules/change-request/change-request.types'
 import { SECTION_COMPANY_STATUS } from '../../modules/change-request/change-request.registry'
+import { applyStatusActionDirectly } from '../../modules/change-request/change-request.apply'
+import { canApproveChangeRequests } from '../../modules/change-request/change-request.validation'
 import { AUDIT_MODULE_COMPANY } from '../../common/status-audit/status-audit.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
@@ -29,6 +31,8 @@ export type AdminAuthResult =
 const STATUS_FIELD_LABEL = 'Status'
 const ALREADY_PENDING_MESSAGE = 'A status change for this company is already pending review.'
 const SUBMITTED_MESSAGE = 'Submitted for approval'
+const ONLY_FULL_ACCESS_MESSAGE = 'Only the main admin or a Marketing Full Access sub-admin can approve or reject.'
+const DIRECT_ACTIONS = ['approve', 'reject']
 
 function actorFrom(admin: AdminAuthResult & { status: true }): ActorRef {
   const tracker = getUpdateTrackerFields(admin)
@@ -58,6 +62,24 @@ interface SubmitLifecycleActionParams {
 }
 
 async function submitLifecycleAction({ admin, companyRowId, intendedAction, reasonForDisable, oldLabel, newLabel }: SubmitLifecycleActionParams) {
+  // First-time Approve/Reject of the company itself is applied directly (user-requested 2026-10-04):
+  // restricted to the main admin / Marketing Full Access, and never staged as a change request.
+  if (DIRECT_ACTIONS.includes(intendedAction)) {
+    if (!canApproveChangeRequests(admin.message.admin_manager_type, admin.message.sub_admin_type)) {
+      return { status: false, message: { alert_message: ONLY_FULL_ACCESS_MESSAGE } }
+    }
+    const payload: Record<string, unknown> = { intended_action: intendedAction }
+    if (reasonForDisable) payload['disable_reason'] = reasonForDisable
+    return applyStatusActionDirectly({
+      module: AUDIT_MODULE_COMPANY,
+      section: SECTION_COMPANY_STATUS,
+      rootDocumentId: companyRowId,
+      payload,
+      actor: actorFrom(admin),
+      successMessage: intendedAction === 'approve' ? 'The company has been approved successfully.' : 'The company has been rejected successfully.',
+    })
+  }
+
   const existing = await findPendingRequest({ module: AUDIT_MODULE_COMPANY, rootDocumentId: companyRowId, section: SECTION_COMPANY_STATUS })
   if (existing) {
     return { status: false, message: { alert_message: ALREADY_PENDING_MESSAGE } }
