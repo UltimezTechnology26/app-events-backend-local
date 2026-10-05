@@ -84,8 +84,18 @@ async function migrateEventsFaqToAppFaq() {
 module.exports = { migrateEventsFaqToAppFaq }
 
 if (require.main === module) {
+    const mongoose = require('mongoose')
+    // config/database.js auto-invokes its own connectDatabase() at require-time (not awaited,
+    // "for backward compatibility") - awaiting a SECOND explicit call to it races against that
+    // first one and can leave the connection in a state where bufferCommands: false still rejects
+    // the very first query right after "connected" logs. Waiting on mongoose's own readyState/
+    // 'connected' event instead is robust regardless of how many times connect() was invoked.
     require('../../config/database')
-    migrateEventsFaqToAppFaq()
+    const waitForConnection = () =>
+        mongoose.connection.readyState === 1 ? Promise.resolve() : new Promise((resolve) => mongoose.connection.once('connected', resolve))
+
+    waitForConnection()
+        .then(() => migrateEventsFaqToAppFaq())
         .then((result) => {
             process.stdout.write(`${JSON.stringify(result)}\n`)
             process.exit(0)
