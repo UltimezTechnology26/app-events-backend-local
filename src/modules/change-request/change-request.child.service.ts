@@ -5,6 +5,8 @@ import { computeDiff, filterDisplayChanges, mergeFieldChanges } from './change-r
 import { SECTION_REGISTRY, isKnownSection, SectionConfig } from './change-request.registry'
 import { findPendingRequestForTargetRow } from './change-request.child.queries'
 import { amendPendingRequest, insertChangeRequest } from './change-request.queries'
+import { applyEditDirectly } from './change-request.apply'
+import { isPendingRootRecord } from './change-request.pending-gate'
 import { CHANGE_REQUEST_ACTION, SubmitChangeRequestResult } from './change-request.types'
 
 const LOG_ACTION_SUBMIT = 'submit'
@@ -54,7 +56,10 @@ export async function submitChildChangeRequest({
   }
 
   const config = SECTION_REGISTRY[section] as SectionConfig
-  const existing = targetRowId === null ? null : await findPendingRequestForTargetRow({ module, targetRowId, section })
+  // A record still pending its first approval isn't live, so its edits are saved straight to it
+  // (no approve/publish step) - see change-request.pending-gate.ts.
+  const saveDirectly = await isPendingRootRecord(module, rootDocumentId)
+  const existing = saveDirectly || targetRowId === null ? null : await findPendingRequestForTargetRow({ module, targetRowId, section })
   const effective = existing?.payload ? { ...liveValues, ...existing.payload } : liveValues
 
   const changes = await computeDiff({
@@ -76,6 +81,20 @@ export async function submitChildChangeRequest({
   }
 
   const displayChanges = filterDisplayChanges(changes, config.displayFields)
+
+  if (saveDirectly) {
+    return applyEditDirectly({
+      module,
+      section,
+      scope: SCOPE_CHILD,
+      action: targetRowId === null ? CHANGE_REQUEST_ACTION.CREATE : CHANGE_REQUEST_ACTION.UPDATE,
+      rootDocumentId,
+      targetRowId,
+      payload,
+      changes: displayChanges.map((change) => ({ ...change, changed_by: actor })),
+      actor,
+    })
+  }
 
   let changeRequestId: number
   let logAction: string
@@ -175,6 +194,22 @@ export async function submitChildDeleteRequest({
   })
 
   const displayChanges = filterDisplayChanges(changes, config.displayFields)
+
+  // Deleting a row of a record still pending its first approval happens straight away too.
+  if (await isPendingRootRecord(module, rootDocumentId)) {
+    return applyEditDirectly({
+      module,
+      section,
+      scope: SCOPE_CHILD,
+      action: CHANGE_REQUEST_ACTION.DELETE,
+      rootDocumentId,
+      targetRowId,
+      payload: {},
+      changes: displayChanges.map((change) => ({ ...change, changed_by: actor })),
+      rowSnapshot,
+      actor,
+    })
+  }
 
   const changeRequestId = await insertChangeRequest({
     module,

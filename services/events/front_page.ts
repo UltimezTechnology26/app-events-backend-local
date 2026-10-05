@@ -215,7 +215,20 @@ export async function resolveViewerPersonalization({
     return result
 }
 
-export const getEventIndividualDetails = async (req: any, user_row_id: number) => {
+// Public visitors only ever see an approved, enabled event. Admin callers (decided by the
+// controller from the admin token, never derived here) skip this gate so the admin View page can
+// preview a still-pending event - and also skip the shared cache and the view counter below, since
+// that result can include a not-yet-public event and an admin preview isn't a real visit.
+const PUBLIC_EVENT_VISIBILITY = { active_status: 1, approval_status: 1 }
+
+// A still-pending event has no event_url yet (it's only generated on approval -
+// events.lifecycle-apply.ts), so an admin caller can look one up by row id instead.
+function resolveEventIdentity(req: any, isAdminCaller: boolean): { _id: number } | { event_url: string } {
+    const eventRowId = isAdminCaller ? Number(req.query?.event_row_id) : Number.NaN
+    return Number.isInteger(eventRowId) && eventRowId > 0 ? { _id: eventRowId } : { event_url: req.params.event_url }
+}
+
+export const getEventIndividualDetails = async (req: any, user_row_id: number, isAdminCaller = false) => {
     try {
         const event_url = req.params.event_url
         // PERF FIX: was keyed by user_row_id too, so every distinct logged-in viewer of the
@@ -226,7 +239,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
         // originally populated this cache entry.
         const key = `individual_event_${event_url}`
 
-        const cache_response = await redisCache.getCache({ key })
+        const cache_response = isAdminCaller ? { status: false, message: null } : await redisCache.getCache({ key })
         if (cache_response.status) {
             const personalization = await resolveViewerPersonalization({
                 eventId: cache_response.message._id,
@@ -243,7 +256,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
         }
         const eventsList = await eventM.aggregate([
             {
-                $match: { event_url: event_url, active_status: 1, approval_status: 1 }
+                $match: { ...resolveEventIdentity(req, isAdminCaller), ...(isAdminCaller ? {} : PUBLIC_EVENT_VISIBILITY) }
             },
             {
                 $lookup:
@@ -608,6 +621,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
                     event_card_image: 1,
                     alt_image_text: 1,
                     approval_status: 1,
+                    active_status: 1,
                     event_description: 1,
                     describe_in_one_line: 1,
                     contact_mobile_number: 1,
@@ -687,7 +701,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
 
         let myArr: any = {}
         if (eventsList[0]) {
-            await eventM.findOneAndUpdate({ _id: eventsList[0]._id }, { $inc: { view_counts: 1 } })
+            if (!isAdminCaller) {
+                await eventM.findOneAndUpdate({ _id: eventsList[0]._id }, { $inc: { view_counts: 1 } })
+            }
             let eventDetails = eventsList[0]
             myArr['_id'] = eventDetails._id
 
@@ -2237,11 +2253,13 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number) =
             Object.assign(myArr, personalization)
 
             // res.json({ status: true, message: myArr })
-            await redisCache.setCache({
-                key,
-                value: myArr,
-                ttl: 1800
-            })
+            if (!isAdminCaller) {
+                await redisCache.setCache({
+                    key,
+                    value: myArr,
+                    ttl: 1800
+                })
+            }
 
             return { status: true, message: myArr, cache_reponse_status: false }
 
