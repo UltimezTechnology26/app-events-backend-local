@@ -1,4 +1,4 @@
-// modules/professionals-points/professionals-points.service.ts
+// modules/benefits/benefits.points.service.ts
 // Ports controllers/app/users/points.js's GET /list/:skip/:limit — the self-service "my points
 // balance" view (distinct from professionals-audit's admin-side points_list). Legacy's own file
 // already carries a confirmed bug fix from a prior engagement (total_entries counting the
@@ -8,6 +8,10 @@
 // professionals_pointsM is shared with several still-live legacy files (admin_panel/app/user.js,
 // setting.js, pro_batch.js, etc.) — required directly, not colocated, matching the same model's
 // treatment in professionals-audit.service.ts.
+//
+// Moved here from src/modules/professionals-points/ (2026-10-05): grouped alongside benefits,
+// since both read/award the same professionals_pointsM points ledger, rather than living in their
+// own single-route module.
 const ProfessionalsPointsM = require('../../../models/app/users/professionals_pointsM')
 
 export interface UserTokenAuthFailure {
