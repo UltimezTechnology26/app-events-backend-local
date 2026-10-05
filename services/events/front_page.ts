@@ -3,7 +3,7 @@ import redisCache, { CacheDuration } from '../../config/redis';
 import eventM from '../../models/app/events/eventM';
 import { getDistanceFromLatLon, getIntIdFromArray, getPresentDateTime } from '../../utils/helpers/helper';
 import event_link_display_detailsM from '../../models/app/events/event_link_display_detailsM';
-import event_faqM from '../../models/app/events/event_faqM';
+import { findFaqsByRoot } from '../../src/common/app-faq/app-faq.repository';
 import event_collaborationM from '../../models/app/events/event_collaborationM';
 import event_guestsM from '../../models/app/events/event_guestsM';
 import ticketM from '../../models/app/events/ticketM';
@@ -819,7 +819,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             // the first flag-dependent query needs them — see further down.
             const get_event_link_display_details_promise = event_link_display_detailsM.findOne({ event_row_id: eventsList[0]._id })
 
-            const event_faqs_query = event_faqM.find({ event_row_id: eventsList[0]._id })
+            const event_faqs_query = findFaqsByRoot({ module: 'event', rootDocumentId: eventsList[0]._id })
 
             const get_collaboration_query = event_collaborationM.aggregate([
                 {
@@ -2243,7 +2243,14 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             myArr['sponsors'] = sponsors_result.length > 0 ? sponsors_result : []
             myArr['partners'] = partners_result.length > 0 ? partners_result : []
 
-            myArr['event_faqs'] = event_faqs
+            // question/answer -> faq_question/faq_answer: cln_app_faqs stores the markets-
+            // matching field names internally, but this public endpoint's response contract is
+            // unchanged - see app-faq.model.ts's own doc comment.
+            myArr['event_faqs'] = (event_faqs as { _id: number; question: string; answer: string }[]).map((faq) => ({
+                _id: faq._id,
+                faq_question: faq.question,
+                faq_answer: faq.answer,
+            }))
             myArr['collaborations_ids_list'] = collaborations_list[0] ? collaborations_list[0].collaborations_ids_list : []
             myArr['tickets'] = tickets
             myArr['coupons'] = coupon

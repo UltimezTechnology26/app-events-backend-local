@@ -22,7 +22,7 @@ const event_seo_detailsM = require('../../../models/app/events/event_seo_details
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const ticketM = require('../../../models/app/events/ticketM')
 const couponM = require('../../../models/app/events/couponM')
-const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const { AppFaqM } = require('../../common/app-faq/app-faq.model')
 const event_contactsM = require('../../../models/app/events/event_contactsM')
 const event_speakersM = require('../../../models/app/events/event_speakersM')
 const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
@@ -339,6 +339,22 @@ const FAQ_EDITABLE_FIELDS = ['faq_question', 'faq_answer'] as const
 const FAQ_FIELD_LABELS: Record<string, string> = {
   faq_question: 'Question',
   faq_answer: 'Answer',
+}
+
+// Events FAQ's own field set — distinct from FAQ_EDITABLE_FIELDS/FAQ_FIELD_LABELS above (still
+// Company's/Professional's, on their own untouched cln_company_faq_lists/
+// cln_professionals_faq_lists collections) because Events FAQ's underlying schema was migrated
+// onto the shared cln_app_faqs collection with markets-matching field names (question/answer, not
+// faq_question/faq_answer) - see src/common/app-faq/app-faq.model.ts's own doc comment. sort_order
+// rides along in editableFields (so an admin-approved CREATE's apply-writer write includes it, see
+// events-faq.service.ts's own comment) but is left out of displayFields - a reviewer diffing a FAQ
+// change cares about the question/answer content, not a bookkeeping position number.
+const EVENT_FAQ_EDITABLE_FIELDS = ['question', 'answer', 'sort_order'] as const
+const EVENT_FAQ_DISPLAY_FIELDS = ['question', 'answer'] as const
+
+const EVENT_FAQ_FIELD_LABELS: Record<string, string> = {
+  question: 'Question',
+  answer: 'Answer',
 }
 
 const HOLDING_CRYPTO_EDITABLE_FIELDS = [
@@ -1423,15 +1439,23 @@ export const SECTION_REGISTRY = {
     invalidateCache: () => invalidateEventCaches(),
   },
   [SECTION_EVENT_FAQ]: {
-    collection: 'cln_events_faq_lists',
-    keyField: 'event_row_id',
+    // 'cln_app_faqs' is a shared, module-discriminated collection now (src/common/app-faq) - the
+    // FAQ-unification pilot domain. Suffixed '__event' so this stays a unique SECTION_MODELS key
+    // (change-request.apply.writers.ts) once Company/Professional FAQ migrate onto the same
+    // physical collection too; it's a lookup key here, not a literal Mongo collection name - see
+    // that file's own SECTION_MODELS doc comment.
+    collection: 'cln_app_faqs__event',
+    keyField: 'root_document_id',
     isList: true,
-    // Same field set as Company/Professional FAQ (FAQ_EDITABLE_FIELDS/FAQ_FIELD_LABELS above) -
-    // event_faqM.js's schema matches field-for-field, so it's reused rather than duplicated.
-    editableFields: FAQ_EDITABLE_FIELDS,
+    // Own field set (EVENT_FAQ_EDITABLE_FIELDS/EVENT_FAQ_FIELD_LABELS above), NOT
+    // FAQ_EDITABLE_FIELDS/FAQ_FIELD_LABELS (still Company's/Professional's, on their own untouched
+    // collections) - AppFaqM's schema uses markets-matching field names (question/answer), unlike
+    // those two.
+    editableFields: EVENT_FAQ_EDITABLE_FIELDS,
     labelResolvers: {},
-    fieldLabels: FAQ_FIELD_LABELS,
-    schemaPaths: (field: string) => event_faq_listsM.schema.path(field),
+    fieldLabels: EVENT_FAQ_FIELD_LABELS,
+    displayFields: EVENT_FAQ_DISPLAY_FIELDS,
+    schemaPaths: (field: string) => AppFaqM.schema.path(field),
     invalidateCache: () => invalidateEventCaches(),
   },
   [SECTION_EVENT_CONTACT]: {

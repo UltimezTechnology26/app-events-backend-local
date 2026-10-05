@@ -19,7 +19,7 @@ const event_seo_detailsM = require('../../../models/app/events/event_seo_details
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const ticketM = require('../../../models/app/events/ticketM')
 const couponM = require('../../../models/app/events/couponM')
-const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const { createModuleScopedFaqModel } = require('../../common/app-faq/app-faq.model')
 const event_contactsM = require('../../../models/app/events/event_contactsM')
 const event_speakersM = require('../../../models/app/events/event_speakersM')
 const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
@@ -65,7 +65,12 @@ export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_events_link_display_details: event_link_display_detailsM,
   cln_event_tickets: ticketM,
   cln_event_coupons: couponM,
-  cln_events_faq_lists: event_faq_listsM,
+  // Module-scoped wrapper over the shared cln_app_faqs collection (src/common/app-faq) - every
+  // filter/payload it forwards gets `module: 'event'` merged in, so this section's create/update/
+  // delete can never reach another domain's FAQ rows once Company/Professional migrate onto the
+  // same physical collection. 'cln_app_faqs__event' is this map's lookup key, not a literal Mongo
+  // collection name - see change-request.registry.ts's own SECTION_EVENT_FAQ doc comment.
+  cln_app_faqs__event: createModuleScopedFaqModel('event'),
   cln_event_contacts: event_contactsM,
   cln_events_speakers: event_speakersM,
   cln_event_sponsor_partner_details: event_sponsors_partner_detailsM,

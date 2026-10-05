@@ -66,7 +66,7 @@ const lessonsM = require('../../models/main/academy/lessonsM')
 const { generateUserLoginToken } = require('../../middleware/authorization')
 const event_contactsM = require('../../models/app/events/event_contactsM')
 const ticketM = require('../../models/app/events/ticketM')
-const event_faqM = require('../../models/app/events/event_faqM')
+const { countFaqsByRoot } = require('../../src/common/app-faq/app-faq.repository')
 const event_utc_datesM = require('../../models/app/events/event_utc_datesM')
 const eventsM = require('../../models/app/events/eventM')
 const MARKET_API_BASE_URL = process.env.MARKET_API_BASE_URL
@@ -1848,7 +1848,7 @@ export async function calculateEventScore(event_row_id, fieldsToUpdate = ["profi
   // ✅ 7. FAQ (10%)
   // -----------------------------------------------------------
   if (fullUpdate || fieldsToUpdate.includes("faq")) {
-    const faqCount = await event_faqM.countDocuments({ event_row_id });
+    const faqCount = await countFaqsByRoot({ module: 'event', rootDocumentId: event_row_id });
     const score = faqCount >= 4 ? 10 : 0;
 
     updateObject.faq_score = score;

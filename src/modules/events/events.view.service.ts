@@ -8,7 +8,7 @@
 // depends on any other's result (each only needs checkEvent[0]._id / contact_country_row_id,
 // already known upfront). Fixed here with one Promise.all instead of six sequential round-trips.
 import { EventM } from './events.models'
-const event_faqM = require('../../../models/app/events/event_faqM')
+const { findFaqsByRoot } = require('../../common/app-faq/app-faq.repository')
 const ticketM = require('../../../models/app/events/ticketM')
 const countryM = require('../../../models/app/static/countryM')
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
@@ -106,7 +106,7 @@ export async function getEventView(requestRowId: number) {
     event.contact_country_row_id ? countryM.findOne({ _id: event.contact_country_row_id }) : Promise.resolve(null),
     event_link_display_detailsM.findOne({ event_row_id: event._id }),
     ticketM.find({ event_row_id: event._id }),
-    event_faqM.find({ event_row_id: event._id }),
+    findFaqsByRoot({ module: 'event', rootDocumentId: event._id }),
     event_contactsM.aggregate(buildContactDetailsPipeline(event._id)),
     event_speakersM.aggregate(buildSpeakersPipeline(event._id)),
     event_sponsors_partner_detailsM.aggregate(buildSponsorsPartnersPipeline(event._id)),
@@ -125,7 +125,14 @@ export async function getEventView(requestRowId: number) {
     result['link_contact_status'] = linkDisplayDetails.link_contact_status
   }
 
-  result['event_faqs'] = faqs
+  // question/answer -> faq_question/faq_answer: cln_app_faqs stores the markets-matching field
+  // names internally, but this endpoint's response contract is unchanged - see app-faq.model.ts's
+  // own doc comment.
+  result['event_faqs'] = (faqs as { _id: number; question: string; answer: string }[]).map((faq) => ({
+    _id: faq._id,
+    faq_question: faq.question,
+    faq_answer: faq.answer,
+  }))
   result['tickets'] = tickets
   result['contact_details'] = contactDetails.length > 0 ? contactDetails : []
   result['speakers_usernames'] = speakers.map((s: { user_row_id: number; user_type: number }) => ({ user_row_id: s.user_row_id, user_type: s.user_type }))
