@@ -6,7 +6,7 @@ const sanitize = require('mongo-sanitize')
 const { check, validationResult } = require('express-validator')
 const { startAndEndOfWeek, getPresentDateTime, arrangeValidation, startAndEndOfToday, startAndEndOfTomorrow, getIntIdFromArray, monthStartEndDate, createDateTime, createEndDateOnly, getDistanceFromLatLon } = require('../../../utils/helpers/helper')
 const { DateFormatter, deleteEventWatchlist, filterQuery, getEventsData, } = require('../../../utils/helpers/events_helper')
-const { checkUserLoginToken } = require('../../../middleware/authorization')
+const { checkUserLoginToken, checkAdminLoginToken } = require('../../../middleware/authorization')
 const { sendEventsEmail } = require('../../../config/email')
 const { setCache, getCache, deleteKeysByPattern } = require('../../../config/cache_helper')
 const { updateNotification, updateThreadNotification } = require('../../../utils/helpers/notification_helper')
@@ -3696,7 +3696,12 @@ router.get('/individual_event/:event_url', async (req, res) => {
             user_row_id = checkUserToken.message
         }
 
-        const result = await getEventIndividualDetails(req, user_row_id)
+        // Admin-only bypass of the approved+enabled gate (same pattern as /user_detail's own,
+        // controllers/app/link_pages.js) - lets the admin panel's View page preview an event that
+        // is still pending its first approval, without opening it up to the public.
+        const isAdminCaller = checkAdminLoginToken(req.headers, [-1]).status
+
+        const result = await getEventIndividualDetails(req, user_row_id, isAdminCaller)
 
         if (result.status) {
             res.json({

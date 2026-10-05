@@ -13,6 +13,7 @@ import { applyAcquisitionWrite } from '../../modules/company_acquisitions/compan
 import { applyProfessionalStatusWrite, applyProfessionalStatusSideEffects } from '../../modules/professionals/professionals.lifecycle-apply'
 import { applyCompanyStatusWrite, applyCompanyStatusSideEffects } from '../../modules/company_admin/company_admin.lifecycle-apply'
 import { applyEventStatusWrite, applyEventStatusSideEffects } from '../../modules/events/events.lifecycle-apply'
+import { recalculateProfileScoreAfterChange } from './change-request.profile-score'
 
 /**
  * Dispatches to the section-specific writer for every section that declared
@@ -330,5 +331,228 @@ export async function applyChangeRequest({
     }
   }
 
+  // The published data now counts toward the record's profile score ("Profile Strength").
+  await recalculateProfileScoreAfterChange({
+    module: request.module,
+    section: request.section,
+    rootDocumentId: request.root_document_id,
+    payload: effectivePayload,
+  })
+
   return { status: true, message: { alert_message: APPLIED_MESSAGE }, appliedFieldCount }
+}
+
+const DIRECT_STATUS_SECTIONS: ReadonlySet<string> = new Set([SECTION_PROFESSIONAL_STATUS, SECTION_COMPANY_STATUS, SECTION_EVENT_STATUS])
+const DIRECT_APPLY_FAILED_MESSAGE = 'Sorry, this action could not be completed. Please try again.'
+
+/**
+ * Applies a module-status action (first-time Approve / Reject of a Company, Professional or Event)
+ * straight to live data - no change request is created, so nothing lands in Pending Changes and no
+ * second approve/publish step exists (user-requested 2026-10-04: only the main admin and Marketing
+ * Full Access can approve/reject a profile, so there is no maker to check). Reuses the exact same
+ * section writer + side effects the publish flow runs for these sections, in the same transaction
+ * shape, so the resulting state, emails, notifications, audit log and caches are identical to what a
+ * published status request produced.
+ */
+export async function applyStatusActionDirectly({
+  module,
+  section,
+  rootDocumentId,
+  payload,
+  actor,
+  successMessage,
+}: {
+  module: string
+  section: string
+  rootDocumentId: number
+  payload: Record<string, unknown>
+  actor: ActorRef
+  successMessage: string
+}): Promise<{ status: boolean; message: { alert_message: string } }> {
+  if (!isKnownSection(section) || !DIRECT_STATUS_SECTIONS.has(section)) {
+    logger.error({ section }, 'change-request: direct apply attempted on a non-status section')
+    return { status: false, message: { alert_message: DIRECT_APPLY_FAILED_MESSAGE } }
+  }
+
+  const config: SectionConfig = SECTION_REGISTRY[section]
+
+  // Never persisted - only the shape the shared writers/side-effects read (payload + root id + actor).
+  const request: ChangeRequestDoc = {
+    _id: 0,
+    module,
+    target_collection: config.collection,
+    target_row_id: null,
+    root_document_id: rootDocumentId,
+    section,
+    action: ACTION_UPDATE as ChangeRequestDoc['action'],
+    payload,
+    changes: [],
+    revision: 1,
+    status: CHANGE_REQUEST_STATUS.APPROVED,
+    requested_by: actor,
+    requested_at: new Date(),
+    apply_started_at: null,
+    row_snapshot: null,
+    rating: null,
+    note: null,
+  }
+
+  const session = await mongoose.startSession()
+  try {
+    await session.withTransaction(async () => {
+      await applyCustomSectionWrite({ request, session })
+      const rootModel = ROOT_MODELS[module]
+      if (rootModel) {
+        await rootModel.updateOne({ _id: rootDocumentId }, { $set: rootDocumentTrackerFields(actor) }, { session })
+      }
+    })
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct status apply transaction failed')
+    return { status: false, message: { alert_message: DIRECT_APPLY_FAILED_MESSAGE } }
+  } finally {
+    await session.endSession()
+  }
+
+  try {
+    await config.invalidateCache?.(rootDocumentId)
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct status apply cache invalidation failed')
+  }
+
+  try {
+    if (section === SECTION_PROFESSIONAL_STATUS) await applyProfessionalStatusSideEffects({ request, actor })
+    else if (section === SECTION_COMPANY_STATUS) await applyCompanyStatusSideEffects({ request, actor })
+    else await applyEventStatusSideEffects({ request, actor })
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct status apply side effects failed')
+  }
+
+  return { status: true, message: { alert_message: successMessage } }
+}
+
+const DIRECT_EDIT_SAVED_MESSAGE = 'Changes saved successfully'
+
+export interface ApplyEditDirectlyParams {
+  module: string
+  section: string
+  scope: 'document' | 'child'
+  action: ChangeRequestDoc['action']
+  rootDocumentId: number
+  targetRowId: number | null
+  /** The fields being written (new values only) - empty for a child delete. */
+  payload: Record<string, unknown>
+  /** Display diff, recorded in the history log. */
+  changes: ChangeRequestDoc['changes']
+  /** Child delete only - the row being removed, kept in the history log. */
+  rowSnapshot?: Record<string, unknown> | null
+  actor: ActorRef
+}
+
+/**
+ * Writes one section's edit straight to live data - no change request is created, so nothing lands
+ * in Pending/Approved Changes and there is no approve/publish step. Used while the owning Company,
+ * Professional or Event is itself still pending its first approval (see change-request.pending-gate.ts):
+ * the admin who finally approves the record reviews all of it then. Runs the same section writer,
+ * root-tracker stamp, cache invalidation and Basic Details side effects the publish flow runs, so the
+ * resulting data is identical to what a published request would have produced.
+ */
+export async function applyEditDirectly({
+  module,
+  section,
+  scope,
+  action,
+  rootDocumentId,
+  targetRowId,
+  payload,
+  changes,
+  rowSnapshot = null,
+  actor,
+}: ApplyEditDirectlyParams): Promise<{ status: boolean; message: { alert_message: string }; changeCount?: number }> {
+  if (!isKnownSection(section)) {
+    logger.error({ section }, 'change-request: direct edit on an unknown section')
+    return { status: false, message: { alert_message: INVALID_SECTION_MESSAGE } }
+  }
+
+  const config: SectionConfig = SECTION_REGISTRY[section]
+  const model = SECTION_MODELS[config.collection]
+  if (!model) {
+    logger.error({ section, collection: config.collection }, 'change-request: no model registered for direct edit')
+    return { status: false, message: { alert_message: INVALID_SECTION_MESSAGE } }
+  }
+
+  // Never persisted - only the shape the shared section writers read.
+  const request: ChangeRequestDoc = {
+    _id: 0,
+    module,
+    target_collection: config.collection,
+    target_row_id: targetRowId,
+    root_document_id: rootDocumentId,
+    section,
+    scope,
+    action,
+    payload,
+    changes: [],
+    revision: 1,
+    status: CHANGE_REQUEST_STATUS.APPROVED,
+    requested_by: actor,
+    requested_at: new Date(),
+    apply_started_at: null,
+    row_snapshot: rowSnapshot,
+    rating: null,
+    note: null,
+  } as ChangeRequestDoc
+
+  const session = await mongoose.startSession()
+  try {
+    await session.withTransaction(async () => {
+      if (config.customWriter) await applyCustomSectionWrite({ request, session })
+      else await applySectionWrite({ request, config, model, session })
+      const rootModel = ROOT_MODELS[module]
+      if (rootModel) {
+        await rootModel.updateOne({ _id: rootDocumentId }, { $set: rootDocumentTrackerFields(actor) }, { session })
+      }
+    })
+  } catch (err) {
+    logger.error({ err, module, section, rootDocumentId }, 'change-request: direct edit transaction failed')
+    return { status: false, message: { alert_message: DIRECT_APPLY_FAILED_MESSAGE } }
+  } finally {
+    await session.endSession()
+  }
+
+  try {
+    await insertChangeLog({
+      module,
+      target_collection: config.collection,
+      target_row_id: targetRowId ?? rootDocumentId,
+      root_document_id: rootDocumentId,
+      section,
+      action: LOG_ACTION_PUBLISH,
+      actor,
+      changes,
+      reason: null,
+      snapshot: rowSnapshot,
+    })
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct edit log write failed')
+  }
+
+  try {
+    await config.invalidateCache?.(rootDocumentId)
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct edit cache invalidation failed')
+  }
+
+  try {
+    if (section === SECTION_BASIC_DETAILS) {
+      await applyBasicDetailsSideEffects({ action: action === 'create' ? 'create' : 'update', companyRowId: rootDocumentId, payload, actor })
+    } else if (section === SECTION_PROFESSIONAL_BASIC_DETAILS) {
+      await applyProfessionalBasicDetailsSideEffects({ action: action === 'create' ? 'create' : 'update', userRowId: rootDocumentId, payload, actor })
+    }
+  } catch (err) {
+    logger.error({ err, section, rootDocumentId }, 'change-request: direct edit side effects failed')
+  }
+
+  await recalculateProfileScoreAfterChange({ module, section, rootDocumentId, payload })
+
+  return { status: true, message: { alert_message: DIRECT_EDIT_SAVED_MESSAGE }, changeCount: Math.max(changes.length, 1) }
 }

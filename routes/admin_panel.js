@@ -4,8 +4,10 @@ const router = express.Router()
 //admin - Starts Here
 const blocked_domian = require('../controllers/admin_panel/blocked_domian')
 const dashboard = require('../controllers/admin_panel/dashboard')
-const sub_admin = require('../controllers/admin_panel/sub_admin')
 const sub_admin_auth = require('../controllers/admin_panel/sub_admin_auth')
+const { subAdminRouter } = require('../src/modules/sub_admin/sub_admin.controller')
+const { subAdminAccessTypeRouter } = require('../src/modules/sub_admin/sub_admin_access_type.controller')
+const { subAdminEmailsRouter } = require('../src/modules/sub_admin/sub_admin_emails.controller')
 const crypto_category = require('../controllers/admin_panel/category_tags/crypto_category')
 
 const company_categories = require('../controllers/admin_panel/category_tags/company_business_model')
@@ -270,7 +272,17 @@ router.use('/users_v2', professionalsRouter)
 // no legacy '/users_v2' sibling to collide with.
 router.use('/professionals_change_approvals_v2', professionalsChangeApprovalsRouter)
 
-router.use('/sub_admin', sub_admin)
+// TS port of controllers/admin_panel/sub_admin.js (src/modules/sub_admin/) -
+// CONFIRMED CUTOVER (2026-10-03): the legacy controller + its `/sub_admin`
+// mount have been deleted after verifying every endpoint end-to-end against
+// frontend-appcp-typescript (list/create/update/enable/disable/password/
+// access_types/update_access_type/refresh_access_type/email CRUD all
+// returned identical responses through the new `_v2` routes). No business
+// logic changed during the port - see each service file's own doc comment
+// for the exact legacy lines it mirrors.
+router.use('/sub_admin_v2', subAdminRouter)
+router.use('/sub_admin_v2', subAdminAccessTypeRouter)
+router.use('/sub_admin_emails_v2', subAdminEmailsRouter)
 router.use('/sub_admin_auth', sub_admin_auth)
 // controllers/admin_panel/app/company_approvals.js fully migrated and deleted — every route it
 // defined now lives directly in modules/company_admin/company_admin.approvals.controller.ts's

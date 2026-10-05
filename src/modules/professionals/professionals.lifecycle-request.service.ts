@@ -16,6 +16,8 @@ import { getUpdateTrackerFields } from '@ultimez-interview/coinpedia-backend-lib
 import { insertChangeRequest, findPendingRequest } from '../../modules/change-request/change-request.queries'
 import { CHANGE_REQUEST_ACTION } from '../../modules/change-request/change-request.types'
 import { SECTION_PROFESSIONAL_STATUS } from '../../modules/change-request/change-request.registry'
+import { applyStatusActionDirectly } from '../../modules/change-request/change-request.apply'
+import { canApproveChangeRequests } from '../../modules/change-request/change-request.validation'
 import { AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-audit.registry'
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
@@ -59,7 +61,28 @@ interface SubmitLifecycleActionParams {
   newLabel: string
 }
 
+const ONLY_FULL_ACCESS_MESSAGE = 'Only the main admin or a Marketing Full Access sub-admin can approve or reject.'
+const DIRECT_ACTIONS = ['approve', 'reject']
+
 async function submitLifecycleAction({ admin, userRowId, intendedAction, reasonForDisable, oldLabel, newLabel }: SubmitLifecycleActionParams) {
+  // First-time Approve/Reject of the professional itself is applied directly (user-requested
+  // 2026-10-04): restricted to the main admin / Marketing Full Access, never staged as a change request.
+  if (DIRECT_ACTIONS.includes(intendedAction)) {
+    if (!canApproveChangeRequests(admin.message.admin_manager_type, admin.message.sub_admin_type)) {
+      return { status: false, message: { alert_message: ONLY_FULL_ACCESS_MESSAGE } }
+    }
+    const directPayload: Record<string, unknown> = { intended_action: intendedAction }
+    if (reasonForDisable) directPayload['reason_for_disable'] = reasonForDisable
+    return applyStatusActionDirectly({
+      module: AUDIT_MODULE_PROFESSIONALS,
+      section: SECTION_PROFESSIONAL_STATUS,
+      rootDocumentId: userRowId,
+      payload: directPayload,
+      actor: actorFrom(admin),
+      successMessage: intendedAction === 'approve' ? 'The professional has been approved successfully.' : 'The professional has been rejected successfully.',
+    })
+  }
+
   const existing = await findPendingRequest({ module: AUDIT_MODULE_PROFESSIONALS, rootDocumentId: userRowId, section: SECTION_PROFESSIONAL_STATUS })
   if (existing) {
     return { status: false, message: { alert_message: ALREADY_PENDING_MESSAGE } }

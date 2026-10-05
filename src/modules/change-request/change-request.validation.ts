@@ -24,6 +24,9 @@ export const CHANGE_REQUEST_MESSAGES = {
 /** admin_manager_type 1 is a main admin; 2 is a sub-admin. */
 export const ADMIN_MANAGER_TYPE_MAIN = 1
 
+/** sub_admin_type 1 = Marketing Restricted, 2 = Developer, 3 = Marketing Full. */
+export const SUB_ADMIN_TYPE_MARKETING_FULL = 3
+
 export interface NumericIdValidation {
   valid: boolean
   message: string | null
@@ -54,17 +57,19 @@ export const isMainAdmin = (adminManagerType: unknown): boolean =>
 
 /**
  * Maker-checker gate for approve/reject/publish (and their field-level and publish-all variants)
- * on change requests, shared by both the Company and Professionals modules.
+ * on change requests, shared by the Company, Professionals and Events modules.
  *
- * REVERTED (user-requested, 2026-09-22): this briefly also allowed a Developer or Marketing-Full
- * sub-admin to approve/reject/publish, alongside the main admin. Per explicit follow-up request,
- * that's reverted - only the main admin may approve, reject, or publish a change request; every
- * sub-admin type is excluded from this specific maker-checker step (they can still create/edit/
- * enable/disable companies and professionals like before, just never approve their own or anyone
- * else's changes).
+ * Allowed: the main admin, and a Marketing Full Access sub-admin (sub_admin_type 3) - re-allowed
+ * per explicit user request (2026-10-03). Marketing Restricted (1) and Developer (2) sub-admins
+ * stay excluded: they can still create/edit/enable/disable and cancel their own requests, just
+ * never approve, reject or publish. History: a Developer + Marketing-Full widening was reverted on
+ * 2026-09-22; this narrower grant (Marketing Full only) replaces it.
+ *
+ * Must stay in lockstep with the frontend's `canApproveChangeRequests` in
+ * coinpedia-shared-components (components/change-approvals/actor-label.utils.ts).
  */
-export const canApproveChangeRequests = (adminManagerType: unknown, _subAdminType?: unknown): boolean =>
-  isMainAdmin(adminManagerType)
+export const canApproveChangeRequests = (adminManagerType: unknown, subAdminType?: unknown): boolean =>
+  isMainAdmin(adminManagerType) || Number(subAdminType) === SUB_ADMIN_TYPE_MARKETING_FULL
 
 export interface RatingValidation {
   valid: boolean
