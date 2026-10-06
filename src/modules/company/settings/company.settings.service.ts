@@ -692,8 +692,10 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
     })
   }
 
-  await invalidateBasicDetailsCaches()
   await upsertCompanySeoDetails({ company_row_id, seoArray })
+  // Cleared AFTER the SEO upsert: the profile page joins SEO, so clearing before it let a read in
+  // between re-cache the stale SEO for up to 30 minutes.
+  await invalidateBasicDetailsCaches()
   await calculateCompanyProfileScore(company_row_id, ['basic', 'team_detail'])
 
   // CONFIRMED CLEANUP (Part 3 §7 Phase G, not a functional bug fix): the real source also
@@ -880,8 +882,9 @@ export async function applyBasicDetailsSideEffects({ action, companyRowId, paylo
     })
   }
 
-  await invalidateBasicDetailsCaches()
   await upsertCompanySeoDetails({ company_row_id: companyRowId, seoArray })
+  // Cleared AFTER the SEO upsert (see the owner path above for why the order matters).
+  await invalidateBasicDetailsCaches()
   await calculateCompanyProfileScore(companyRowId, ['basic', 'team_detail'])
 }
 

@@ -29,6 +29,7 @@ import {
   updateCompanyCreatedByAdminClaimStatus,
 } from './company_claim_requests.queries'
 import { AdminActor, UserActor, AdminTokenPayload } from './company_claim_requests.types'
+import { invalidateBasicDetailsCaches } from '../company/settings/company.settings.cache'
 
 const JWT_CLAIM_SECRET_KEY = process.env.JWT_CLAIM_SECRET_KEY
 
@@ -226,6 +227,9 @@ export async function verifyClaim({ actor, claimTokenRaw }: VerifyClaimParams) {
 
   const updateFields = getUpdateTrackerFields(actor)
   await updateCompanyOwnership(company_row_id, { user_row_id: token_user_row_id, ...updateFields })
+  // Ownership/claim status changed live; the public company list and profile page showed the old
+  // (unclaimed) state until their TTL expired because nothing cleared those caches here.
+  await invalidateBasicDetailsCaches()
 
   return { status: true, message: { alert_message: 'Company claimed successfully' } }
 }
@@ -302,6 +306,9 @@ export async function approveClaimRequest({ admin, requestRowIdRaw }: ApproveCla
   await updateCompanyOwnership(company_row_id, { user_row_id, claim_status: 2, ...updateFields })
   await updateCompanyCreatedByAdminClaimStatus(company_row_id, 2)
   await updateClaimRequestStatus(request_row_id, { claim_status: 2, claim_action_date_n_time: getPresentDateTime() })
+  // Same as the user-token claim path above: the company's ownership changed live, so the public
+  // company list/profile page must refresh (nothing cleared them before).
+  await invalidateBasicDetailsCaches()
 
   if (user_row_id) {
     await updateNotification({ user_row_id, notify_type: 2, notify_type_row_id: company_row_id, message_row_id: 13, action_row_id: request_row_id })

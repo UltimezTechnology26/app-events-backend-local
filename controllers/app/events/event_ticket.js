@@ -18,6 +18,7 @@ const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { getCache, setCache, deleteKeysByPattern } = require('../../../config/cache_helper')
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
+const { invalidatePublicEventCaches } = require('../../../src/modules/events/events.cache')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 const { submitChildChangeRequest, submitChildDeleteRequest } = require('../../../src/modules/change-request/change-request.child.service')
 const { AUDIT_MODULE_EVENTS } = require('../../../src/common/status-audit/status-audit.registry')
@@ -511,6 +512,8 @@ router.get('/delete_ticket/:ticket_row_id', async (req, res) => {
                 deleteTickets({ type: 1, event_row_id: event_row_id, ticket_row_id: ticket_row_id })
                 await deleteKeysByPattern('ticket_list_*')
                 await deleteKeysByPattern('individual_event_*')
+                // Tickets feed the public events list (price / ticket status) - only the event page was cleared.
+                await invalidatePublicEventCaches()
 
                 await calculateEventScore(event_row_id, ['tickets_coupons'])
 
@@ -543,6 +546,7 @@ router.get('/enable_ticket/:ticket_row_id', async (req, res) => {
                         await ticketM.updateOne({ _id: ticket_row_id }, { $set: { active_status: 1 } })
                         await deleteKeysByPattern('ticket_list_*')
                         await deleteKeysByPattern('individual_event_*')
+                        await invalidatePublicEventCaches()
                         res.json({ status: true, message: { alert_message: "Enabled Ticket Successfully" } })
                     }
                     else {
@@ -578,6 +582,7 @@ router.get('/disable_ticket/:ticket_row_id', async (req, res) => {
                     await ticketM.updateOne({ _id: ticket_row_id }, { $set: { active_status: 0 } })
                     await deleteKeysByPattern('ticket_list_*')
                     await deleteKeysByPattern('individual_event_*')
+                    await invalidatePublicEventCaches()
                     res.json({ status: true, message: { alert_message: "Disabled Ticket Successfully" } })
                 }
                 else {

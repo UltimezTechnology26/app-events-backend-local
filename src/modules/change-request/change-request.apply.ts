@@ -331,6 +331,17 @@ export async function applyChangeRequest({
     }
   }
 
+  // Status sections (enable/disable/delete) run their side effects - including the delete cascade
+  // - AFTER the cache clear above, so a public read in between could re-cache the not-yet-deleted
+  // record for up to its TTL. Clear again now that the cascade has finished.
+  if (request.section === SECTION_PROFESSIONAL_STATUS || request.section === SECTION_COMPANY_STATUS || request.section === SECTION_EVENT_STATUS) {
+    try {
+      await config.invalidateCache?.(request.root_document_id)
+    } catch (err) {
+      logger.error({ err, changeRequestId }, 'change-request: post-side-effects cache invalidation failed')
+    }
+  }
+
   // The published data now counts toward the record's profile score ("Profile Strength").
   await recalculateProfileScoreAfterChange({
     module: request.module,

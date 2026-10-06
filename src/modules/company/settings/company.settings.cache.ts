@@ -17,6 +17,9 @@ const BASIC_DETAILS_CACHE_PATTERNS = [
   'individual_event_*',
   'app_user_detail_*',
   'app_popular_companies*',
+  // The public trending-companies list (12 h TTL, company.discovery.ts) shows name/logo/location/
+  // country but no write path ever cleared it, so a changed company kept its old values there.
+  'app_trending_companies_*',
   'app_search_companies_*',
   'company_watchlist_list_*',
   'professional_detail_list_*',
@@ -36,6 +39,7 @@ const COMPANY_LOGO_CACHE_PATTERNS = [
   'company_followers_*',
   'app_user_detail_*',
   'app_popular_companies*',
+  'app_trending_companies_*',
   'app_search_companies_*',
   'company_watchlist_list_*',
   'professional_detail_list_*',

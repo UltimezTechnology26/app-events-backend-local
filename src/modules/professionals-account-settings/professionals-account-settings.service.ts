@@ -9,6 +9,7 @@ const CompanyM = require('../../../models/app/company/companyM')
 const EventM = require('../../../models/app/events/eventM')
 import { UpdateVerifyEmailsM, ProfessionalsDeleteVerificationsM } from './professionals-account-settings.models'
 import type { UserTokenResult } from './professionals-account-settings.types'
+import { invalidateProfessionalAccountStateCaches } from '../professionals/professionals.cache'
 
 const randomstring = require('randomstring')
 const sanitize = require('mongo-sanitize')
@@ -78,6 +79,10 @@ export async function verifyEmailAndDeleteAccount(auth: UserTokenResult, otpNumb
     checkCompany ? CompanyM.updateOne({ user_row_id: userRowId }, { $set: { active_status: 0 } }) : null,
     checkEvents ? EventM.updateMany({ user_row_id: userRowId }, { $set: { active_status: 0 } }) : null,
   ])
+
+  // The deleted account (and its deactivated company/events) must disappear from the public
+  // lists/pages - nothing cleared those caches before, so the profile kept showing until TTL.
+  await invalidateProfessionalAccountStateCaches()
 
   return { status: true, message: { alert_message: 'Your user account has been deleted successfully.' } }
 }

@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const sanitize = require('mongo-sanitize')
 const { setCache, getCache, deleteKeysByPattern } = require('../../../config/cache_helper')
+const { invalidatePublicEventCaches } = require('../../../src/modules/events/events.cache')
 const { check, validationResult } = require('express-validator')
 const { getPresentDateTime, arrangeValidation, validateAndSaveImage, getIntIdFromArray, generateEventUrl, createDateTime, removeHtmltag } = require('../../../utils/helpers/helper')
 const { checkUserLoginToken, checkAllLoginToken } = require('../../../middleware/authorization')
@@ -360,6 +361,7 @@ router.post('/update_link_display_details', [
 
                     await event_link_display_detailsM(update_object).save()
                     await deleteKeysByPattern('individual_event_*')
+                    await invalidatePublicEventCaches()
 
 
                     res.json({ status: true, message: { alert_message: 'This event link display setting details has been updated succssfully.' } })
@@ -367,6 +369,7 @@ router.post('/update_link_display_details', [
                 else {
                     await event_link_display_detailsM.updateOne({ event_row_id: event_row_id }, { $set: update_object })
                     await deleteKeysByPattern('individual_event_*')
+                    await invalidatePublicEventCaches()
 
 
                     res.json({ status: true, message: { alert_message: 'This event link display setting details has been updated succssfully.' } })
@@ -680,6 +683,7 @@ router.post('/accept_speaker_request', [
         await deleteKeysByPattern('event_speakers_list_*')
         await deleteKeysByPattern('speakers_list*')
         await deleteKeysByPattern('individual_event_*')
+        await invalidatePublicEventCaches()
         const userInfo = await professionalsM.findOne({ _id: user_row_id }, { full_name: 1, email_id: 1 });
         if (!userInfo) {
             res.json({ status: false, message: { alert_message: 'User not found.' } });
@@ -811,6 +815,7 @@ router.post('/reject_speakers_request', [
         await deleteKeysByPattern('speakers_list*')
         await deleteKeysByPattern('event_speakers_list_*')
         await deleteKeysByPattern('individual_event_*')
+        await invalidatePublicEventCaches()
         const userInfo = await professionalsM.findOne({ _id: user_row_id }, { full_name: 1, email_id: 1 });
         if (userInfo) {
             const pass_email_id = userInfo.email_id;
@@ -1144,6 +1149,7 @@ router.get('/delete_speaker/:speaker_row_id', async (req, res) => {
                         await deleteKeysByPattern('event_speakers_list_*')
                         await deleteKeysByPattern('individual_event_*')
                         await deleteKeysByPattern('speakers_list*')
+                        await invalidatePublicEventCaches()
                         const eventData = await eventM.findOne(
                             { _id: check_speaker.event_row_id },
                             { event_url: 1, approval_status: 1, event_title: 1, start_date: 1, event_venue: 1, created_date_n_time: 1, event_type: 1 }
@@ -2220,6 +2226,7 @@ router.post('/submit_event', [
                     await deleteKeysByPattern('speakers_list*')
                     await deleteKeysByPattern('manage_events_list_*')
                     await deleteKeysByPattern('app_user_other_details_*')
+                    await invalidatePublicEventCaches()
 
                     if (changed) {
                         await seo_change_logsM.create({
@@ -2424,6 +2431,7 @@ router.post('/submit_event', [
                     await deleteKeysByPattern('manage_events_list_*')
                     await deleteKeysByPattern('app_user_other_details_*')
                     await deleteKeysByPattern('backend_event_tags_list*')
+                    await invalidatePublicEventCaches()
                     event_row_id = Number.parseInt(dataSave._id)
                     if (user_row_id) {
                         if (admin_row_id) {
@@ -2854,6 +2862,7 @@ router.post('/edit_event', [
                     await deleteKeysByPattern('manage_events_list_*')
                     await deleteKeysByPattern('app_user_other_details_*')
                     await deleteKeysByPattern('backend_event_tags_list*')
+                    await invalidatePublicEventCaches()
                     const event_query = await eventM.aggregate([
                         {
                             $match: { _id: event_row_id, user_row_id: user_row_id }

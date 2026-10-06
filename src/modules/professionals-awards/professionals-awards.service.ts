@@ -195,6 +195,9 @@ export async function deleteAward(auth: UserAuthResult, awardRowIdRaw: string, q
 
   await deleteUserAward({ type: 1, user_row_id: userRowId, award_row_id: awardRowId, award_image: awardImage })
   await deleteKeysByPattern('users_awards_list_*')
+  // The public profile page's aggregate (`app_user_other_details_*`, 12 h TTL) embeds awards - the
+  // add/edit paths clear it, but this delete didn't, so a deleted award kept showing on the profile.
+  await deleteKeysByPattern('app_user_other_details_*')
   await calculateUserProfileScore(userRowId, ['award'])
 
   return { status: true, message: { alert_message: 'This award details for this user have been deleted successfully.' } }
