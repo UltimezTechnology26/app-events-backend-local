@@ -853,7 +853,7 @@ const PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS = [
  * `created_by_sub_admin_id`, `created_date_n_time`, `updated_by*`, `view_counts`) and the
  * meta/SEO/robots/og/twitter fields also present on eventM's own schema (these are legacy/unused
  * here - the live Basic Details form and the separate `event_seo` section below both read/write
- * `cln_events_seo_details`, not these duplicate fields on the event document itself).
+ * `cln_app_seo_details_event`, not these duplicate fields on the event document itself).
  */
 const EVENT_BASIC_DETAILS_EDITABLE_FIELDS = [
   'event_title',
@@ -1056,8 +1056,8 @@ const EVENT_ATTENDEE_FIELD_LABELS: Record<string, string> = {
  */
 export const SECTION_REGISTRY = {
   [SECTION_SEO]: {
-    collection: 'cln_company_seo_details',
-    keyField: 'company_row_id',
+    collection: 'cln_app_seo_details_company',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
@@ -1251,8 +1251,8 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_PROFESSIONAL_SEO]: {
-    collection: 'cln_professionals_seo_details',
-    keyField: 'user_row_id',
+    collection: 'cln_app_seo_details_professional',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
@@ -1404,8 +1404,10 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_EVENT_SEO]: {
-    collection: 'cln_events_seo_details',
-    keyField: 'event_row_id',
+    // Logical section key (also stored on existing change requests) - the rows now live in the
+    // shared cln_app_seo_details collection (entity_type 'event'), see events-seo.models.ts.
+    collection: 'cln_app_seo_details_event',
+    keyField: 'root_document_id',
     isList: false,
     // Same field set as Company/Professional SEO (SEO_EDITABLE_FIELDS/SEO_FIELD_LABELS above) -
     // event_seo_detailsM.js's schema matches field-for-field, so it's reused rather than

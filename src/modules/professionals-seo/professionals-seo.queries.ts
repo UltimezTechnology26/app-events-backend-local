@@ -17,7 +17,7 @@ export async function getUserSeoAggregate(userRowId: number) {
     },
     { $lookup: { from: 'cln_static_countries', localField: 'country_mobile_id', foreignField: '_id', as: 'country_info' } },
     { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_professionals_seo_details', localField: '_id', foreignField: 'user_row_id', as: 'seo_details' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'professional' } }], as: 'seo_details' } },
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals_social_links', localField: '_id', foreignField: 'user_row_id', as: 'social_details' } },
     { $unwind: { path: '$social_details', preserveNullAndEmptyArrays: true } },
@@ -129,6 +129,11 @@ export async function getUserSeoAggregate(userRowId: number) {
         twitter_title: '$seo_details.twitter_title',
         twitter_description: '$seo_details.twitter_description',
         twitter_creator: '$seo_details.twitter_creator',
+        // Standardized suggested title when no custom meta_title is set yet - matches the exact
+        // default the write path already saves on first save
+        // (professionals.self-service.service.ts's `${full_name} | Coinpedia User Profile`), so the
+        // admin SEO form's preview stays in sync with what actually gets written.
+        default_meta_title: { $concat: ['$full_name', ' | Coinpedia User Profile'] },
         faq: 1,
         created_by_status: 1,
         user_name: 1,

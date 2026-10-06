@@ -227,7 +227,7 @@ export interface CompanyInsertPayload {
 }
 
 export interface CompanySeoUpdatePayload {
-  company_row_id?: number
+  root_document_id?: number
   meta_keywords?: string
   meta_description?: string
   meta_title?: string
@@ -482,7 +482,7 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
       companyName: insertArray.company_name,
     })
 
-    seoArray['company_row_id'] = saveCompanyDetails._id
+    seoArray['root_document_id'] = saveCompanyDetails._id
     socialArray['company_row_id'] = saveCompanyDetails._id
 
     if (insertArray.about_company) {
@@ -739,7 +739,7 @@ export async function applyBasicDetailsSideEffects({ action, companyRowId, paylo
   const hasChanged = (newVal: string | undefined) => (newVal ?? '').trim() !== ''
 
   if (action === 'create') {
-    const seoArray: CompanySeoUpdatePayload = { company_row_id: companyRowId }
+    const seoArray: CompanySeoUpdatePayload = { root_document_id: companyRowId }
     const socialArray: CompanySocialLinksPayload = { company_row_id: companyRowId }
 
     if (aboutCompany) {
@@ -1012,7 +1012,7 @@ export async function saveOrUpdateBasicCompanyDetailsTeamPanel({ body, preValida
     insertArray['created_date_n_time'] = date_n_time
 
     const saveCompanyDetails = await companyM(insertArray).save()
-    seoArray['company_row_id'] = saveCompanyDetails._id
+    seoArray['root_document_id'] = saveCompanyDetails._id
     socialArray['company_row_id'] = saveCompanyDetails._id
 
     await company_seo_detailsM(seoArray).save()
@@ -2285,6 +2285,39 @@ export async function getCompanySeo({ actor, companyId }: GetCompanySeoParams) {
       return { status: false, message: { alert_message: 'Invalid Company ID.' } }
     }
     seoData = companyData[0]
+
+    // CONFIRMED FIX (standardization follow-up): `default_meta_title` was only ever computed for
+    // display (buildGetCompanySeoPipeline's own $concat) - a company with no custom meta_title
+    // showed the standardized suggestion every time it was viewed, but nothing was ever actually
+    // saved, so the suggestion lived nowhere but this one request/response. Persisting it here, the
+    // first time it's generated, means the collection itself ends up holding the real value instead
+    // of relying on this fallback forever - matching the already-established write-time default
+    // (saveOrUpdateBasicCompanyDetails's own `companyName + ' | Coinpedia Company Listing'`) for
+    // companies that predate that logic or otherwise never got it backfilled.
+    const defaultTitle = seoData.default_meta_title as string | undefined
+    if (defaultTitle && !seoData.meta_title) {
+      const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+      if (!seoData.og_title) backfill.og_title = defaultTitle
+      if (!seoData.twitter_title) backfill.twitter_title = defaultTitle
+      // CONFIRMED BUG AVOIDED: a bare `updateOne(..., {upsert:true})` never runs CompanySeoDetailsM's
+      // own `pre('save')` counter hook, so a company with no SEO doc at all would get a raw Mongo
+      // ObjectId `_id` instead of this collection's numeric one (caught live while testing this very
+      // backfill). Checking existence first: `updateOne` only when a document is already there,
+      // `new Model().save()` (hook runs, numeric _id assigned) when it isn't.
+      const existingSeo = await findCompanySeoDetailsLean(Number(companyId))
+      if (existingSeo) {
+        await upsertCompanySeoData({ company_row_id: Number(companyId), updateData: backfill })
+      } else {
+        await new company_seo_detailsM({
+          root_document_id: Number(companyId),
+          ...backfill,
+          created_by: { type: 'system', id: null },
+          created_at: new Date(),
+        }).save()
+      }
+      Object.assign(seoData, backfill)
+    }
+
     await setCache({ key: cacheKey, value: seoData, ttl: 1800 })
   }
 

@@ -1,4 +1,5 @@
 const express = require('express')
+const { rejectDuplicateKeywords } = require('../../../src/common/app-seo/app-seo.keywords')
 const router = express.Router()
 const randomstring = require("randomstring")
 const sanitize = require('mongo-sanitize')
@@ -278,7 +279,7 @@ router.post('/update_user_details', [
 
                 // Update SEO details
                 let seo_update_array = {}
-                const check_query = await professionals_seo_detailsM.findOne({ user_row_id: user_row_id }, {
+                const check_query = await professionals_seo_detailsM.findOne({ root_document_id: user_row_id }, {
                     _id: 1, meta_keywords: 1,
                     meta_description: 1,
                     meta_title: 1,
@@ -401,7 +402,7 @@ router.post('/update_user_details', [
 
                 // Update SEO details
                 await professionals_seo_detailsM.findOneAndUpdate(
-                    { user_row_id: user_row_id },
+                    { root_document_id: user_row_id },
                     { $set: seo_update_array },
                     { upsert: true }
                 )
@@ -816,10 +817,10 @@ router.post('/update_user_details_api', [
             const seo_update_array = {}
             seo_update_array['meta_keywords'] = req.body.meta_keywords
             seo_update_array['meta_description'] = req.body.meta_description
-            seo_update_array['user_row_id'] = user_row_id
+            seo_update_array['root_document_id'] = user_row_id
 
             await professionals_seo_detailsM.findOneAndUpdate(
-                { user_row_id: user_row_id },
+                { root_document_id: user_row_id },
                 { $set: seo_update_array },
                 { upsert: true }
             )
@@ -1090,9 +1091,10 @@ router.get('/new_user_individual_details', checkApiKey, async (req, res) => {
                 {
                     $lookup:
                     {
-                        from: "cln_professionals_seo_details",
+                        from: "cln_app_seo_details",
                         localField: "_id",
-                        foreignField: "user_row_id",
+                        foreignField: "entity_row_id",
+                        pipeline: [{ $match: { entity_type: "professional" } }],
                         as: "seo_info"
                     }
                 },
@@ -2379,7 +2381,7 @@ router.post('/update_user_seo', [
     check('meta_title').not().isEmpty().withMessage('The Meta Title field is required.'),
     check('meta_description').not().isEmpty().withMessage('The Meta Description field is required.'),
     check('meta_keywords').not().isEmpty().withMessage('The Meta Keywords field is required.'),
-], async (req, res) => {
+], rejectDuplicateKeywords, async (req, res) => {
     try {
         // VALIDATION
         const errors = validationResult(req);
@@ -2417,7 +2419,7 @@ router.post('/update_user_seo', [
         if (!userData) {
             return res.json({ status: false, message: { alert_message: "Invalid User ID." } });
         }
-        const checkQuery = await professionals_seo_detailsM.findOne({ user_row_id: condition._id });
+        const checkQuery = await professionals_seo_detailsM.findOne({ root_document_id: condition._id });
 
 
         // CHANGE DETECTION
@@ -2492,7 +2494,7 @@ router.post('/update_user_seo', [
         };
 
 
-        await professionals_seo_detailsM.updateOne({ user_row_id: Number(module_id) }, updateData);
+        await professionals_seo_detailsM.updateOne({ root_document_id: Number(module_id) }, updateData);
         await calculateUserProfileScore(module_id, ['professional_profile'])
         await deleteKeysByPattern('user_detail*')
         await deleteKeysByPattern('app_user_detail_*')
@@ -2558,9 +2560,10 @@ router.get('/get_user_seo/:user_row_id', async (req, res) => {
             { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
             {
                 $lookup: {
-                    from: "cln_professionals_seo_details",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "user_row_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "professional" } }],
                     as: "seo_details"
                 }
             },

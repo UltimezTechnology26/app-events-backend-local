@@ -2293,7 +2293,7 @@ router.post('/create_new_user', [
 
                 seoArray['meta_keywords'] = req.body.meta_keywords
                 seoArray['meta_description'] = req.body.meta_description
-                seoArray['user_row_id'] = user_row_id
+                seoArray['root_document_id'] = user_row_id
 
                 await professionals_social_linksM(socialArray).save()
                 await professionals_seo_detailsM(seoArray).save()
@@ -2510,7 +2510,7 @@ router.post('/update_user/:user_row_id', [
                         const seoArray = {}
                         seoArray['meta_keywords'] = req.body.meta_keywords
                         seoArray['meta_description'] = req.body.meta_description
-                        seoArray['user_row_id'] = user_row_id
+                        seoArray['root_document_id'] = user_row_id
 
                         await professionals_social_linksM.findOneAndUpdate(
                             { user_row_id: user_row_id },
@@ -2519,7 +2519,7 @@ router.post('/update_user/:user_row_id', [
                         )
 
                         await professionals_seo_detailsM.findOneAndUpdate(
-                            { user_row_id: user_row_id },
+                            { root_document_id: user_row_id },
                             { $set: seoArray },
                             { upsert: true }
                         )
@@ -3075,7 +3075,7 @@ router.get('/single_details/:user_row_id', async (req, res) => {
                     }
 
                     // Get SEO details from SEO details table
-                    const seoQueryRun = await professionals_seo_detailsM.findOne({ user_row_id: user_row_id })
+                    const seoQueryRun = await professionals_seo_detailsM.findOne({ root_document_id: user_row_id })
                     if (seoQueryRun) {
                         resObject['meta_keywords'] = seoQueryRun.meta_keywords
                         resObject['meta_description'] = seoQueryRun.meta_description
@@ -5017,7 +5017,7 @@ router.get('/seo_overview', checkApiKey, async (req, res) => {
             {
                 $lookup: {
                     from: "cln_professionals",
-                    localField: "user_row_id",
+                    localField: "entity_row_id",
                     foreignField: "_id",
                     as: "u",
                     pipeline: [

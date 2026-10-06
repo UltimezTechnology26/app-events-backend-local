@@ -457,7 +457,7 @@ export const getViewDetails = async (request_row_id: number, user_row_id: number
                     ]) :
                     Promise.resolve([]),
                 event_seo_detailsM.findOne(
-                    { event_row_id: eventId },
+                    { root_document_id: eventId },
                     { _id: 1, meta_keywords: 1, meta_description: 1, meta_title: 1 }
                 ).lean()
             ])

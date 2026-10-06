@@ -824,7 +824,7 @@ export const deleteCompanyDetails = async ({ company_row_id }) => {
 
     await companyM.deleteOne({ _id: company_row_id })
     await company_social_linksM.deleteOne({ company_row_id: company_row_id })
-    await company_seo_detailsM.deleteOne({ company_row_id: company_row_id })
+    await company_seo_detailsM.deleteOne({ root_document_id: company_row_id })
 
 
 
@@ -904,9 +904,9 @@ export const deleteUserDetais = async ({ user_row_id, token }) => {
     await deleteNotifications({ notify_type: 1, notify_type_row_id: user_row_id })
 
 
-    const getSeoDetails = await professionals_seo_detailsM.findOne({ user_row_id: user_row_id })
+    const getSeoDetails = await professionals_seo_detailsM.findOne({ root_document_id: user_row_id })
     if (getSeoDetails) {
-      await professionals_seo_detailsM.deleteOne({ user_row_id: user_row_id })
+      await professionals_seo_detailsM.deleteOne({ root_document_id: user_row_id })
     }
     const getSocialDetails = await professionals_social_linksM.findOne({ user_row_id: user_row_id })
     if (getSocialDetails) {
@@ -1162,7 +1162,7 @@ export async function calculateUserProfileScore(user_row_id, fieldsToUpdate = ["
     const [profile, social, seo, profileImage] = await Promise.all([
       professionalsM.findOne({ _id: user_row_id }).lean(),
       professionals_social_linksM.findOne({ user_row_id }).lean(),
-      professionals_seo_detailsM.findOne({ user_row_id }).lean(),
+      professionals_seo_detailsM.findOne({ root_document_id: user_row_id }).lean(),
       professionals_profile_imagesM.findOne({ user_row_id }).lean(),
     ]);
 
@@ -1517,7 +1517,7 @@ export async function calculateCompanyProfileScore(company_row_id, fieldsToUpdat
   // ---------------------------------------------------------
   const basic = await companyM.findOne({ _id: company_row_id }).lean();
   if (fullUpdate || fieldsToUpdate.includes("basic")) {
-    const other = await company_seo_detailsM.findOne({ company_row_id }).lean();
+    const other = await company_seo_detailsM.findOne({ root_document_id: company_row_id }).lean();
 
     const basicFields = {
       company_logo: 2,
@@ -1743,7 +1743,7 @@ export async function calculateEventScore(event_row_id, fieldsToUpdate = ["profi
 
   // Fetch core event data
   const event = await eventM.findOne({ _id: event_row_id }).lean();
-  const event_seo = await event_seo_detailsM.findOne({ event_row_id: event_row_id }).lean();
+  const event_seo = await event_seo_detailsM.findOne({ root_document_id: event_row_id }).lean();
 
 
   // -----------------------------------------------------------

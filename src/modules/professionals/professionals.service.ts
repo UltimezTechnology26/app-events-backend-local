@@ -149,7 +149,7 @@ export async function createNewUser({ admin, body, preValidationErrors }: { admi
 
   await Promise.all([
     new ProfessionalSocialLinksM(buildSocialLinksArray(body, user_row_id)).save(),
-    new ProfessionalSeoDetailsM({ meta_keywords: body.meta_keywords, meta_description: body.meta_description, user_row_id }).save(),
+    new ProfessionalSeoDetailsM({ meta_keywords: body.meta_keywords, meta_description: body.meta_description, root_document_id: user_row_id }).save(),
   ])
 
   const manual_user_row_id = Number.parseInt(body.manual_user_row_id)
@@ -292,7 +292,7 @@ export async function updateUser({ admin, userRowIdRaw, body, preValidationError
   await Promise.all([
     ProfessionalM.updateOne({ _id: user_row_id }, { $set: insertArray }),
     ProfessionalSocialLinksM.findOneAndUpdate({ user_row_id }, { $set: buildSocialLinksArray(body, user_row_id) }, { upsert: true }),
-    ProfessionalSeoDetailsM.findOneAndUpdate({ user_row_id }, { $set: { meta_keywords: body.meta_keywords, meta_description: body.meta_description, user_row_id } }, { upsert: true }),
+    ProfessionalSeoDetailsM.findOneAndUpdate({ root_document_id: user_row_id }, { $set: { meta_keywords: body.meta_keywords, meta_description: body.meta_description } }, { upsert: true }),
   ])
 
   if (body.profile_image) {

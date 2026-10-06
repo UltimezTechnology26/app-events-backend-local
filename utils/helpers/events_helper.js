@@ -1648,7 +1648,7 @@ export const deleteEvent = async ({ event_row_id, deleted_reason }) => {
         }).save()
 
         await eventM.deleteOne({ _id: event_row_id })
-        await event_seo_detailsM.deleteOne({ event_row_id: event_row_id })
+        await event_seo_detailsM.deleteOne({ root_document_id: event_row_id })
         await event_speakersM.deleteMany({ event_row_id: event_row_id })
 
         const check_attendee = await event_attendeesM.findOne({ event_row_id: event_row_id })

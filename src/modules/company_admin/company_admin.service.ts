@@ -422,7 +422,7 @@ export async function bulkImportCompanies({ admin, bulkData }: BulkImportCompani
     const company_row_id = inserted_query._id
 
     await insertCompanySeoDetails({
-      company_row_id,
+      root_document_id: company_row_id,
       meta_title: run.meta_title || '',
       meta_keywords: run.meta_keywords || '',
       meta_description: run.meta_description || '',

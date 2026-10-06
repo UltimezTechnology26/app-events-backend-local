@@ -1,5 +1,6 @@
 // modules/company/company.settings.controller.ts
 import express, { Router, Request, Response } from 'express'
+import { rejectDuplicateKeywords } from '../../../common/app-seo/app-seo.keywords'
 const { validationResult } = require('express-validator')
 const { checkUserLoginToken, checkAllLoginToken, verifyEmailTempToken, checkApiKey } = require('../../../../middleware/authorization')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
@@ -265,7 +266,7 @@ companySettingsRouter.get('/send_email_otp', asyncRoute('Send email otp.', async
 }))
 
 // NOT migrated to asyncRoute — see docs/error-handling-exceptions.md #10.
-companySettingsRouter.post('/update_company_seo', writeEndpointRateLimiter, updateCompanySeoValidation, async (req: Request, res: Response) => {
+companySettingsRouter.post('/update_company_seo', writeEndpointRateLimiter, updateCompanySeoValidation, rejectDuplicateKeywords, async (req: Request, res: Response) => {
   try {
     const guard = await requireAllLogin7(req)
     if (guard) return res.json(guard)

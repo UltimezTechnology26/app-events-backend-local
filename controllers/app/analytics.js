@@ -141,9 +141,10 @@ router.get('/all_users_company_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "company" } }],
           as: "seo_details"
         }
       },
@@ -196,9 +197,10 @@ router.get('/all_users_company_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "professional" } }],
           as: "seo_details"
         }
       },
@@ -283,9 +285,10 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       { $limit: limit },
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "company" } }],
           as: "seo_details"
         }
       },
@@ -372,9 +375,10 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "professional" } }],
           as: "seo_details"
         }
       },
@@ -995,9 +999,10 @@ router.get('/events_all_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "event" } }],
           as: "seo_info"
         }
       },
@@ -1095,9 +1100,10 @@ router.get('/all_events_urls/:skip/:limit', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "event" } }],
           as: "seo_info"
         }
       },
@@ -2021,7 +2027,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
         {
           $lookup: {
             from: "cln_professionals",
-            localField: "user_row_id",
+            localField: "entity_row_id",
             foreignField: "_id",
             as: "user_info",
             pipeline: [
@@ -2038,7 +2044,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
         {
           $lookup: {
             from: "cln_company_lists",
-            localField: "company_row_id",
+            localField: "entity_row_id",
             foreignField: "_id",
             as: "company_info",
             pipeline: [
@@ -2191,7 +2197,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
           {
             $project: {
               _id: 1,
-              user_row_id: 1,
+              user_row_id: "$entity_row_id",
               module: { $literal: "user" },
               module_id: { $arrayElemAt: ["$user_info.user_name", 0] },
               issue_type: issue
@@ -2212,7 +2218,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
             $project: {
               _id: 1,
               module: { $literal: "company" },
-              company_row_id: 1,
+              company_row_id: "$entity_row_id",
               module_id: { $arrayElemAt: ["$company_info.company_id", 0] }, // 👈 SHOW COMPANY ID
               company_name: { $arrayElemAt: ["$company_info.company_name", 0] },
               issue_type: issue
@@ -2225,7 +2231,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
     } else if (moduleFilter === "event") {
       results.push(...await seo_static_urlsM.aggregate([{ $match: { module: "event" } }, ...staticPipeline]));
 
-      // Event-specific pipeline to handle SEO data from cln_events_seo_details
+      // Event-specific pipeline to handle SEO data from cln_app_seo_details (entity_type: 'event')
       const eventPipeline = [
         {
           $addFields: {
@@ -2277,9 +2283,10 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
           ...condition_query,
           {
             $lookup: {
-              from: "cln_events_seo_details",
+              from: "cln_app_seo_details",
               localField: "_id",
-              foreignField: "event_row_id",
+              foreignField: "entity_row_id",
+              pipeline: [{ $match: { entity_type: "event" } }],
               as: "event_seo"
             }
           },
@@ -2335,13 +2342,13 @@ router.get("/seo_issue_check", checkApiKey, async (req, res) => {
 
     if (module === "user") {
       collection = professionals_seo_detailsM;
-      matchQuery = { user_row_id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else if (module === "company") {
       collection = company_seo_detailsM;
-      matchQuery = { company_row_id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else if (module === "event") {
       collection = event_seo_detailsM;
-      matchQuery = { _id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else {
       return res.status(400).json({
         status: false,
@@ -2505,9 +2512,10 @@ router.get('/get_user_seo/:user_row_id', checkApiKey, async (req, res) => {
       { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "professional" } }],
           as: "seo_details",
         }
       },
@@ -2742,9 +2750,10 @@ router.get('/get_company_seo/:company_id', checkApiKey, async (req, res) => {
 
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "company" } }],
           as: "seo_details",
         }
       },
@@ -2926,9 +2935,10 @@ router.get('/get_event_seo/:event_row_id', checkApiKey, async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "entity_row_id",
+          pipeline: [{ $match: { entity_type: "event" } }],
           as: "seo_info"
         }
       },
