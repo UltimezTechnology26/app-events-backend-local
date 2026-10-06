@@ -444,19 +444,23 @@ router.get('/delete_ticket/:ticket_row_id', async (req, res) => {
             let errObj = {}
             let ticket_row_id = Number.parseInt(req.params.ticket_row_id)
             let event_row_id = 0
+            // Declared out here: the admin-panel staging branch below reads it after this block.
+            let checkTicket = null
 
             if (Number.isNaN(ticket_row_id)) {
                 errObj['ticket_row_id'] = "Invalid Ticket Row ID."
             }
             else {
-                const checkTicket = await ticketM.findOne({ _id: ticket_row_id })
-                event_row_id = checkTicket.event_row_id
-                if (!checkTicket) {
+                checkTicket = await ticketM.findOne({ _id: ticket_row_id })
+                if (checkTicket) {
+                    event_row_id = checkTicket.event_row_id
+                }
+                else {
                     errObj['ticket_row_id'] = "Invalid Ticket Row ID."
                 }
 
-                const check_event = await eventM.findOne({ _id: event_row_id })
-                if (!check_event) {
+                const check_event = checkTicket ? await eventM.findOne({ _id: event_row_id }) : null
+                if (checkTicket && !check_event) {
                     errObj['event_row_id'] = "Invalid Event Row ID."
                 }
 

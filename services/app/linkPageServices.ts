@@ -13,7 +13,7 @@ import { getEventsData, professionalfilterQuery } from '../../utils/helpers/even
 import event_speakersM from '../../models/app/events/event_speakersM';
 import event_sponsors_partner_detailsM from '../../models/app/events/event_sponsors_partner_detailsM';
 import companyFollowersM from '../../models/app/company/followersM';
-import professionals_faqM from '../../models/app/users/professionals_faqM';
+import { findFaqsByRoot } from '../../src/common/app-faq/app-faq.repository';
 import professionals_awardsM from '../../models/app/users/professionals_awardsM';
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
@@ -721,7 +721,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
 
             const designation_id = query_run.designation_id ? query_run.designation_id : []
 
-            const users_faq_query = professionals_faqM.find({ user_row_id: query_run._id }, { faq_question: 1, faq_answer: 1, _id: 1 }).lean()
+            const users_faq_query = findFaqsByRoot({ module: 'professional', rootDocumentId: Number(query_run._id) })
 
             const users_awards_query = professionals_awardsM.find({ user_row_id: query_run._id }, { award_title: 1, award_description: 1, award_image: 1, _id: 1 }).lean().sort({ _id: -1 })
 
@@ -1934,7 +1934,14 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
 
 
             resultArray['similar_users'] = similar_users
-            resultArray['users_faq'] = users_faq
+            // question/answer -> faq_question/faq_answer: cln_app_faqs stores the markets-
+            // matching field names internally, but this endpoint's response contract is
+            // unchanged - see app-faq.model.ts's own doc comment.
+            resultArray['users_faq'] = (users_faq as { _id: number; question: string; answer: string }[]).map((faq) => ({
+                _id: faq._id,
+                faq_question: faq.question,
+                faq_answer: faq.answer,
+            }))
             resultArray['users_awards'] = users_awards
             resultArray['people_following_list'] = people_following_list
             resultArray['company_following_list'] = company_following_list

@@ -49,7 +49,7 @@ async function deleteEventCascade(eventRowId: number, deletedReason: string) {
   const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
   const event_speakersM = require('../../../models/app/events/event_speakersM')
   const event_attendeesM = require('../../../models/app/events/event_attendeesM')
-  const event_faqM = require('../../../models/app/events/event_faqM')
+  const { findOneFaqByRoot } = require('../../common/app-faq/app-faq.repository')
   const ticketM = require('../../../models/app/events/ticketM')
   const notify_userM = require('../../../models/app/events/notify_userM')
   const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
@@ -104,7 +104,7 @@ async function deleteEventCascade(eventRowId: number, deletedReason: string) {
     notify_userM.deleteMany({ event_row_id: eventRowId }),
     events_countM.deleteOne({ event_row_id: eventRowId }),
     event_attendeesM.findOne({ event_row_id: eventRowId }),
-    event_faqM.findOne({ event_row_id: eventRowId }),
+    findOneFaqByRoot({ module: 'event', rootDocumentId: eventRowId }),
     ticketM.findOne({ event_row_id: eventRowId }),
     event_sponsors_partner_detailsM.findOne({ event_row_id: eventRowId }),
     event_watchlistsM.findOne({ event_row_id: eventRowId }),

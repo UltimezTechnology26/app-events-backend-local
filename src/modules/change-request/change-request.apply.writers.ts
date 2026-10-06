@@ -1,6 +1,5 @@
 const company_seo_detailsM = require('../../../models/app/company/company_seo_detailsM')
 const company_social_linksM = require('../../../models/app/company/company_social_linksM')
-const company_faqM = require('../../../models/app/company/company_faqM')
 const company_holdingM = require('../../../models/markets/products_n_holding/company_holdingM')
 const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
 const company_revenue_growthM = require('../../../models/app/company/company_revenue_growthM')
@@ -13,13 +12,12 @@ const professionalsM = require('../../../models/app/professionalsM')
 const professionals_seo_detailsM = require('../../../models/app/professionals_seo_detailsM')
 const professionals_social_linksM = require('../../../models/app/professionals_social_linksM')
 const professionals_awardsM = require('../../../models/app/users/professionals_awardsM')
-const professionals_faqM = require('../../../models/app/users/professionals_faqM')
 const eventM = require('../../../models/app/events/eventM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const ticketM = require('../../../models/app/events/ticketM')
 const couponM = require('../../../models/app/events/couponM')
-const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const { createModuleScopedFaqModel } = require('../../common/app-faq/app-faq.model')
 const event_contactsM = require('../../../models/app/events/event_contactsM')
 const event_speakersM = require('../../../models/app/events/event_speakersM')
 const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
@@ -46,7 +44,6 @@ export interface SectionModel {
 export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_company_seo_details: company_seo_detailsM,
   cln_company_social_links: company_social_linksM,
-  cln_company_faq_lists: company_faqM,
   cln_company_holdings: company_holdingM,
   cln_company_products: company_productsM,
   cln_company_revenue_details: company_revenue_growthM,
@@ -59,13 +56,20 @@ export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_professionals_seo_details: professionals_seo_detailsM,
   cln_professionals_social_links: professionals_social_linksM,
   cln_professionals_awards: professionals_awardsM,
-  cln_professionals_faq_lists: professionals_faqM,
   cln_events: eventM,
   cln_events_seo_details: event_seo_detailsM,
   cln_events_link_display_details: event_link_display_detailsM,
   cln_event_tickets: ticketM,
   cln_event_coupons: couponM,
-  cln_events_faq_lists: event_faq_listsM,
+  // Module-scoped wrappers over the shared cln_app_faqs collection (src/common/app-faq) - every
+  // filter/payload each one forwards gets its own `module` merged in, so a section's create/
+  // update/delete can never reach another domain's FAQ rows despite all three sharing one
+  // physical collection. 'cln_app_faqs__<module>' is this map's own lookup key, not a literal
+  // Mongo collection name - see change-request.registry.ts's own SECTION_FAQ/
+  // SECTION_PROFESSIONAL_FAQ/SECTION_EVENT_FAQ doc comments.
+  cln_app_faqs__company: createModuleScopedFaqModel('company'),
+  cln_app_faqs__professional: createModuleScopedFaqModel('professional'),
+  cln_app_faqs__event: createModuleScopedFaqModel('event'),
   cln_event_contacts: event_contactsM,
   cln_events_speakers: event_speakersM,
   cln_event_sponsor_partner_details: event_sponsors_partner_detailsM,

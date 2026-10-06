@@ -37,7 +37,6 @@ import { getCompanyProducts, getMatchedProducts, getTokenList } from "../../../u
 import { array_column, company_profile_completed_percentage, getMinusDates } from "../../../utils/helpers/helper";
 import redisCache, { CacheDuration } from "../../../config/redis";
 import company_deleted_historyM from "../../../models/app/company/company_deleted_historyM";
-import company_faqM from "../../../models/app/company/company_faqM";
 import professionals_work_experienceM from "../../../models/app/professionals_work_experienceM";
 import employees_requestsM from "../../../models/app/company/employees_requestsM";
 import company_productsM from "../../../models/markets/products_n_holding/company_productsM";

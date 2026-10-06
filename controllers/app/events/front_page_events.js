@@ -14,7 +14,6 @@ const { getAllEvents, getEventIndividualDetails, getSpeakerList, getOrganizersLi
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
-const event_faqM = require('../../../models/app/events/event_faqM')
 const ticketM = require('../../../models/app/events/ticketM')
 const companyM = require('../../../models/app/company/companyM')
 const eventM = require('../../../models/app/events/eventM')

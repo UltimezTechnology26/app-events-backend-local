@@ -86,11 +86,15 @@ export function findEmployeeApprovalRequest({
 
 /**
  * Moved from company.service.ts's getCompanyOtherDetails/companyOtherDetails (identical
- * `company_faqM.find(...)` inline at both call sites) — pure relocation.
+ * `company_faqM.find(...)` inline at both call sites) — pure relocation. cln_app_faqs stores
+ * question/answer internally now (src/common/app-faq/app-faq.model.ts), but this function's own
+ * response contract (consumed directly by company.service.ts's own public-facing result.faq_list)
+ * is unchanged - mapped back to faq_question/faq_answer right here.
  */
-export function findCompanyFaqList(company_row_id: number): Promise<CompanyFaqListItem[]> {
-  const company_faqM = require('../../../models/app/company/company_faqM')
-  return company_faqM.find({ company_row_id: company_row_id }, { _id: 1, faq_question: 1, faq_answer: 1 }).lean()
+export async function findCompanyFaqList(company_row_id: number): Promise<CompanyFaqListItem[]> {
+  const { findFaqsByRoot } = require('../../common/app-faq/app-faq.repository')
+  const rows: { _id: number; question: string; answer: string }[] = await findFaqsByRoot({ module: 'company', rootDocumentId: company_row_id })
+  return rows.map((row) => ({ _id: row._id, faq_question: row.question, faq_answer: row.answer }))
 }
 
 /**

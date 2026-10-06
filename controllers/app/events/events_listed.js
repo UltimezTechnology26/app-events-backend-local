@@ -257,7 +257,6 @@ const company_manual_retrievalsM = require('../../../models/app/company/company_
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
 const seo_change_logsM = require('../../../models/seo_change_logsM')
-const event_faqM = require('../../../models/app/events/event_faqM')
 
 //Speakers
 router.post('/update_link_display_details', [
@@ -3547,14 +3546,21 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
                 }
             },
 
-            // FAQ lookup
+            // FAQ lookup — cln_app_faqs is a shared, module-discriminated collection (see
+            // src/common/app-faq/app-faq.model.ts), so the join matches on module +
+            // root_document_id via `let`/pipeline rather than a plain foreignField equality.
             {
                 $lookup: {
-                    from: "cln_events_faq_lists",
-                    localField: "_id",
-                    foreignField: "event_row_id",
-                    as: "faq",
-                    pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }]
+                    from: "cln_app_faqs",
+                    let: { eventId: "$_id" },
+                    pipeline: [
+                        { $match: { $expr: { $and: [{ $eq: ["$module", "event"] }, { $eq: ["$root_document_id", "$$eventId"] }] } } },
+                        // question/answer -> faq_question/faq_answer: cln_app_faqs stores the
+                        // markets-matching field names internally, but this endpoint's response
+                        // contract is unchanged - see app-faq.model.ts's own doc comment.
+                        { $project: { _id: 0, faq_question: "$question", faq_answer: "$answer" } }
+                    ],
+                    as: "faq"
                 }
             },
             // SEO details lookup
