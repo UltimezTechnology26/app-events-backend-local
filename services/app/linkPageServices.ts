@@ -1,5 +1,6 @@
 import { PipelineStage } from 'mongoose';
 import professionalsM from '../../models/app/professionalsM';
+const professionals_seo_detailsM = require('../../models/app/professionals_seo_detailsM');
 import redisCache, { CacheDuration } from '../../config/redis';
 import logger from '../../config/logger';
 import { array_column, createDateTime, createEndDateOnly, getIntIdFromArray, getMinusDates, getSocialURL, user_profile_completed_percentage } from '../../utils/helpers/helper';
@@ -2191,6 +2192,28 @@ export const getUserDetails = async ({ username, user_row_id, isAdminCaller = fa
                     twitter_creator: query_run[0].seo_details.twitter_creator,
                     robots_index: query_run[0].seo_details.robots_index,
                     robots_follow: query_run[0].seo_details.robots_follow
+                }
+                // CONFIRMED FIX (standardization follow-up): persist the standardized fallback
+                // title the first time it's generated for this public profile view, same
+                // reasoning as Company's own public-page backfill (company.individual.ts) - the
+                // collection otherwise never ends up holding a real meta_title for a professional
+                // who's only ever been viewed via the computed fallback.
+                if (query_run[0].full_name && !resultArray['seo_details'].meta_title) {
+                    const defaultTitle = `${query_run[0].full_name} | Coinpedia User Profile`
+                    const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+                    if (!resultArray['seo_details'].og_title) backfill.og_title = defaultTitle
+                    if (!resultArray['seo_details'].twitter_title) backfill.twitter_title = defaultTitle
+                    // A bare `updateOne(..., {upsert:true})` never runs ProfessionalSeoDetailsM's
+                    // own `pre('save')` counter hook, so a professional with no SEO doc at all would
+                    // get a raw Mongo ObjectId `_id` instead of this collection's numeric one.
+                    professionals_seo_detailsM.findOne({ root_document_id: query_run[0]._id }).lean()
+                        .then((existing: unknown) => existing
+                            ? professionals_seo_detailsM.updateOne({ root_document_id: query_run[0]._id }, { $set: backfill })
+                            : new professionals_seo_detailsM({ root_document_id: query_run[0]._id, ...backfill, created_by: { type: 'system', id: null }, created_at: new Date() }).save())
+                        .catch((err: unknown) => {
+                            logger.error(`Backfill professional SEO default title. ${err instanceof Error ? err.message : String(err)}`)
+                        })
+                    Object.assign(resultArray['seo_details'], backfill)
                 }
                 resultArray['profile_scores'] = {
                     professional_profile_score: query_run[0]?.profile_scores?.professional_profile_score ?? 0,

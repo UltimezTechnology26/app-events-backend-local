@@ -2341,7 +2341,7 @@ router.get("/seo_issue_check", checkApiKey, async (req, res) => {
       matchQuery = { root_document_id: module_id };
     } else if (module === "event") {
       collection = event_seo_detailsM;
-      matchQuery = { _id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else {
       return res.status(400).json({
         status: false,

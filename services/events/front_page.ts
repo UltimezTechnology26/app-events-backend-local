@@ -1,6 +1,7 @@
 import { getEventsData, filterQuery } from '../../utils/helpers/events_helper';
 import redisCache, { CacheDuration } from '../../config/redis';
 import eventM from '../../models/app/events/eventM';
+const event_seo_detailsM = require('../../models/app/events/event_seo_detailsM');
 import { getDistanceFromLatLon, getIntIdFromArray, getPresentDateTime } from '../../utils/helpers/helper';
 import event_link_display_detailsM from '../../models/app/events/event_link_display_detailsM';
 import { findFaqsByRoot } from '../../src/common/app-faq/app-faq.repository';
@@ -758,6 +759,27 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
 
             // Return SEO details as nested object
             myArr['seo_details'] = eventDetails?.seo_details || {}
+            // CONFIRMED FIX (standardization follow-up): persist the standardized fallback title
+            // (the bare event_title, same convention events.submit.service.ts's own write-time
+            // default already uses) the first time it's generated for this public page view, same
+            // reasoning as Company's/Professionals' own public-page backfills.
+            if (eventDetails?.event_title && !myArr['seo_details'].meta_title) {
+                const defaultTitle = eventDetails.event_title as string
+                const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+                if (!myArr['seo_details'].og_title) backfill.og_title = defaultTitle
+                if (!myArr['seo_details'].twitter_title) backfill.twitter_title = defaultTitle
+                // A bare `updateOne(..., {upsert:true})` never runs EventSeoDetailsM's own
+                // `pre('save')` counter hook, so an event with no SEO doc at all would get a raw
+                // Mongo ObjectId `_id` instead of this collection's numeric one.
+                event_seo_detailsM.findOne({ root_document_id: eventDetails._id }).lean()
+                    .then((existing: unknown) => existing
+                        ? event_seo_detailsM.updateOne({ root_document_id: eventDetails._id }, { $set: backfill })
+                        : new event_seo_detailsM({ root_document_id: eventDetails._id, ...backfill, created_by: { type: 'system', id: null }, created_at: new Date() }).save())
+                    .catch((err: unknown) => {
+                        console.error("Backfill event SEO default title:", err instanceof Error ? err.message : String(err))
+                    })
+                Object.assign(myArr['seo_details'], backfill)
+            }
 
             // Return profile scores as nested object
             myArr['profile_scores'] = eventDetails?.profile_scores || {}

@@ -135,5 +135,32 @@ export async function getUserSeo(auth: UserAuthResult, userRowIdRaw: string) {
     return { status: false, message: { alert_message: 'Invalid User Row ID.' } }
   }
 
-  return { status: true, message: { alert_message: 'User SEO fetched successfully' }, data: userData[0] }
+  const seoRow = userData[0] as Record<string, unknown>
+  // CONFIRMED FIX (standardization follow-up): persist the standardized suggested title the first
+  // time it's generated, same reasoning as Company's own getCompanySeo backfill - otherwise the
+  // collection never ends up holding a real meta_title for a professional who's only ever seen the
+  // computed fallback.
+  const defaultTitle = seoRow.default_meta_title as string | undefined
+  if (defaultTitle && !seoRow.meta_title) {
+    const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+    if (!seoRow.og_title) backfill.og_title = defaultTitle
+    if (!seoRow.twitter_title) backfill.twitter_title = defaultTitle
+    // A bare `updateOne(..., {upsert:true})` never runs ProfessionalSeoDetailsM's own `pre('save')`
+    // counter hook, so a professional with no SEO doc at all would get a raw Mongo ObjectId `_id`
+    // instead of this collection's numeric one - check existence first.
+    const existingSeo = await ProfessionalSeoDetailsM.findOne({ root_document_id: Number(userRowIdRaw) }).lean()
+    if (existingSeo) {
+      await ProfessionalSeoDetailsM.updateOne({ root_document_id: Number(userRowIdRaw) }, { $set: backfill })
+    } else {
+      await new ProfessionalSeoDetailsM({
+        root_document_id: Number(userRowIdRaw),
+        ...backfill,
+        created_by: { type: 'system', id: null },
+        created_at: new Date(),
+      }).save()
+    }
+    Object.assign(seoRow, backfill)
+  }
+
+  return { status: true, message: { alert_message: 'User SEO fetched successfully' }, data: seoRow }
 }
