@@ -8,7 +8,7 @@ const setting = require('../controllers/app/users/setting')
 const referrals = require('../controllers/app/users/referrals')
 const { professionalsReferralsRouter } = require('../src/modules/professionals-referrals/professionals-referrals.controller')
 const points = require('../controllers/app/users/points')
-const { professionalsPointsRouter } = require('../src/modules/professionals-points/professionals-points.controller')
+const { benefitsPointsRouter } = require('../src/modules/benefits/benefits.points.controller')
 const link_page = require('../controllers/app/link_pages')
 const feedback = require('../controllers/app/users/feedback')
 const { professionalsFeedbackRouter } = require('../src/modules/professionals-feedback/professionals-feedback.controller')
@@ -24,6 +24,8 @@ const { appTeamMembersRouter } = require('../src/modules/team-members/team-membe
 const { companyRouter } = require('../src/modules/company/company.controller')
 const { companySettingsRouter } = require('../src/modules/company/settings/company.settings.controller')
 const { companyFaqRouter } = require('../src/modules/company/faq/company.faq.controller')
+const { communityGroupListRouter } = require('../src/modules/community/community.groups.controller')
+const { communityDeletePostRouter } = require('../src/modules/community/community.posts.controller')
 const { companyManualAppRouter } = require('../src/modules/company_manual/company_manual.controller')
 const { companyWatchlistRouter } = require('../src/modules/company_watchlist/company_watchlist.controller')
 const { partnersAppRouter } = require('../src/modules/partners/partners.controller')
@@ -116,10 +118,14 @@ router.use('/setting_profile_v2', professionalsSelfServiceRouter)
 // src/modules/professionals-awards/**. Mounted at a temporary `_v2` prefix, parallel to the
 // untouched legacy '/users/awards' mount above.
 router.use('/users/awards_v2', professionalsAwardsRouter)
-// Professionals migration gap-audit backlog: controllers/app/users/points.js ported into
-// src/modules/professionals-points/**. Mounted at a temporary `_v2` prefix, parallel to the
-// untouched legacy '/points' mount above.
-router.use('/points_v2', professionalsPointsRouter)
+// Professionals migration gap-audit backlog: controllers/app/users/faq.js ported into
+// src/modules/professionals-faq/**. Mounted at a temporary `_v2` prefix, parallel to the
+// untouched legacy '/users/faq' mount above.
+router.use('/users/faq_v2', professionalsFaqRouter)
+// controllers/app/users/points.js ported into src/modules/benefits/** (moved from
+// professionals-points, grouped with benefits since both read/award the same points ledger).
+// Mounted at a temporary `_v2` prefix, parallel to the untouched legacy '/points' mount above.
+router.use('/points_v2', benefitsPointsRouter)
 // Professionals migration gap-audit backlog: controllers/app/users/referrals.js ported into
 // src/modules/professionals-referrals/**. Mounted at a temporary `_v2` prefix, parallel to the
 // untouched legacy '/referrals' mount above.
@@ -183,6 +189,17 @@ router.use('/company/employee', appTeamMembersRouter)
 // controllers/app/company/manual_company.js fully migrated and deleted — every route it defined
 // now lives directly in modules/company_manual/company_manual.controller.ts's companyManualAppRouter.
 router.use('/company/manual_company', companyManualAppRouter)
+// Community admin+user unification, step 1 (community-user-admin-unification-plan.md): shared
+// group list, same checkAllLoginToken pattern as companyFaqRouter above. Both legacy
+// `admin_panel/community/groups/group_list` and `main/community/posts.js`'s `/group_list` stay
+// live and unmodified until both frontends are confirmed on this route.
+router.use('/community/group_list_v2', communityGroupListRouter)
+// Community admin+user unification, step 2: shared delete-post, branches on actor.message.user_type
+// (admin: unconditional moderation delete; self-service user: ownership + 24h window). Both
+// `community/posts_v2/delete_post/:post_id` (admin) and `main/community/posts.js`'s
+// `/delete_post/:post_id` (user) stay live and unmodified until both frontends are confirmed on
+// this route.
+router.use('/community/delete_post_v2', communityDeletePostRouter)
 // controllers/app/company/faq.js fully migrated and deleted — every route it defined now lives
 // directly in modules/company/faq/company.faq.controller.ts's companyFaqRouter.
 router.use('/company/faq', companyFaqRouter)

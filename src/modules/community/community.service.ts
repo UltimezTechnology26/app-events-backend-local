@@ -1,11 +1,11 @@
-// modules/professionals-community/professionals-community.service.ts
+// modules/community/community.service.ts
 // Ports controllers/main/community/pro_batch.js's GET /details (~94-265). Same behavior, same
 // response shape, same conditional side effects (21-day-challenge row, Pro Batch badge + points +
 // emails) — only the independent reads are parallelized (CONFIRMED PERF FIX, see below).
 import ProfessionalM from '../../../models/app/professionalsM'
 import ProfessionalsPointsM from '../../../models/app/users/professionals_pointsM'
-import { Community21DaysChallengeM } from './professionals-community.models'
-import { getProfileScores, getIntroAndFirstFeedFlags, getPostDates, getUserPostEngagementStats, getDistinctPostGroupIds } from './professionals-community.queries'
+import { Community21DaysChallengeM } from './community.models'
+import { getProfileScores, getIntroAndFirstFeedFlags, getPostDates, getUserPostEngagementStats, getDistinctPostGroupIds } from './community.queries'
 const { getPresentDateTime } = require('../../../utils/helpers/helper')
 const { sendCommunityEmail } = require('../../../config/email')
 const { sendDollarrewardEmail } = require('../../../utils/helpers/app_helper')
@@ -14,7 +14,8 @@ const PROFILE_COMPLETE_THRESHOLD = 70
 const STREAK_DAYS_FOR_CHALLENGE = 21
 const PRO_BATCH_POINTS = '100'
 
-function calculateStreaks(postDates: Array<{ _id: string }>): { maxStreak: number; currentStreak: number } {
+/** Exported so the `benefits` module's benefits.service.ts can reuse it instead of a second copy. */
+export function calculateStreaks(postDates: Array<{ _id: string }>): { maxStreak: number; currentStreak: number } {
   const dates = postDates.map((p) => new Date(p._id))
   let maxStreak = 1
   let currentStreak = 1

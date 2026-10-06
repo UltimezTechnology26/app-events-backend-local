@@ -1,4 +1,4 @@
-// modules/professionals-community/professionals-community.models.ts
+// modules/community/community.models.ts
 //
 // Phase K of the Professionals migration (see plan doc). Ports controllers/main/community/
 // pro_batch.js's GET /details (~94-265) — the only route in that file — into a dedicated module,

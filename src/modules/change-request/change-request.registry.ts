@@ -743,10 +743,10 @@ const ACQUISITIONS_DISPLAY_FIELDS = [
 
 /**
  * Mirrors `updateUserDetails`'s own `mainArray` (professionals.self-service.service.ts) — the
- * exact set of fields that route already `$set`s on a direct write. `email_id`/`mobile_number`/
- * `user_name`/`wallet_address` are handled by their own dedicated self-service routes (own
- * uniqueness/OTP checks), not this one, so they're not listed here either — matching the scope of
- * the one function this section's publish path actually calls into.
+ * exact set of fields that route already `$set`s on a direct write, plus the admin-only plain
+ * fields (`user_name`, `email_id`, `mobile_number`) it also writes for an admin caller. A
+ * professional's own email/phone/username/wallet changes still go through their dedicated
+ * self-service routes (own uniqueness/OTP checks) and never reach this section.
  */
 const PROFESSIONAL_BASIC_DETAILS_EDITABLE_FIELDS = [
   // CONFIRMED GAP FIX (user-requested, 2026-09-20, "username is not updating in pending
@@ -756,6 +756,13 @@ const PROFESSIONAL_BASIC_DETAILS_EDITABLE_FIELDS = [
   // doc comment), so a changed username was silently dropped before it ever reached a change
   // request, let alone got published.
   'user_name',
+  // Admin edits send email_id/mobile_number as plain fields (legacy admin-coinpedia's create_user.js
+  // does too - no OTP/update sub-flow for admins). updateUserDetails already validates uniqueness /
+  // blocked domains before this section is reached, but without these two entries computeDiff never
+  // tracked them, so an admin-entered email or phone number was silently dropped on edit while the
+  // country code (listed below) was saved.
+  'email_id',
+  'mobile_number',
   'full_name',
   'gender',
   'account_visible_type',
@@ -811,6 +818,8 @@ const PROFESSIONAL_BASIC_DETAILS_LABEL_RESOLVERS: Record<string, LabelResolver> 
 
 const PROFESSIONAL_BASIC_DETAILS_FIELD_LABELS: Record<string, string> = {
   user_name: 'User Name',
+  email_id: 'Email ID',
+  mobile_number: 'Contact Number',
   full_name: 'Full Name',
   gender: 'Gender',
   account_visible_type: 'Profile Visibility',
@@ -825,6 +834,8 @@ const PROFESSIONAL_BASIC_DETAILS_FIELD_LABELS: Record<string, string> = {
 /** Only the reviewer-meaningful fields — country/mobile-country ids, area/city/state/lat/long/location_country/created_date_n_time-style bookkeeping stay out of the diff view, same reasoning as BASIC_DETAILS_DISPLAY_FIELDS (Company). */
 const PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS = [
   'user_name',
+  'email_id',
+  'mobile_number',
   'full_name',
   'gender',
   'account_visible_type',
