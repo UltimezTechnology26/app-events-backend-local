@@ -10,6 +10,7 @@ import express, { Router, Request, Response } from 'express'
 const { checkAdminLoginToken } = require('../../../middleware/authorization')
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
+import { canApproveChangeRequests } from '../change-request/change-request.validation'
 import { getPostsList, getDeletedPostsList, deletePost, getPostsOverview } from './community-admin.posts.service'
 
 export const communityPostsRouter: Router = express.Router()
@@ -63,6 +64,21 @@ communityPostsRouter.get(
   '/delete_post/:post_id',
   writeEndpointRateLimiter,
   asyncRoute('Community post delete.', async (req, res) => {
+    const checkToken = checkAdminLoginToken(req.headers, COMMUNITY_POSTS_ACCESS_IDS)
+    if (!checkToken.status) {
+      res.json(checkToken)
+      return
+    }
+
+    // CONFIRMED NEW BEHAVIOR (2026-10-06, user-requested): reuses the same Full-Access-or-main-
+    // admin maker-checker policy already enforced for change-request publish/approve elsewhere
+    // (see canApproveChangeRequests's own doc comment) - a Marketing Restricted or Developer
+    // sub-admin can see and manage posts within this module, but may not permanently delete one.
+    if (!canApproveChangeRequests(checkToken.message.admin_manager_type, checkToken.message.sub_admin_type)) {
+      res.json({ status: false, message: { alert_message: 'Sorry, you do not have permission to delete this post.' } })
+      return
+    }
+
     res.json(await deletePost(req.params.post_id as string))
   }),
 )
