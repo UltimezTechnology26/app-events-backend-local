@@ -33,7 +33,6 @@ const professionals_delete_verificationsM = require('../../../models/app/profess
 const company_manual_retrievalsM = require('../../../models/app/company/company_manual_retrievalsM')
 const eventM = require('../../../models/app/events/eventM')
 const push_notifications_detailsM = require('../../../models/app/notifications/push_notifications_detailsM')
-const professionals_faqM = require('../../../models/app/users/professionals_faqM')
 const professionals_pointsM = require('../../../models/app/users/professionals_pointsM')
 const community_postsM = require('../../../models/main/community/community_postsM')
 const courses_certificatesM = require('../../../models/main/academy/courses_certificatesM')
@@ -2685,13 +2684,18 @@ router.get('/get_user_seo/:user_row_id', async (req, res) => {
             },
             { $unwind: { path: "$info_work", preserveNullAndEmptyArrays: true } },
 
+            // cln_app_faqs is a shared, module-discriminated collection (see
+            // src/common/app-faq/app-faq.model.ts), so the join matches on module +
+            // root_document_id via `let`/pipeline rather than a plain foreignField equality.
             {
                 $lookup: {
-                    from: "cln_professionals_faq_lists",
-                    localField: "_id",
-                    foreignField: "user_row_id",
-                    as: "faq",
-                    pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }]
+                    from: "cln_app_faqs",
+                    let: { userId: "$_id" },
+                    pipeline: [
+                        { $match: { $expr: { $and: [{ $eq: ["$module", "professional"] }, { $eq: ["$root_document_id", "$$userId"] }] } } },
+                        { $project: { _id: 0, faq_question: "$question", faq_answer: "$answer" } }
+                    ],
+                    as: "faq"
                 }
             },
             {

@@ -15,7 +15,7 @@ const { eventsList } = require('../../../services/admin_panel/events')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
-const event_faqM = require('../../../models/app/events/event_faqM')
+const { findFaqsByRoot } = require('../../../src/common/app-faq/app-faq.repository')
 const countryM = require('../../../models/app/static/countryM')
 const ticketM = require('../../../models/app/events/ticketM')
 const eventM = require('../../../models/app/events/eventM')
@@ -8571,7 +8571,11 @@ router.get('/view_event/:request_row_id', async (req, res) => {
                     myArr['utc_row_id'] = checkEvent[0].utc_row_id
                     myArr['country'] = checkEvent[0].country
                     myArr['alt_image_text'] = checkEvent[0].alt_image_text
-                    myArr['event_faqs'] = await event_faqM.find({ event_row_id: checkEvent[0]._id })
+                    // question/answer -> faq_question/faq_answer: cln_app_faqs stores the
+                    // markets-matching field names internally, but this endpoint's response
+                    // contract is unchanged - see app-faq.model.ts's own doc comment.
+                    const event_faqs_rows = await findFaqsByRoot({ module: 'event', rootDocumentId: checkEvent[0]._id })
+                    myArr['event_faqs'] = event_faqs_rows.map((faq) => ({ _id: faq._id, faq_question: faq.question, faq_answer: faq.answer }))
                     myArr['contact_country_row_id'] = checkEvent[0].contact_country_row_id
                     myArr['build_event_page_score'] = checkEvent[0]?.build_event_page_score
                     myArr['seo_details_score'] = checkEvent[0]?.seo_details_score
