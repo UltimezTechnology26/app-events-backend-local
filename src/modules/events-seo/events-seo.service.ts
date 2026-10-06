@@ -29,7 +29,7 @@ export async function getSeoOverview() {
 
   const eventStatsPromise = eventM.aggregate([
     { $match: { event_url: { $exists: true, $ne: '' }, approval_status: 1, active_status: 1 } },
-    { $lookup: { from: 'cln_events_seo_details', localField: '_id', foreignField: 'event_row_id', as: 'event_seo' } },
+    { $lookup: { from: 'cln_app_seo_details_event', localField: '_id', foreignField: 'root_document_id', as: 'event_seo' } },
     { $unwind: { path: '$event_seo', preserveNullAndEmptyArrays: true } },
     { $addFields: { title_len: { $strLenCP: { $ifNull: ['$event_seo.meta_title', ''] } }, tags: { $map: { input: { $ifNull: ['$event_seo.header_structure', []] }, as: 'h', in: '$$h.tag' } } } },
     {

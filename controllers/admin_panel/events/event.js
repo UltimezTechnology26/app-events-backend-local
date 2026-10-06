@@ -5508,7 +5508,7 @@ router.post('/submit_event', [
 
                 const dataSave = await eventM(insertArr).save()
                 const seoArr = {
-                    event_row_id: dataSave?._id,
+                    root_document_id: dataSave?._id,
                     meta_keywords: req.body.meta_keywords,
                     meta_description: req.body.meta_description,
                     meta_title: req.body.meta_title,
@@ -5871,7 +5871,7 @@ router.post('/edit_event', [
                 const checkEvent = await eventM.findOne({ _id: event_row_id }, {
                     _id: 1, event_image: 1, event_image_type: 1, approval_status: 1,
                 })
-                const checkEventSeo = await event_seo_detailsM.findOne({ event_row_id: event_row_id }, {
+                const checkEventSeo = await event_seo_detailsM.findOne({ root_document_id: event_row_id }, {
                     meta_keywords: 1,
                     meta_description: 1,
                     meta_title: 1,
@@ -5925,7 +5925,7 @@ router.post('/edit_event', [
                     Object.assign(updateArr, updateFields, { updated_date_n_time: new Date() })
 
                     await eventM.updateOne({ _id: event_row_id }, { $set: updateArr })
-                    await event_seo_detailsM.updateOne({ event_row_id: event_row_id }, { $set: updateSeoArr })
+                    await event_seo_detailsM.updateOne({ root_document_id: event_row_id }, { $set: updateSeoArr })
 
 
                     const changed =
@@ -8296,9 +8296,9 @@ router.get('/view_event/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_events_seo_details",
+                            from: "cln_app_seo_details_event",
                             localField: "_id",
-                            foreignField: "event_row_id",
+                            foreignField: "root_document_id",
                             as: "event_seo"
                         }
                     },
@@ -12105,9 +12105,9 @@ router.get('/deleted_events_list/:skip/:limit', async (req, res) => {
                 {
                     $lookup:
                     {
-                        from: "cln_events_seo_details",
+                        from: "cln_app_seo_details_event",
                         localField: "_id",
-                        foreignField: "event_row_id",
+                        foreignField: "root_document_id",
                         as: "event_seo"
                     }
                 },
@@ -12346,9 +12346,9 @@ router.get('/deleted_events_view/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_events_seo_details",
+                            from: "cln_app_seo_details_event",
                             localField: "_id",
-                            foreignField: "event_row_id",
+                            foreignField: "root_document_id",
                             as: "event_seo"
                         }
                     },
@@ -13149,9 +13149,9 @@ router.get('/seo_overview', checkApiKey, async (req, res) => {
             },
             {
                 $lookup: {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details_event",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "root_document_id",
                     as: "event_seo"
                 }
             },

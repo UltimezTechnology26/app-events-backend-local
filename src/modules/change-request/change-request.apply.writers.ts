@@ -57,7 +57,7 @@ export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_professionals_social_links: professionals_social_linksM,
   cln_professionals_awards: professionals_awardsM,
   cln_events: eventM,
-  cln_events_seo_details: event_seo_detailsM,
+  cln_app_seo_details_event: event_seo_detailsM,
   cln_events_link_display_details: event_link_display_detailsM,
   cln_event_tickets: ticketM,
   cln_event_coupons: couponM,

@@ -99,7 +99,7 @@ async function deleteEventCascade(eventRowId: number, deletedReason: string) {
   // same perf fix events.write.service.ts's own deleteEventCascade already had.
   const [, , , , , checkAttendee, checkFaq, checkTickets, checkSponsorsPartners, checkWatchlist] = await Promise.all([
     eventM_legacy.deleteOne({ _id: eventRowId }),
-    event_seo_detailsM.deleteOne({ event_row_id: eventRowId }),
+    event_seo_detailsM.deleteOne({ root_document_id: eventRowId }),
     event_speakersM.deleteMany({ event_row_id: eventRowId }),
     notify_userM.deleteMany({ event_row_id: eventRowId }),
     events_countM.deleteOne({ event_row_id: eventRowId }),

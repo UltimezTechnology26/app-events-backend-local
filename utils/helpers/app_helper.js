@@ -1743,7 +1743,7 @@ export async function calculateEventScore(event_row_id, fieldsToUpdate = ["profi
 
   // Fetch core event data
   const event = await eventM.findOne({ _id: event_row_id }).lean();
-  const event_seo = await event_seo_detailsM.findOne({ event_row_id: event_row_id }).lean();
+  const event_seo = await event_seo_detailsM.findOne({ root_document_id: event_row_id }).lean();
 
 
   // -----------------------------------------------------------

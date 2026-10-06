@@ -244,7 +244,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     // ---- UPDATE PATH ----
     const eventData = await eventM.findOne({ _id: eventRowId }, { event_url: 1, approval_status: 1 })
     const seoData = await event_seo_detailsM.findOne(
-      { event_row_id: eventRowId },
+      { root_document_id: eventRowId },
       { meta_keywords: 1, meta_description: 1, meta_title: 1, robots_index: 1, robots_follow: 1, og_title: 1, og_description: 1, twitter_title: 1, twitter_description: 1, twitter_creator: 1 }
     )
     const combinedData = { ...eventData?.toObject(), ...seoData?.toObject() }
@@ -295,7 +295,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     }
 
     await eventM.updateOne({ _id: eventRowId }, { $set: eventUpdateData })
-    await event_seo_detailsM.updateOne({ event_row_id: eventRowId }, { $set: seoFields }, { upsert: true })
+    await event_seo_detailsM.updateOne({ root_document_id: eventRowId }, { $set: seoFields }, { upsert: true })
     await invalidateEventSubmitCaches()
 
     const changed =
@@ -398,7 +398,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
   })
 
   if (Object.keys(seoFields).length > 0) {
-    await event_seo_detailsM.updateOne({ event_row_id: dataSave._id }, { $set: seoFields }, { upsert: true })
+    await event_seo_detailsM.updateOne({ root_document_id: dataSave._id }, { $set: seoFields }, { upsert: true })
   }
 
   const hasNonEmpty = (val: unknown) => String(val ?? '').trim() !== ''

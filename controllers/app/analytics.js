@@ -995,9 +995,9 @@ router.get('/events_all_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details_event",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "root_document_id",
           as: "seo_info"
         }
       },
@@ -1095,9 +1095,9 @@ router.get('/all_events_urls/:skip/:limit', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details_event",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "root_document_id",
           as: "seo_info"
         }
       },
@@ -2225,7 +2225,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
     } else if (moduleFilter === "event") {
       results.push(...await seo_static_urlsM.aggregate([{ $match: { module: "event" } }, ...staticPipeline]));
 
-      // Event-specific pipeline to handle SEO data from cln_events_seo_details
+      // Event-specific pipeline to handle SEO data from cln_app_seo_details_event
       const eventPipeline = [
         {
           $addFields: {
@@ -2277,9 +2277,9 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
           ...condition_query,
           {
             $lookup: {
-              from: "cln_events_seo_details",
+              from: "cln_app_seo_details_event",
               localField: "_id",
-              foreignField: "event_row_id",
+              foreignField: "root_document_id",
               as: "event_seo"
             }
           },
@@ -2926,9 +2926,9 @@ router.get('/get_event_seo/:event_row_id', checkApiKey, async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_events_seo_details",
+          from: "cln_app_seo_details_event",
           localField: "_id",
-          foreignField: "event_row_id",
+          foreignField: "root_document_id",
           as: "seo_info"
         }
       },

@@ -545,9 +545,9 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             {
                 $lookup:
                 {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details_event",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "root_document_id",
                     as: "seo_info"
                 }
             },

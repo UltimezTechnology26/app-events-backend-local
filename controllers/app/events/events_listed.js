@@ -2047,7 +2047,7 @@ router.post('/submit_event', [
 
                     // Get SEO data separately
                     const seoData = await event_seo_detailsM.findOne(
-                        { event_row_id: event_row_id },
+                        { root_document_id: event_row_id },
                         {
                             meta_keywords: 1,
                             meta_description: 1,
@@ -2207,7 +2207,7 @@ router.post('/submit_event', [
 
                     // Update SEO details table (only SEO fields)
                     await event_seo_detailsM.updateOne(
-                        { event_row_id: event_row_id },
+                        { root_document_id: event_row_id },
                         { $set: seoFields },
                         { upsert: true }
                     );
@@ -2342,7 +2342,7 @@ router.post('/submit_event', [
                     //  SEO fields to separate collection
                     if (Object.keys(seoFields).length > 0) {
                         await event_seo_detailsM.updateOne(
-                            { event_row_id: dataSave._id },
+                            { root_document_id: dataSave._id },
                             { $set: seoFields },
                             { upsert: true }
                         );
@@ -3342,7 +3342,7 @@ router.post('/update_seo', [
         }
 
         // Get existing SEO data from the separated collection
-        const seoData = await event_seo_detailsM.findOne({ event_row_id: module_id });
+        const seoData = await event_seo_detailsM.findOne({ root_document_id: module_id });
 
         // Publish gate applies to admin-panel edits only (design §2, same shape as every other
         // Events section) - the event's own host keeps writing live immediately below, unchanged
@@ -3443,7 +3443,7 @@ router.post('/update_seo', [
 
         // Update SEO details in the separated collection
         await event_seo_detailsM.updateOne(
-            { event_row_id: module_id },
+            { root_document_id: module_id },
             { $set: updateData },
             { upsert: true }
         );
@@ -3566,9 +3566,9 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
             // SEO details lookup
             {
                 $lookup: {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details_event",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "root_document_id",
                     as: "seo_info"
                 }
             },

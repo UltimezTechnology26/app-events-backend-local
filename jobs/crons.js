@@ -612,7 +612,7 @@ cron.schedule("35 12 * * *", async () => {
                 const header_structure = await safeCrawl(url);
 
                 await event_seo_detailsM.updateOne(
-                    { event_row_id: event._id },
+                    { root_document_id: event._id },
                     { $set: { header_structure } },
                     { upsert: true }
                 );
@@ -870,7 +870,7 @@ cron.schedule("20 10 * * *", async () => {
                 const header_structure = await safeCrawl(url);
 
                 await event_seo_detailsM.updateOne(
-                    { event_row_id: event._id },
+                    { root_document_id: event._id },
                     { $set: { header_structure } },
                     { upsert: true }
                 );
