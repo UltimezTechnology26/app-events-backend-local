@@ -88,6 +88,9 @@ async function invalidateProfessionalDetailsCaches(): Promise<void> {
   await Promise.all([
     require('../../modules/work-experience/work-experience.cache').invalidateWorkExperienceCaches(),
     invalidateTeamMembersCaches(),
+    // The public Professionals list (headline position/company) and the profile page both read
+    // work experience - neither was cleared on publish, so they kept the old data until their TTL.
+    require('../../modules/professionals/professionals.cache').invalidateProfessionalPublicCaches(),
   ])
 }
 function invalidateJobCaches(): Promise<void> {
@@ -106,13 +109,11 @@ function invalidateCompanyAcquisitionsCaches(): Promise<void> {
 // public-page data source) serving stale data - same bug class already found and fixed for
 // Awards/FAQ's above.
 async function invalidateProfessionalsCaches(): Promise<void> {
-  const { deleteKeysByPattern } = require('@ultimez-interview/coinpedia-backend-library/cache')
-  await Promise.all([
-    require('../../modules/professionals/professionals.cache').invalidateProfessionalsCaches(),
-    deleteKeysByPattern('user_detail*'),
-    deleteKeysByPattern('app_user_detail_*'),
-    deleteKeysByPattern('app_popular_professionals*'),
-  ])
+  // Clears the admin list/overview AND the public list (link_page/users_list, 30-minute TTL),
+  // profile page + aggregates and popular/trending/search. The public list caches each row's
+  // country/location, so before it was cleared here a published location/country change kept
+  // showing the old country (e.g. India) until the TTL expired on its own.
+  await require('../../modules/professionals/professionals.cache').invalidateProfessionalsCaches()
 }
 function invalidateProfessionalsSeoCaches(): Promise<void> {
   return require('../../modules/professionals-seo/professionals-seo.cache').invalidateAfterSeoUpdate()
@@ -1172,7 +1173,11 @@ export const SECTION_REGISTRY = {
     displayFields: BASIC_DETAILS_DISPLAY_FIELDS,
     schemaPaths: (field: string) => companyM.schema.path(field),
     fieldGroups: {
-      location: ['company_location', 'city', 'state', 'latitude', 'longitude'],
+      // `country_id` belongs to the location group: it's derived from the picked place together
+      // with city/state/lat/lng, and isn't a reviewer-visible row (BASIC_DETAILS_DISPLAY_FIELDS
+      // hides it). Left ungrouped, a reviewer could approve the new location while the country
+      // change was decided separately, leaving e.g. a Paris location stored with India's id.
+      location: ['company_location', 'city', 'state', 'latitude', 'longitude', 'country_id'],
       business_model: ['main_business_model_id', 'business_model_id'],
     },
     fieldLevelApproval: true,
@@ -1247,6 +1252,13 @@ export const SECTION_REGISTRY = {
     fieldLabels: PROFESSIONAL_BASIC_DETAILS_FIELD_LABELS,
     displayFields: PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS,
     schemaPaths: (field: string) => professionalsM.schema.path(field),
+    // The location picker submits ONE place selection that fans out into these raw fields; only
+    // `location` is reviewer-visible (see PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS). Grouping
+    // them makes approve/reject atomic, so a reviewer can't approve the new location text while
+    // its country/coordinates are decided separately (same as Company Basic Details' location).
+    fieldGroups: {
+      location: ['location', 'area', 'city', 'state', 'latitude', 'longitude', 'country_id', 'country_name', 'location_country'],
+    },
     invalidateCache: () => invalidateProfessionalsCaches(),
     fieldLevelApproval: true,
   },

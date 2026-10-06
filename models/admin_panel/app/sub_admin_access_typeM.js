@@ -27,6 +27,13 @@ const saveSchema = mongoose.Schema({
     },
     cant_extra: {
         type: [String]
+    },
+    // What a Restricted Access / Full Access sub-admin can do in this module.
+    restricted_access: {
+        type: [String]
+    },
+    full_access: {
+        type: [String]
     }
 })
 

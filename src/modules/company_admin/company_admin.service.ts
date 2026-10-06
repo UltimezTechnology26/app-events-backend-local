@@ -37,6 +37,7 @@ import {
   updateCompanyLogo,
 } from './company_admin.queries'
 import { getNewCompanyYearsOverviewCache, setNewCompanyYearsOverviewCache } from './company_admin.cache'
+import { invalidateBasicDetailsCaches, invalidateCompanyLogoCaches } from '../company/settings/company.settings.cache'
 import { saveOrUpdateBasicCompanyDetails } from '../company/settings/company.settings.service'
 import { Actor, BulkCompanyRow, NotInsertedBulkCompanyEntry, CompanyBulkInsertFields, InsertedCompanyRow, YearsOverviewResult } from './company_admin.types'
 
@@ -458,6 +459,10 @@ export async function bulkImportCompanies({ admin, bulkData }: BulkImportCompani
     await calculateCompanyProfileScore(company_row_id)
   }
 
+  // Bulk-created companies are live immediately but nothing cleared the public company list,
+  // partners list or popular/trending/search caches afterwards, so they stayed missing until TTL.
+  await invalidateBasicDetailsCaches()
+
   return { status: true, message: { not_inserted_array, alert_message: 'Companies list details has been submitted successfully.' } }
 }
 
@@ -541,6 +546,9 @@ export async function updateCompanyPageDetails({ admin, actor, companyRowIdRaw, 
       await deleteImageDigitalOcean(checkCompany.company_logo, 1)
     }
     await updateCompanyLogo(company_row_id, company_logo)
+    // The logo is written live here (not through the approval gate) and nothing cleared the public
+    // caches afterwards, so the old logo kept showing on the company list/profile page until TTL.
+    await invalidateCompanyLogoCaches()
   }
 
   return result

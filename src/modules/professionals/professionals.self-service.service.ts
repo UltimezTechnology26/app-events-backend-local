@@ -15,6 +15,7 @@ import { AUDIT_MODULE_PROFESSIONALS } from '../../common/status-audit/status-aud
 import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
 import logger from '../../../config/logger'
+import { invalidateProfessionalPublicCaches } from './professionals.cache'
 
 const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
@@ -153,6 +154,7 @@ export async function applyProfessionalBasicDetailsSideEffects({ action, userRow
     deleteKeysByPattern('individual_event_*'),
     deleteKeysByPattern('app_company_individual_details_*'),
     deleteKeysByPattern('speakers_list_*'),
+    invalidateProfessionalPublicCaches(),
   ])
   await calculateUserProfileScore(userRowId, ['professional_profile'])
 }
@@ -305,6 +307,10 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
       deleteKeysByPattern('user_detail*'),
       deleteKeysByPattern('app_user_detail_*'),
       deleteKeysByPattern('app_popular_professionals*'),
+      // Public Professionals list (link_page/users_list) caches each row's country/location for
+      // 30 minutes - without this, a changed location kept showing the old country there. Also
+      // clears the profile aggregate (`app_user_other_details_*`) and trending/search keys.
+      invalidateProfessionalPublicCaches(),
     ])
 
     alertMessage = 'Great! Your profile details have been updated successfully. Thank you for making the necessary changes'
@@ -323,6 +329,7 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
       deleteKeysByPattern('user_detail*'),
       deleteKeysByPattern('app_user_detail_*'),
       deleteKeysByPattern('app_popular_professionals*'),
+      invalidateProfessionalPublicCaches(),
     ])
     userRowId = insertedQuery._id
     insertedFullName = insertedQuery.full_name
@@ -452,6 +459,7 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
     deleteKeysByPattern('individual_event_*'),
     deleteKeysByPattern('app_company_individual_details_*'),
     deleteKeysByPattern('speakers_list_*'),
+    invalidateProfessionalPublicCaches(),
   ])
   await calculateUserProfileScore(userRowId, ['professional_profile'])
 

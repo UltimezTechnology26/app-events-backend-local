@@ -11,6 +11,7 @@ import {
   buildRecoveredListPipeline, buildRecoveredCountPipeline,
 } from './professionals-delete-lifecycle.queries'
 import type { AdminAuthResult } from './professionals-delete-lifecycle.types'
+import { invalidateProfessionalAccountStateCaches } from '../professionals/professionals.cache'
 
 const ProfessionalsDeleteVerificationsM = require('../../../models/app/professionals_delete_verificationsM')
 const ProfessionalsDeleteActionsM = require('../../../models/app/professionals_delete_actionsM')
@@ -100,6 +101,10 @@ export async function recoverAccount(auth: AdminAuthResult, userRowId: number, a
     await session.endSession()
   }
 
+  // The recovered account (and its reactivated company/events) must reappear on the public
+  // lists/pages - nothing cleared those caches before, so it stayed hidden until their TTL expired.
+  await invalidateProfessionalAccountStateCaches()
+
   const passSubject = 'Your CoinPedia Account Recovered Successfully.'
   const passMessage = `
                         <p style="margin: 24px 0;font-weight: 500;font-size:22px;text-transform: capitalize;color:#000;">Hello ${checkQuery.full_name},</p>
@@ -136,6 +141,9 @@ export async function deleteUser(auth: AdminAuthResult, userRowId: number, token
   if (!deleteUserResult.status) {
     return { status: false, message: { alert_message: deleteUserResult.message } }
   }
+  // A hard-deleted professional (and their company/events) must disappear from the public
+  // lists/pages - nothing cleared those caches before, so a deleted profile kept showing.
+  await invalidateProfessionalAccountStateCaches()
   return { status: true, message: { alert_message: 'This user details deleted successfully.', asd: deleteUserResult } }
 }
 

@@ -68,11 +68,12 @@ export async function updateProfileImage(auth: UserAuthResult, body: UpdateProfi
       if (!imageQuery) await deleteImageDigitalOcean(queryRun.profile_image, DIGITAL_OCEAN_IMAGE_TYPE)
     }
     await ProfessionalM.updateOne({ _id: userRowId }, { $set: { updated_date_n_time: getPresentDateTime() } })
-    // FLAGGED, NOT FIXED: legacy invalidates zero cache keys on this "existing image row" update
-    // path (only the "brand new row" insert path below does). Preserved as-is — adding
-    // invalidation here would be a real behavior change (fresher cached responses after an
-    // update), not a no-op cleanup, so it needs explicit sign-off first.
     await ProfessionalProfileImagesM.updateOne({ user_row_id: userRowId }, { $set: { profile_image_type: profileImageType, profile_image: profileImage } })
+    // CONFIRMED BUG FIX (user-requested: caches must refresh automatically after every save):
+    // legacy invalidated zero cache keys on this "existing image row" update path (only the "brand
+    // new row" insert path below did), so a changed photo kept showing the old one on the public
+    // list and profile page until their TTL expired.
+    await invalidateProfileImageCaches()
   } else {
     await new ProfessionalProfileImagesM({ user_row_id: userRowId, profile_image: profileImage, profile_image_type: profileImageType }).save()
     await invalidateProfileImageCaches()

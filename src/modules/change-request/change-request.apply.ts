@@ -71,6 +71,32 @@ function rootDocumentTrackerFields(actor: ActorRef): UpdateTrackerFields {
   }
 }
 
+/**
+ * CONFIRMED BUG FIX (found testing the approve/publish flow live): a field-level publish builds its
+ * payload ONLY from the approved `changes[]` entries, and `changes[]` holds just the reviewer-
+ * VISIBLE fields (SectionConfig.displayFields hides derived/bookkeeping ones). A section's
+ * `fieldGroups` members that are hidden - e.g. a location's city/state/latitude/longitude/country_id,
+ * which travel with the visible `company_location`/`location` as one unit - were therefore never
+ * written on publish: the approved location text changed while its coordinates, city, state and
+ * country stayed the OLD place's (e.g. a New York location with Paris coordinates and France's id).
+ * When any member of a group is being applied, carry over every other member of that group from the
+ * request's stored payload so the group lands atomically, as its fieldGroups doc promises.
+ */
+function withApprovedGroupMembers(
+  approved: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  fieldGroups: Record<string, string[]> | undefined,
+): Record<string, unknown> {
+  const result = { ...approved }
+  for (const members of Object.values(fieldGroups ?? {})) {
+    if (!members.some((member) => member in approved)) continue
+    for (const member of members) {
+      if (!(member in result) && member in payload) result[member] = payload[member]
+    }
+  }
+  return result
+}
+
 const LOG_ACTION_PUBLISH = 'publish'
 const ACTION_DELETE = 'delete'
 const ACTION_UPDATE = 'update'
@@ -167,7 +193,11 @@ export async function applyChangeRequest({
   // For a field-level section, this publish writes ONLY the fields just approved - everything
   // still pending, already published by an earlier partial publish, or rejected is excluded.
   const effectivePayload = usesFieldLevelApproval
-    ? Object.fromEntries(approvedUnpublished.map((c) => [c.field, c.new_value]))
+    ? withApprovedGroupMembers(
+        Object.fromEntries(approvedUnpublished.map((c) => [c.field, c.new_value])),
+        request.payload ?? {},
+        config.fieldGroups,
+      )
     : request.payload ?? {}
   const effectiveRequest: ChangeRequestDoc = usesFieldLevelApproval
     ? { ...request, payload: effectivePayload }
@@ -328,6 +358,17 @@ export async function applyChangeRequest({
       await applyEventStatusSideEffects({ request: effectiveRequest, actor })
     } catch (err) {
       logger.error({ err, changeRequestId }, 'change-request: event status side effects failed')
+    }
+  }
+
+  // Status sections (enable/disable/delete) run their side effects - including the delete cascade
+  // - AFTER the cache clear above, so a public read in between could re-cache the not-yet-deleted
+  // record for up to its TTL. Clear again now that the cascade has finished.
+  if (request.section === SECTION_PROFESSIONAL_STATUS || request.section === SECTION_COMPANY_STATUS || request.section === SECTION_EVENT_STATUS) {
+    try {
+      await config.invalidateCache?.(request.root_document_id)
+    } catch (err) {
+      logger.error({ err, changeRequestId }, 'change-request: post-side-effects cache invalidation failed')
     }
   }
 

@@ -28,34 +28,62 @@ export async function invalidateEventsListCache(): Promise<void> {
   await deleteKeysByPattern(EVENTS_LIST_CACHE_PATTERN)
 }
 
-/** Matches enable_event/disable_event's own 4 patterns (event.js:7729/7842). */
+/**
+ * Every PUBLIC-facing event cache a change to an event can make stale: the public events list
+ * (`all_events_*`), the event page (`individual_event_*`), watchlists, the speakers list, and the
+ * organizers list (`organizers_list_*` - a 12 h cache that carries each organizer's `events_count`
+ * and that only company/professional writes ever cleared) plus the company pages/list that embed an
+ * organizer's events. The legacy-route-specific sets below each skipped some of these (e.g. enable/
+ * disable/delete/approve never cleared `individual_event_*`, so a deleted or disabled event's page
+ * stayed up until its TTL expired) - every helper below now also calls this.
+ */
+const PUBLIC_EVENT_CACHE_PATTERNS = [
+  'all_events_*',
+  'individual_event_*',
+  'events_watchlist_*',
+  'speakers_list*',
+  'organizers_list_*',
+  'app_company_individual_other_details_*',
+  'app_company_list_*',
+  'app_user_other_details_*',
+]
+
+export async function invalidatePublicEventCaches(): Promise<void> {
+  await deleteAll(PUBLIC_EVENT_CACHE_PATTERNS)
+}
+
+/** Matches enable_event/disable_event's own 4 patterns (event.js:7729/7842), plus the public set. */
 export async function invalidateEventLifecycleCaches(): Promise<void> {
   await deleteAll(['all_events_*', 'users_registered_list_*', 'manage_events_list_*', 'app_company_individual_other_details_*'])
+  await invalidatePublicEventCaches()
   await invalidateEventsListCache()
 }
 
-/** Matches delete_event's own 3 patterns (event.js:7959, via deleteEvent). */
+/** Matches delete_event's own 3 patterns (event.js:7959, via deleteEvent), plus the public set. */
 export async function invalidateEventDeleteCaches(): Promise<void> {
   await deleteAll(['users_registered_list_*', 'all_events_*', 'manage_events_list_*'])
+  await invalidatePublicEventCaches()
   await invalidateEventsListCache()
 }
 
-/** Matches approve_event/reject_event's own 3 patterns (event.js:9336/9831) - same set delete_event
- *  clears, minus app_company_individual_other_details_* (neither legacy route touches it). */
+/** Matches approve_event/reject_event's own 3 patterns (event.js:9336/9831), plus the public set. */
 export async function invalidateEventApprovalCaches(): Promise<void> {
   await deleteAll(['users_registered_list_*', 'all_events_*', 'manage_events_list_*'])
+  await invalidatePublicEventCaches()
   await invalidateEventsListCache()
 }
 
-/** Matches edit_event's own 7 patterns (event.js:5636). */
+/** Matches edit_event's own 7 patterns (event.js:5636), plus the public set. */
 export async function invalidateEventEditCaches(): Promise<void> {
   await deleteAll(['all_events_*', 'individual_event_*', 'users_registered_list_*', 'events_watchlist_*', 'app_company_individual_other_details_*', 'manage_events_list_*', 'app_user_other_details_*'])
+  await invalidatePublicEventCaches()
   await invalidateEventsListCache()
 }
 
-/** Matches submit_event's own 9 patterns (events_listed.js:1652, both create and update paths). */
+/** Matches submit_event's own 9 patterns (events_listed.js:1652, both create and update paths), plus the public set. */
 export async function invalidateEventSubmitCaches(): Promise<void> {
   await deleteAll(['all_events_*', 'individual_event_*', 'users_registered_list_*', 'events_watchlist_*', 'app_company_individual_other_details_*', 'speakers_list*', 'manage_events_list_*', 'app_user_other_details_*', 'backend_event_tags_list*'])
+  await invalidatePublicEventCaches()
   await invalidateEventsListCache()
 }
 

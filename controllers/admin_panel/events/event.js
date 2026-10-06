@@ -8,6 +8,7 @@ const { EventsstartAndEndOfToday, EventstartAndEndOfWeek, checkAttendee, checkSu
 const { DateFormatter } = require('../../../utils/helpers/events_helper')
 const { getUpdateTrackerFields } = require('../../../utils/helpers/app_helper')
 const { setCache, getCache, deleteKeysByPattern } = require('../../../config/cache_helper')
+const { invalidatePublicEventCaches } = require('../../../src/modules/events/events.cache')
 const { checkAdminLoginToken, checkApiKey, checkAllLoginToken } = require('../../../middleware/authorization')
 const { sendEmail, sendEventsEmail } = require('../../../config/email')
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
@@ -5522,6 +5523,7 @@ router.post('/submit_event', [
                 await deleteKeysByPattern('app_company_individual_other_details_*')
                 await deleteKeysByPattern('manage_events_list_*')
                 await deleteKeysByPattern('app_user_other_details_*')
+                await invalidatePublicEventCaches()
 
 
                 let event_row_id = dataSave._id
@@ -5960,6 +5962,7 @@ router.post('/edit_event', [
                     await deleteKeysByPattern('app_company_individual_other_details_*')
                     await deleteKeysByPattern('manage_events_list_*')
                     await deleteKeysByPattern('app_user_other_details_*')
+                    await invalidatePublicEventCaches()
                     if (speakers_data.length) {
                         const email_data = {
                             approval_status: checkEvent.approval_status,
@@ -7773,6 +7776,7 @@ router.get('/enable_event/:request_row_id', async (req, res) => {
                         await deleteKeysByPattern('users_registered_list_*')
                         await deleteKeysByPattern('manage_events_list_*')
                         await deleteKeysByPattern('app_company_individual_other_details_*')
+                        await invalidatePublicEventCaches()
 
                         let event_title = check_query[0].event_title
                         let full_name = check_query[0].full_name
@@ -7929,6 +7933,7 @@ router.post('/disable_event/:request_row_id', [
                         await deleteKeysByPattern('manage_events_list_*')
                         await deleteKeysByPattern('all_events_*')
                         await deleteKeysByPattern('app_company_individual_other_details_*')
+                        await invalidatePublicEventCaches()
 
 
                         res.json({ status: true, message: { alert_message: "This event details has been disabled successfully." } })
@@ -7979,6 +7984,7 @@ router.post('/delete_event/:request_row_id', [
                         await deleteKeysByPattern('users_registered_list_*')
                         await deleteKeysByPattern('all_events_*')
                         await deleteKeysByPattern('manage_events_list_*')
+                        await invalidatePublicEventCaches()
                         res.json({ status: true, message: { alert_message: 'Event Deleted Successfully' } })
 
                     }
@@ -9532,6 +9538,7 @@ router.get('/approve_event/:request_row_id', async (req, res) => {
                             await deleteKeysByPattern('users_registered_list_*')
                             await deleteKeysByPattern('all_events_*')
                             await deleteKeysByPattern('manage_events_list_*')
+                            await invalidatePublicEventCaches()
                             const cardData = {
                                 event_title: check_query[0].event_title,
                                 start_date: start_date_formatted,
@@ -9956,6 +9963,7 @@ router.post('/reject_event/:request_row_id', [
                         await deleteKeysByPattern('all_events_*')
                         await deleteKeysByPattern('users_registered_list_*')
                         await deleteKeysByPattern('manage_events_list_*')
+                        await invalidatePublicEventCaches()
                         res.json({ status: true, message: { alert_message: "This event details has been rejected successfully." } })
                     }
                     else {
@@ -10167,6 +10175,7 @@ router.post('/update_ticket', [
                             }
                             await deleteKeysByPattern('individual_event_*')
                             await deleteKeysByPattern('ticket_list_*')
+                            await invalidatePublicEventCaches()
 
                             res.json({ status: true, message: { alert_message: 'Ticket updated successfully.' } })
                         }
@@ -10199,6 +10208,7 @@ router.post('/update_ticket', [
                         }
                         await deleteKeysByPattern('individual_event_*')
                         await deleteKeysByPattern('ticket_list_*')
+                        await invalidatePublicEventCaches()
                         await calculateEventScore(event_row_id, ['tickets_coupons'])
 
                         res.json({ status: true, message: { alert_message: 'New ticket created successfully.' } })
@@ -10333,6 +10343,7 @@ router.get('/delete_ticket/:ticket_row_id', async (req, res) => {
                         deleteTickets({ type: 1, event_row_id: event_row_id, ticket_row_id: ticket_row_id })
                         await deleteKeysByPattern('individual_event_*')
                         await deleteKeysByPattern('ticket_list_*')
+                        await invalidatePublicEventCaches()
                         await calculateEventScore(event_row_id, ['tickets_coupons'])
 
                         res.json({ status: true, message: { alert_message: "This ticket details has been deleted successfully" } })
@@ -10374,6 +10385,7 @@ router.get('/enable_ticket/:ticket_row_id', async (req, res) => {
                         await ticketM.updateOne({ _id: ticket_row_id }, { $set: { active_status: 1 } })
                         await deleteKeysByPattern('individual_event_*')
                         await deleteKeysByPattern('ticket_list_*')
+                        await invalidatePublicEventCaches()
                         res.json({ status: true, message: { alert_message: "Enabled Ticket Successfully" } })
                     }
                     else {
@@ -10412,6 +10424,7 @@ router.get('/disable_ticket/:ticket_row_id', async (req, res) => {
                         await ticketM.updateOne({ _id: ticket_row_id }, { $set: { active_status: 0 } })
                         await deleteKeysByPattern('individual_event_*')
                         await deleteKeysByPattern('ticket_list_*')
+                        await invalidatePublicEventCaches()
                         res.json({ status: true, message: { alert_message: "Disabled Ticket Successfully" } })
                     }
                     else {

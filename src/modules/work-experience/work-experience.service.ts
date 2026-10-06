@@ -11,6 +11,7 @@ const { getPresentDateTime, checkUserSubadminAccess } = require('../../../utils/
 const { updateNotification } = require('../../../utils/helpers/notification_helper')
 import { deleteKeysByPattern } from '@ultimez-interview/coinpedia-backend-library/cache'
 import { invalidateWorkExperienceCaches } from './work-experience.cache'
+import { invalidateProfessionalPublicCaches } from '../professionals/professionals.cache'
 import { buildEmployeeRequestCountPipeline, getManualProfessionalDetailListPipeline } from './work-experience.queries'
 import { submitChildChangeRequest, submitChildDeleteRequest } from '../../modules/change-request/change-request.child.service'
 import { SECTION_PROFESSIONAL_DETAILS } from '../../modules/change-request/change-request.registry'
@@ -241,6 +242,9 @@ export async function createOrUpdateWorkExperience({
     await deleteKeysByPattern('app_user_detail_*')
     await deleteKeysByPattern('app_user_other_details_*')
     await invalidateWorkExperienceCaches()
+    // The public Professionals list shows each row's headline position/company, which comes from
+    // this record - it was never cleared here, so it stayed stale for up to 30 minutes.
+    await invalidateProfessionalPublicCaches()
     if (company_type === 1 && company_row_id) {
       // This save writes to the same professionals_work_experienceM rows the company's Team
       // Details tab (employee_list_*) and public profile (app_company_individual_other_details_*)
@@ -286,6 +290,7 @@ export async function createOrUpdateWorkExperience({
     await deleteKeysByPattern('app_user_detail_*')
     await deleteKeysByPattern('app_user_other_details_*')
     await invalidateWorkExperienceCaches()
+    await invalidateProfessionalPublicCaches()
     if (company_type === 1 && company_row_id) {
       await deleteKeysByPattern('employee_list_*')
       await deleteKeysByPattern('app_company_individual_other_details_*')
@@ -620,6 +625,7 @@ export async function deleteProfessionalDetail(userRowId: number, professionalDe
   await deleteProfessionalDetails({ professional_details_id: professionalDetailsId, type: 1 })
   await deleteKeysByPattern('app_user_other_details_*')
   await deleteKeysByPattern('professional_detail_list_*')
+  await invalidateProfessionalPublicCaches()
   if (query.company_type === 1 && query.company_row_id) {
     await deleteKeysByPattern('employee_list_*')
     await deleteKeysByPattern('app_company_individual_other_details_*')

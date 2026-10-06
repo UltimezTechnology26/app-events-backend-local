@@ -1,6 +1,20 @@
 // Ports controllers/admin_panel/sub_admin.js's account-CRUD request/response
 // shapes verbatim - structural port only, no field renames/additions.
 
+/** `sub_admin_type` values (1 = Marketing Restricted, 2 = Developer Team, 3 = Marketing Full). */
+export const SUB_ADMIN_TYPE = {
+  MARKETING_RESTRICTED: 1,
+  DEVELOPER: 2,
+  MARKETING_FULL: 3,
+} as const
+
+/**
+ * Developer Team is retired (2026-10-06): no new sub-admin may be given it.
+ * Existing Developer accounts keep the type (and their record-level
+ * restrictions) until disabled, so an edit may keep 2 but never switch to it.
+ */
+export const RETIRED_SUB_ADMIN_TYPES: readonly number[] = [SUB_ADMIN_TYPE.DEVELOPER]
+
 export interface CheckTokenResult {
   status: boolean
   message?: string

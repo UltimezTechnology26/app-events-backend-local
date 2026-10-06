@@ -623,6 +623,11 @@ router.post('/update_sponsors_partners', [
                     insert_array['alert_message'] = 'Congratulations!  Your ' + (sponsor_partner_type == 1 ? ' sponsor ' : ' partner ') + ' details have been successfully added!'
 
                     await deleteKeysByPattern('all_events_*')
+                    await deleteKeysByPattern('event_sponsor_list_*')
+                    await deleteKeysByPattern('individual_event_*')
+                    await deleteKeysByPattern('app_user_other_details_*')
+                    await deleteKeysByPattern('app_company_list_*')
+                    await deleteKeysByPattern('app_company_individual_other_details_*')
                     res.json({ status: true, message: insert_array })
                 }
                 else {
@@ -1846,6 +1851,8 @@ router.post('/reject_sponsor_request', [
         await deleteKeysByPattern('individual_event_*')
         await deleteKeysByPattern('all_events_*')
         await deleteKeysByPattern('app_user_other_details_*')
+        await deleteKeysByPattern('app_company_list_*')
+        await deleteKeysByPattern('app_company_individual_other_details_*')
         // ===== Send Email =====
         // Get sponsor info robustly
         let sponsorUserInfo = {};
