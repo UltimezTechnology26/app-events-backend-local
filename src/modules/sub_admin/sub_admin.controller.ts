@@ -1,8 +1,5 @@
-// Ports controllers/admin_panel/sub_admin.js's account-CRUD routes (lines
-// 22-546) into this module's convention. Dual-mounted at /sub_admin_v2
-// (routes/admin_panel.js) alongside the still-live legacy /sub_admin mount -
-// no cutover yet, no behavior change (see sub_admin.service.ts's own doc
-// comment for the exact per-handler legacy control-flow preserved).
+// Sub-admin account routes (list/create/update/enable/disable/password),
+// mounted at /sub_admin_v2 in routes/admin_panel.js. Super-admin only.
 import express, { Router } from 'express'
 const { check, validationResult } = require('express-validator')
 import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/validation'
@@ -13,8 +10,6 @@ import {
   updateSubAdminDetail,
   enableSubAdmin,
   disableSubAdmin,
-  getIndividualSubAdmin,
-  deleteSubAdmin,
   updateSubAdminPassword,
 } from './sub_admin.service'
 
@@ -80,20 +75,6 @@ subAdminRouter.post('/disable_user/:sub_admin_row_id', [
   const checkToken = checkAdminLoginToken(req.headers, [0])
   if (!checkToken.status) return res.json(checkToken)
   const result = await disableSubAdmin(String(req.params.sub_admin_row_id), req.body, errObj)
-  return res.json(result)
-}))
-
-subAdminRouter.get('/individual/:user_row_id', asyncRoute('Individual sub admin details.', async (req, res) => {
-  const checkToken = checkAdminLoginToken(req.headers, [0])
-  if (!checkToken.status) return res.json(checkToken)
-  const result = await getIndividualSubAdmin(String(req.params.user_row_id))
-  return res.json(result)
-}))
-
-subAdminRouter.get('/delete_sub_admin/:sub_admin_row_id', asyncRoute('Delete sub admin.', async (req, res) => {
-  const checkToken = checkAdminLoginToken(req.headers, [0])
-  if (!checkToken.status) return res.json(checkToken)
-  const result = await deleteSubAdmin(String(req.params.sub_admin_row_id))
   return res.json(result)
 }))
 

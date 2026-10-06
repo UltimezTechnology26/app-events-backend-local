@@ -15,6 +15,7 @@ const { getPresentDateTime } = require('../../../utils/helpers/helper')
 const sub_adminM = require('../../../models/admin_panel/app/sub_adminM')
 const sub_admin_access_typeM = require('../../../models/admin_panel/app/sub_admin_access_typeM')
 
+import { RETIRED_SUB_ADMIN_TYPES, SUB_ADMIN_TYPE } from './sub_admin.types'
 import type { CheckTokenResult, CreateOrUpdateSubAdminBody, DisableSubAdminBody, ServiceResponse } from './sub_admin.types'
 
 const BCRYPT_SALT_ROUNDS = 10
@@ -70,6 +71,17 @@ export async function listSubAdmins(skipRaw: string, limitRaw: string, search: s
   return { status: true, message: myArray, countQueryRun }
 }
 
+const RETIRED_SUB_ADMIN_TYPE_MESSAGE = 'The Developer Team type is retired. Choose Restricted Access or Full Access.'
+
+function parseSubAdminType(value: CreateOrUpdateSubAdminBody['sub_admin_type']): number {
+  return value ? Number.parseInt(String(value)) : SUB_ADMIN_TYPE.MARKETING_RESTRICTED
+}
+
+/** A retired type is only allowed when the account already holds it (`currentType`). */
+function isRetiredTypeChange(requestedType: number, currentType?: number): boolean {
+  return RETIRED_SUB_ADMIN_TYPES.includes(requestedType) && requestedType !== currentType
+}
+
 /** Ports POST /create_sub_admin (legacy lines 94-163). */
 export async function createSubAdmin(body: CreateOrUpdateSubAdminBody, errObj: Record<string, string>, checkToken: CheckTokenResult): Promise<ServiceResponse> {
   if (!checkToken.status) {
@@ -90,6 +102,11 @@ export async function createSubAdmin(body: CreateOrUpdateSubAdminBody, errObj: R
     errObj['create_type_row_id'] = 'The Create type row Ids field must be integer in object'
   }
 
+  const sub_admin_type = parseSubAdminType(body.sub_admin_type)
+  if (isRetiredTypeChange(sub_admin_type)) {
+    errObj['sub_admin_type'] = RETIRED_SUB_ADMIN_TYPE_MESSAGE
+  }
+
   if (Object.keys(errObj).length > 0) {
     return { status: false, message: errObj }
   }
@@ -103,7 +120,7 @@ export async function createSubAdmin(body: CreateOrUpdateSubAdminBody, errObj: R
     create_type_row_id,
     login_status: 1,
     date_n_time: getPresentDateTime(),
-    sub_admin_type: body.sub_admin_type ? Number.parseInt(String(body.sub_admin_type)) : 1,
+    sub_admin_type,
   }).save()
 
   return { status: true, message: { alert_message: 'The sub admin details created successfully.', save_query } }
@@ -136,6 +153,11 @@ export async function updateSubAdminDetail(subAdminRowId: string, body: CreateOr
     errObj['create_type_row_id'] = 'The Create type row Ids field must be integer in object'
   }
 
+  const sub_admin_type = parseSubAdminType(body.sub_admin_type)
+  if (isRetiredTypeChange(sub_admin_type, queryRun?.sub_admin_type)) {
+    errObj['sub_admin_type'] = RETIRED_SUB_ADMIN_TYPE_MESSAGE
+  }
+
   if (Object.keys(errObj).length > 0) {
     return { status: false, message: errObj }
   }
@@ -148,7 +170,7 @@ export async function updateSubAdminDetail(subAdminRowId: string, body: CreateOr
         email_id,
         mobile_number,
         create_type_row_id,
-        sub_admin_type: body.sub_admin_type ? Number.parseInt(String(body.sub_admin_type)) : 1,
+        sub_admin_type,
       },
     },
   )
@@ -195,45 +217,6 @@ export async function disableSubAdmin(subAdminRowIdRaw: string, body: DisableSub
     { $set: { login_status: 0, disabled_reason: body.reason_for_disable, disabled_date_n_time: getPresentDateTime() } },
   )
   return { status: true, message: { alert_message: 'Sub Admin Disabled Successfully.' } }
-}
-
-/** Ports GET /individual/:user_row_id (legacy lines 326-360). */
-export async function getIndividualSubAdmin(userRowIdRaw: string): Promise<ServiceResponse> {
-  const queryRun = await sub_adminM.findOne(
-    { _id: Number.parseInt(userRowIdRaw) },
-    { _id: 1, full_name: 1, mobile_number: 1, email_id: 1, login_status: 1, date_n_time: 1, create_type_row_id: 1, sub_admin_type: 1 },
-  )
-
-  if (!queryRun) {
-    return { status: false, message: { alert_message: 'Sorry! Invalid User Row id' } }
-  }
-
-  return {
-    status: true,
-    message: {
-      _id: queryRun._id,
-      full_name: queryRun.full_name,
-      mobile_number: queryRun.mobile_number,
-      email_id: queryRun.email_id,
-      login_status: queryRun.login_status,
-      date_n_time: queryRun.date_n_time,
-      sub_admin_type: queryRun.sub_admin_type,
-      create_type_row_id: getIntIdFromArray(queryRun.create_type_row_id),
-      create_types_query: await sub_admin_access_typeM.find({ _id: { $in: queryRun.create_type_row_id } }, { create_type_name: 1, _id: 1 }),
-    },
-  }
-}
-
-/** Ports GET /delete_sub_admin/:sub_admin_row_id (legacy lines 482-505). */
-export async function deleteSubAdmin(subAdminRowIdRaw: string): Promise<ServiceResponse> {
-  const id = Number.parseInt(subAdminRowIdRaw)
-  const queryRun = await sub_adminM.findOne({ _id: id })
-  if (!queryRun) {
-    return { status: false, message: { alert_message: 'Invalid Subadmin Row id' } }
-  }
-
-  await sub_adminM.deleteOne({ _id: id })
-  return { status: true, message: { alert_message: 'Subadmin Deleted Successfully' } }
 }
 
 /** Ports POST /update_subadmin_password/:sub_admin_row_id (legacy lines 507-546). */

@@ -34,7 +34,7 @@ const Schema = mongoose.Schema({
     sub_admin_type: {
         type: Number,
         default: 1
-    }, //1: Marketing, 2:Developer
+    }, //1: Marketing Restricted, 2: Developer (retired - existing accounts only), 3: Marketing Full
     // create_type_name: {
     //     type:String,
     //     required:true
