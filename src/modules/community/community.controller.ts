@@ -1,7 +1,7 @@
-// modules/professionals-community/professionals-community.controller.ts
+// modules/community/community.controller.ts
 //
 // Phase K of the Professionals migration (see plan doc). Ports controllers/main/community/
-// pro_batch.js's GET /details (~94-265) into a dedicated professionals-community module.
+// pro_batch.js's GET /details (~94-265) into a dedicated community module.
 //
 // Mounted at a temporary `_v2` prefix (routes/main.js: '/pro_batch_v2') parallel to the untouched
 // legacy '/pro_batch' mount, per this migration's confirmed cutover strategy — legacy stays live
@@ -19,11 +19,11 @@
 // any of them in its one route — dead imports in the legacy file. Not carried into this module.
 import express, { Router, Request, Response } from 'express'
 const { checkUserLoginToken } = require('../../../middleware/authorization')
-import { getCommunityDetails } from './professionals-community.service'
+import { getCommunityDetails } from './community.service'
 
-export const professionalsCommunityRouter: Router = express.Router()
+export const communityRouter: Router = express.Router()
 
-professionalsCommunityRouter.get('/details', async (req: Request, res: Response) => {
+communityRouter.get('/details', async (req: Request, res: Response) => {
   try {
     const checkToken = checkUserLoginToken(req.headers)
     if (!checkToken.status) {

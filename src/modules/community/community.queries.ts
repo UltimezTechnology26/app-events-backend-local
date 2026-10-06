@@ -1,11 +1,11 @@
-// modules/professionals-community/professionals-community.queries.ts
+// modules/community/community.queries.ts
 // Ported 1:1 from controllers/main/community/pro_batch.js (~18-91, ~103-196). Same stages, same
 // thresholds, same field names — no new behavior.
 import ProfessionalM from '../../../models/app/professionalsM'
 import CommunityPostsM from '../../../models/main/community/community_postsM'
 import CommunityLikesM from '../../../models/main/community/community_likesM'
 import CommunityCommentsM from '../../../models/main/community/community_commentsM'
-import { EngagementStats } from './professionals-community.types'
+import { EngagementStats } from './community.types'
 
 const HIGH_ENGAGEMENT_LIKES_THRESHOLD = 500
 const HIGH_ENGAGEMENT_COMMENTS_THRESHOLD = 300
