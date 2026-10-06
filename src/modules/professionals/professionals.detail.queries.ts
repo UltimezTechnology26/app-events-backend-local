@@ -87,7 +87,7 @@ export function fetchSocialLinks(userRowId: number) {
 
 /** Ports the SEO-details single lookup (user.js:3078) — independent, needs only `user_row_id`. */
 export function fetchSeoDetails(userRowId: number) {
-  return ProfessionalSeoDetailsM.findOne({ user_row_id: userRowId })
+  return ProfessionalSeoDetailsM.findOne({ root_document_id: userRowId })
 }
 
 /** Ports the total_followers count (user.js:3084) — independent, needs only `user_row_id`. */

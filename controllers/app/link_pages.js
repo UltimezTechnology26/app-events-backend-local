@@ -1046,9 +1046,9 @@ const userDetails = async ({ user_row_id, username }) => {
         {
             $lookup:
             {
-                from: "cln_professionals_seo_details",
+                from: "cln_app_seo_details_professional",
                 localField: "_id",
-                foreignField: "user_row_id",
+                foreignField: "root_document_id",
                 as: "seo_info"
             }
         },

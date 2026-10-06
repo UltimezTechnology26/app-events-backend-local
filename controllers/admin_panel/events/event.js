@@ -9170,7 +9170,7 @@ router.get('/user_view/:user_row_id', async (req, res) => {
                         resObject['medium'] = socialQueryRun.medium
                         resObject['reddit'] = socialQueryRun.reddit
                     }
-                    const seoQueryRun = await professionals_seo_detailsM.findOne({ user_row_id: user_row_id })
+                    const seoQueryRun = await professionals_seo_detailsM.findOne({ root_document_id: user_row_id })
                     if (seoQueryRun) {
                         resObject['meta_keywords'] = seoQueryRun.meta_keywords
                         resObject['meta_description'] = seoQueryRun.meta_description

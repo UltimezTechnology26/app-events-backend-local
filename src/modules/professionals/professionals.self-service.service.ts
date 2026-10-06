@@ -79,7 +79,7 @@ export async function applyProfessionalBasicDetailsSideEffects({ action, userRow
   const userBio = typeof payload.user_bio === 'string' ? payload.user_bio : undefined
 
   const checkQuery: any = await ProfessionalSeoDetailsM.findOne(
-    { user_row_id: userRowId },
+    { root_document_id: userRowId },
     { _id: 1, meta_keywords: 1, meta_description: 1, meta_title: 1, og_title: 1, og_description: 1, twitter_title: 1, twitter_description: 1 },
   )
 
@@ -143,7 +143,7 @@ export async function applyProfessionalBasicDetailsSideEffects({ action, userRow
   }
 
   if (Object.keys(seoUpdateArray).length > 0 || action === 'create') {
-    await ProfessionalSeoDetailsM.findOneAndUpdate({ user_row_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
+    await ProfessionalSeoDetailsM.findOneAndUpdate({ root_document_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
   }
 
   await Promise.all([
@@ -379,7 +379,7 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
   const socialUpdateArray = { youtube_channel: body.youtube_channel ? body.youtube_channel.trim() : '', website: body.website }
 
   const checkQuery: any = await ProfessionalSeoDetailsM.findOne(
-    { user_row_id: userRowId },
+    { root_document_id: userRowId },
     { _id: 1, meta_keywords: 1, meta_description: 1, meta_title: 1, robots_index: 1, robots_follow: 1, og_title: 1, og_description: 1, twitter_title: 1, twitter_description: 1, twitter_creator: 1 },
   )
 
@@ -442,7 +442,7 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
     })
   }
 
-  await ProfessionalSeoDetailsM.findOneAndUpdate({ user_row_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
+  await ProfessionalSeoDetailsM.findOneAndUpdate({ root_document_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
   await ProfessionalSocialLinksM.findOneAndUpdate({ user_row_id: userRowId }, { $set: socialUpdateArray }, { upsert: true })
 
   await Promise.all([
@@ -671,7 +671,7 @@ export async function updateUserDetailsApi(body: UpdateUserDetailsBody, preValid
   }
 
   const seoUpdateArray = { meta_keywords: body.meta_keywords, meta_description: body.meta_description, user_row_id: userRowId }
-  await ProfessionalSeoDetailsM.findOneAndUpdate({ user_row_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
+  await ProfessionalSeoDetailsM.findOneAndUpdate({ root_document_id: userRowId }, { $set: seoUpdateArray }, { upsert: true })
 
   const socialUpdateArray = { youtube_channel: body.youtube_channel ? body.youtube_channel.trim() : '', website: body.website, user_row_id: userRowId }
   await ProfessionalSocialLinksM.findOneAndUpdate({ user_row_id: userRowId }, { $set: socialUpdateArray }, { upsert: true })
@@ -759,7 +759,7 @@ export async function getNewUserIndividualDetails(userRowIdRaw: unknown, apiForT
     { $unwind: { path: '$info_img', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals_social_links', localField: '_id', foreignField: 'user_row_id', as: 'social_info' } },
     { $unwind: { path: '$social_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_professionals_seo_details', localField: '_id', foreignField: 'user_row_id', as: 'seo_info' } },
+    { $lookup: { from: 'cln_app_seo_details_professional', localField: '_id', foreignField: 'root_document_id', as: 'seo_info' } },
     { $unwind: { path: '$seo_info', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_static_user_designations', localField: 'designation_id', foreignField: '_id', as: 'info_designations', pipeline: [{ $project: { _id: 1, designation_name: 1 } }] } },
     { $lookup: { from: 'cln_push_notifications_details', localField: '_id', foreignField: 'user_row_id', as: 'info_push_notification', pipeline: [{ $project: { push_notification_status: 1 } }] } },

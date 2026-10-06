@@ -54,9 +54,9 @@ const companyIndividualDetails = async ({ user_row_id, company_id }: { user_row_
         // Essential lookups only
         {
             $lookup: {
-                from: "cln_company_seo_details",
+                from: "cln_app_seo_details_company",
                 localField: "_id",
-                foreignField: "company_row_id",
+                foreignField: "root_document_id",
                 as: "seo_details"
             }
         },

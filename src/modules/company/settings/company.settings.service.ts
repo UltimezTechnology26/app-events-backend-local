@@ -227,7 +227,7 @@ export interface CompanyInsertPayload {
 }
 
 export interface CompanySeoUpdatePayload {
-  company_row_id?: number
+  root_document_id?: number
   meta_keywords?: string
   meta_description?: string
   meta_title?: string
@@ -482,7 +482,7 @@ export async function saveOrUpdateBasicCompanyDetails({ actor, body, preValidati
       companyName: insertArray.company_name,
     })
 
-    seoArray['company_row_id'] = saveCompanyDetails._id
+    seoArray['root_document_id'] = saveCompanyDetails._id
     socialArray['company_row_id'] = saveCompanyDetails._id
 
     if (insertArray.about_company) {
@@ -739,7 +739,7 @@ export async function applyBasicDetailsSideEffects({ action, companyRowId, paylo
   const hasChanged = (newVal: string | undefined) => (newVal ?? '').trim() !== ''
 
   if (action === 'create') {
-    const seoArray: CompanySeoUpdatePayload = { company_row_id: companyRowId }
+    const seoArray: CompanySeoUpdatePayload = { root_document_id: companyRowId }
     const socialArray: CompanySocialLinksPayload = { company_row_id: companyRowId }
 
     if (aboutCompany) {
@@ -1012,7 +1012,7 @@ export async function saveOrUpdateBasicCompanyDetailsTeamPanel({ body, preValida
     insertArray['created_date_n_time'] = date_n_time
 
     const saveCompanyDetails = await companyM(insertArray).save()
-    seoArray['company_row_id'] = saveCompanyDetails._id
+    seoArray['root_document_id'] = saveCompanyDetails._id
     socialArray['company_row_id'] = saveCompanyDetails._id
 
     await company_seo_detailsM(seoArray).save()

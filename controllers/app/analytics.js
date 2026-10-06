@@ -141,9 +141,9 @@ router.get('/all_users_company_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details_company",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "root_document_id",
           as: "seo_details"
         }
       },
@@ -196,9 +196,9 @@ router.get('/all_users_company_urls', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details_professional",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "root_document_id",
           as: "seo_details"
         }
       },
@@ -283,9 +283,9 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       { $limit: limit },
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details_company",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "root_document_id",
           as: "seo_details"
         }
       },
@@ -372,9 +372,9 @@ router.get('/users_company_urls/:skip/:limit', async (req, res) => {
       },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details_professional",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "root_document_id",
           as: "seo_details"
         }
       },
@@ -2021,7 +2021,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
         {
           $lookup: {
             from: "cln_professionals",
-            localField: "user_row_id",
+            localField: "root_document_id",
             foreignField: "_id",
             as: "user_info",
             pipeline: [
@@ -2038,7 +2038,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
         {
           $lookup: {
             from: "cln_company_lists",
-            localField: "company_row_id",
+            localField: "root_document_id",
             foreignField: "_id",
             as: "company_info",
             pipeline: [
@@ -2191,7 +2191,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
           {
             $project: {
               _id: 1,
-              user_row_id: 1,
+              user_row_id: "$root_document_id",
               module: { $literal: "user" },
               module_id: { $arrayElemAt: ["$user_info.user_name", 0] },
               issue_type: issue
@@ -2212,7 +2212,7 @@ router.get('/seo_issues_list', checkApiKey, async (req, res) => {
             $project: {
               _id: 1,
               module: { $literal: "company" },
-              company_row_id: 1,
+              company_row_id: "$root_document_id",
               module_id: { $arrayElemAt: ["$company_info.company_id", 0] }, // 👈 SHOW COMPANY ID
               company_name: { $arrayElemAt: ["$company_info.company_name", 0] },
               issue_type: issue
@@ -2335,10 +2335,10 @@ router.get("/seo_issue_check", checkApiKey, async (req, res) => {
 
     if (module === "user") {
       collection = professionals_seo_detailsM;
-      matchQuery = { user_row_id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else if (module === "company") {
       collection = company_seo_detailsM;
-      matchQuery = { company_row_id: module_id };
+      matchQuery = { root_document_id: module_id };
     } else if (module === "event") {
       collection = event_seo_detailsM;
       matchQuery = { _id: module_id };
@@ -2505,9 +2505,9 @@ router.get('/get_user_seo/:user_row_id', checkApiKey, async (req, res) => {
       { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
-          from: "cln_professionals_seo_details",
+          from: "cln_app_seo_details_professional",
           localField: "_id",
-          foreignField: "user_row_id",
+          foreignField: "root_document_id",
           as: "seo_details",
         }
       },
@@ -2742,9 +2742,9 @@ router.get('/get_company_seo/:company_id', checkApiKey, async (req, res) => {
 
       {
         $lookup: {
-          from: "cln_company_seo_details",
+          from: "cln_app_seo_details_company",
           localField: "_id",
-          foreignField: "company_row_id",
+          foreignField: "root_document_id",
           as: "seo_details",
         }
       },

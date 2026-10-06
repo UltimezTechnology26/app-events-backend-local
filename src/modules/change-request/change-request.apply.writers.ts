@@ -42,7 +42,7 @@ export interface SectionModel {
  * (the backend CLAUDE.md forbids resolving a model from request input).
  */
 export const SECTION_MODELS: Record<string, SectionModel> = {
-  cln_company_seo_details: company_seo_detailsM,
+  cln_app_seo_details_company: company_seo_detailsM,
   cln_company_social_links: company_social_linksM,
   cln_company_holdings: company_holdingM,
   cln_company_products: company_productsM,
@@ -53,7 +53,7 @@ export const SECTION_MODELS: Record<string, SectionModel> = {
   cln_jobs: jobsM,
   cln_company_acquisitions: companyAcquisitionsM,
   cln_professionals: professionalsM,
-  cln_professionals_seo_details: professionals_seo_detailsM,
+  cln_app_seo_details_professional: professionals_seo_detailsM,
   cln_professionals_social_links: professionals_social_linksM,
   cln_professionals_awards: professionals_awardsM,
   cln_events: eventM,

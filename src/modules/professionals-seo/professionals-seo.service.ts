@@ -37,13 +37,13 @@ export async function updateUserSeo(auth: UserAuthResult, body: UpdateUserSeoBod
 
   // FLAGGED, NOT FIXED (real pre-existing bug, not hypothetical): legacy never null-checks
   // checkQuery before reading `checkQuery.meta_title` etc. below — if this professional has no
-  // `cln_professionals_seo_details` row yet, this throws a TypeError, caught by the outer
+  // `cln_app_seo_details_professional` row yet, this throws a TypeError, caught by the outer
   // try/catch as a generic "unexpected error" instead of creating the row. In practice every
   // professional gets an initial SEO-details row on creation (professionals.service.ts), so this
   // is latent rather than commonly hit — but it is a real gap, not fixed here since adding
   // null-safety + upsert would be a genuine behavior change (this route currently can't create a
   // first-time SEO row at all) needing sign-off first.
-  const checkQuery: any = await ProfessionalSeoDetailsM.findOne({ user_row_id: condition._id })
+  const checkQuery: any = await ProfessionalSeoDetailsM.findOne({ root_document_id: condition._id })
 
   const updateData = {
     meta_title: body.meta_title,
@@ -111,7 +111,7 @@ export async function updateUserSeo(auth: UserAuthResult, body: UpdateUserSeoBod
     })
   }
 
-  await ProfessionalSeoDetailsM.updateOne({ user_row_id: Number(body.module_id) }, updateData)
+  await ProfessionalSeoDetailsM.updateOne({ root_document_id: Number(body.module_id) }, updateData)
   await calculateUserProfileScore(body.module_id, ['professional_profile'])
   await invalidateAfterSeoUpdate()
 

@@ -1056,8 +1056,8 @@ const EVENT_ATTENDEE_FIELD_LABELS: Record<string, string> = {
  */
 export const SECTION_REGISTRY = {
   [SECTION_SEO]: {
-    collection: 'cln_company_seo_details',
-    keyField: 'company_row_id',
+    collection: 'cln_app_seo_details_company',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
@@ -1251,8 +1251,8 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_PROFESSIONAL_SEO]: {
-    collection: 'cln_professionals_seo_details',
-    keyField: 'user_row_id',
+    collection: 'cln_app_seo_details_professional',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
