@@ -244,6 +244,8 @@ const event_tagsM = require('../../../models/app/static/event_tagsM')
 const event_default_imagesM = require('../../../models/app/static/event_default_imagesM')
 const countryM = require('../../../models/app/static/countryM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+const { withEventTitleSuffix, buildDefaultEventMetaTitle } = require('../../../src/modules/events-seo/events-seo.title')
+const { rejectDuplicateKeywords } = require('../../../src/common/app-seo/app-seo.keywords')
 const event_attendeesM = require('../../../models/app/events/event_attendeesM')
 const event_speakers_manualM = require('../../../models/app/events/event_speakers_manualM')
 const professionalsM = require('../../../models/app/professionalsM')
@@ -258,7 +260,6 @@ const company_manual_retrievalsM = require('../../../models/app/company/company_
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const { calculateEventScore } = require('../../../utils/helpers/app_helper')
 const seo_change_logsM = require('../../../models/seo_change_logsM')
-const event_faqM = require('../../../models/app/events/event_faqM')
 
 //Speakers
 router.post('/update_link_display_details', [
@@ -2054,7 +2055,7 @@ router.post('/submit_event', [
 
                     // Get SEO data separately
                     const seoData = await event_seo_detailsM.findOne(
-                        { event_row_id: event_row_id },
+                        { root_document_id: event_row_id },
                         {
                             meta_keywords: 1,
                             meta_description: 1,
@@ -2214,7 +2215,7 @@ router.post('/submit_event', [
 
                     // Update SEO details table (only SEO fields)
                     await event_seo_detailsM.updateOne(
-                        { event_row_id: event_row_id },
+                        { root_document_id: event_row_id },
                         { $set: seoFields },
                         { upsert: true }
                     );
@@ -2350,7 +2351,7 @@ router.post('/submit_event', [
                     //  SEO fields to separate collection
                     if (Object.keys(seoFields).length > 0) {
                         await event_seo_detailsM.updateOne(
-                            { event_row_id: dataSave._id },
+                            { root_document_id: dataSave._id },
                             { $set: seoFields },
                             { upsert: true }
                         );
@@ -3313,7 +3314,7 @@ router.post('/update_seo', [
     check('meta_title').not().isEmpty().withMessage('The Meta Title field is required.'),
     check('meta_description').not().isEmpty().withMessage('The Meta Description field is required.'),
     check('meta_keywords').not().isEmpty().withMessage('The Meta Keywords field is required.'),
-], async (req, res) => {
+], rejectDuplicateKeywords, async (req, res) => {
     try {
         const errors = validationResult(req);
         const errObj = arrangeValidation(errors);
@@ -3323,6 +3324,13 @@ router.post('/update_seo', [
 
         const checkUserToken = await checkAllLoginToken(req.headers, [10]);
         if (!checkUserToken.status) return res.json(checkUserToken);
+
+        // Store the same " | Events Coinpedia" title the SEO Details form shows and the live page
+        // renders. Done on req.body itself so the change-log / change-request comparisons below see
+        // the suffixed values too. Already-suffixed and empty titles pass through unchanged.
+        req.body.meta_title = withEventTitleSuffix(req.body.meta_title);
+        req.body.og_title = withEventTitleSuffix(req.body.og_title);
+        req.body.twitter_title = withEventTitleSuffix(req.body.twitter_title);
 
         let {
             module_id,
@@ -3352,7 +3360,7 @@ router.post('/update_seo', [
         }
 
         // Get existing SEO data from the separated collection
-        const seoData = await event_seo_detailsM.findOne({ event_row_id: module_id });
+        const seoData = await event_seo_detailsM.findOne({ root_document_id: module_id });
 
         // Publish gate applies to admin-panel edits only (design §2, same shape as every other
         // Events section) - the event's own host keeps writing live immediately below, unchanged
@@ -3453,7 +3461,7 @@ router.post('/update_seo', [
 
         // Update SEO details in the separated collection
         await event_seo_detailsM.updateOne(
-            { event_row_id: module_id },
+            { root_document_id: module_id },
             { $set: updateData },
             { upsert: true }
         );
@@ -3556,22 +3564,30 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
                 }
             },
 
-            // FAQ lookup
+            // FAQ lookup — cln_app_faqs is a shared, module-discriminated collection (see
+            // src/common/app-faq/app-faq.model.ts), so the join matches on module +
+            // root_document_id via `let`/pipeline rather than a plain foreignField equality.
             {
                 $lookup: {
-                    from: "cln_events_faq_lists",
-                    localField: "_id",
-                    foreignField: "event_row_id",
-                    as: "faq",
-                    pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }]
+                    from: "cln_app_faqs",
+                    let: { eventId: "$_id" },
+                    pipeline: [
+                        { $match: { $expr: { $and: [{ $eq: ["$module", "event"] }, { $eq: ["$root_document_id", "$$eventId"] }] } } },
+                        // question/answer -> faq_question/faq_answer: cln_app_faqs stores the
+                        // markets-matching field names internally, but this endpoint's response
+                        // contract is unchanged - see app-faq.model.ts's own doc comment.
+                        { $project: { _id: 0, faq_question: "$question", faq_answer: "$answer" } }
+                    ],
+                    as: "faq"
                 }
             },
             // SEO details lookup
             {
                 $lookup: {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "event" } }],
                     as: "seo_info"
                 }
             },
@@ -3632,6 +3648,13 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
         }
 
         const data = eventData[0];
+
+        // Show the same " | Events Coinpedia" suffix the live event page renders, so the SEO Details
+        // form and the page agree. Empty titles stay empty (the form falls back to default_meta_title).
+        data.meta_title = withEventTitleSuffix(data.meta_title);
+        data.og_title = withEventTitleSuffix(data.og_title);
+        data.twitter_title = withEventTitleSuffix(data.twitter_title);
+        data.default_meta_title = buildDefaultEventMetaTitle(data.title);
 
         data.attendees_list = await event_attendeesM.aggregate([
             {

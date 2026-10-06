@@ -101,7 +101,11 @@ export const getBenefitsDetails = async (headers?: any): Promise<BenefitsRespons
                 { $sort: { total_posts: -1 } },
                 { $limit: 1000 }
             ]).allowDiskUse(true),
-            Promise.resolve(courses_certificatesM.exists({ user_row_id: user_row_id }) !== null),
+            // FIXED (2026-10-03): this previously compared the `.exists()` call's Promise object to
+            // `null` without awaiting it first, so `expert_tag` was always `true` regardless of
+            // whether the user actually held an academy certificate. Now correctly resolves the
+            // Promise before comparing.
+            courses_certificatesM.exists({ user_row_id: user_row_id }).then((doc: unknown) => doc !== null),
             professionals_pointsM.exists({
                 user_row_id,
                 point_type: 'job_apply_eligibility'

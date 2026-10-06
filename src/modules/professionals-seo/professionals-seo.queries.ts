@@ -17,7 +17,7 @@ export async function getUserSeoAggregate(userRowId: number) {
     },
     { $lookup: { from: 'cln_static_countries', localField: 'country_mobile_id', foreignField: '_id', as: 'country_info' } },
     { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_professionals_seo_details', localField: '_id', foreignField: 'user_row_id', as: 'seo_details' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'professional' } }], as: 'seo_details' } },
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals_social_links', localField: '_id', foreignField: 'user_row_id', as: 'social_details' } },
     { $unwind: { path: '$social_details', preserveNullAndEmptyArrays: true } },
@@ -76,13 +76,18 @@ export async function getUserSeoAggregate(userRowId: number) {
       },
     },
     { $unwind: { path: '$info_work', preserveNullAndEmptyArrays: true } },
+    // cln_app_faqs is a shared, module-discriminated collection (see
+    // src/common/app-faq/app-faq.model.ts), so the join matches on module + root_document_id via
+    // `let`/pipeline rather than a plain foreignField equality.
     {
       $lookup: {
-        from: 'cln_professionals_faq_lists',
-        localField: '_id',
-        foreignField: 'user_row_id',
+        from: 'cln_app_faqs',
+        let: { userId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$module', 'professional'] }, { $eq: ['$root_document_id', '$$userId'] }] } } },
+          { $project: { _id: 0, faq_question: '$question', faq_answer: '$answer' } },
+        ],
         as: 'faq',
-        pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }],
       },
     },
     { $addFields: { created_by_status: { $cond: [{ $gt: [{ $size: '$sub_admin_info' }, 0] }, 2, 0] } } },
@@ -124,6 +129,11 @@ export async function getUserSeoAggregate(userRowId: number) {
         twitter_title: '$seo_details.twitter_title',
         twitter_description: '$seo_details.twitter_description',
         twitter_creator: '$seo_details.twitter_creator',
+        // Standardized suggested title when no custom meta_title is set yet - matches the exact
+        // default the write path already saves on first save
+        // (professionals.self-service.service.ts's `${full_name} | Coinpedia User Profile`), so the
+        // admin SEO form's preview stays in sync with what actually gets written.
+        default_meta_title: { $concat: ['$full_name', ' | Coinpedia User Profile'] },
         faq: 1,
         created_by_status: 1,
         user_name: 1,

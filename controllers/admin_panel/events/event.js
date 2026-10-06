@@ -16,7 +16,7 @@ const { eventsList } = require('../../../services/admin_panel/events')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
 
-const event_faqM = require('../../../models/app/events/event_faqM')
+const { findFaqsByRoot } = require('../../../src/common/app-faq/app-faq.repository')
 const countryM = require('../../../models/app/static/countryM')
 const ticketM = require('../../../models/app/events/ticketM')
 const eventM = require('../../../models/app/events/eventM')
@@ -5509,7 +5509,7 @@ router.post('/submit_event', [
 
                 const dataSave = await eventM(insertArr).save()
                 const seoArr = {
-                    event_row_id: dataSave?._id,
+                    root_document_id: dataSave?._id,
                     meta_keywords: req.body.meta_keywords,
                     meta_description: req.body.meta_description,
                     meta_title: req.body.meta_title,
@@ -5873,7 +5873,7 @@ router.post('/edit_event', [
                 const checkEvent = await eventM.findOne({ _id: event_row_id }, {
                     _id: 1, event_image: 1, event_image_type: 1, approval_status: 1,
                 })
-                const checkEventSeo = await event_seo_detailsM.findOne({ event_row_id: event_row_id }, {
+                const checkEventSeo = await event_seo_detailsM.findOne({ root_document_id: event_row_id }, {
                     meta_keywords: 1,
                     meta_description: 1,
                     meta_title: 1,
@@ -5927,7 +5927,7 @@ router.post('/edit_event', [
                     Object.assign(updateArr, updateFields, { updated_date_n_time: new Date() })
 
                     await eventM.updateOne({ _id: event_row_id }, { $set: updateArr })
-                    await event_seo_detailsM.updateOne({ event_row_id: event_row_id }, { $set: updateSeoArr })
+                    await event_seo_detailsM.updateOne({ root_document_id: event_row_id }, { $set: updateSeoArr })
 
 
                     const changed =
@@ -8302,9 +8302,10 @@ router.get('/view_event/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_events_seo_details",
+                            from: "cln_app_seo_details",
                             localField: "_id",
-                            foreignField: "event_row_id",
+                            foreignField: "entity_row_id",
+                            pipeline: [{ $match: { entity_type: "event" } }],
                             as: "event_seo"
                         }
                     },
@@ -8577,7 +8578,11 @@ router.get('/view_event/:request_row_id', async (req, res) => {
                     myArr['utc_row_id'] = checkEvent[0].utc_row_id
                     myArr['country'] = checkEvent[0].country
                     myArr['alt_image_text'] = checkEvent[0].alt_image_text
-                    myArr['event_faqs'] = await event_faqM.find({ event_row_id: checkEvent[0]._id })
+                    // question/answer -> faq_question/faq_answer: cln_app_faqs stores the
+                    // markets-matching field names internally, but this endpoint's response
+                    // contract is unchanged - see app-faq.model.ts's own doc comment.
+                    const event_faqs_rows = await findFaqsByRoot({ module: 'event', rootDocumentId: checkEvent[0]._id })
+                    myArr['event_faqs'] = event_faqs_rows.map((faq) => ({ _id: faq._id, faq_question: faq.question, faq_answer: faq.answer }))
                     myArr['contact_country_row_id'] = checkEvent[0].contact_country_row_id
                     myArr['build_event_page_score'] = checkEvent[0]?.build_event_page_score
                     myArr['seo_details_score'] = checkEvent[0]?.seo_details_score
@@ -9172,7 +9177,7 @@ router.get('/user_view/:user_row_id', async (req, res) => {
                         resObject['medium'] = socialQueryRun.medium
                         resObject['reddit'] = socialQueryRun.reddit
                     }
-                    const seoQueryRun = await professionals_seo_detailsM.findOne({ user_row_id: user_row_id })
+                    const seoQueryRun = await professionals_seo_detailsM.findOne({ root_document_id: user_row_id })
                     if (seoQueryRun) {
                         resObject['meta_keywords'] = seoQueryRun.meta_keywords
                         resObject['meta_description'] = seoQueryRun.meta_description
@@ -12114,9 +12119,10 @@ router.get('/deleted_events_list/:skip/:limit', async (req, res) => {
                 {
                     $lookup:
                     {
-                        from: "cln_events_seo_details",
+                        from: "cln_app_seo_details",
                         localField: "_id",
-                        foreignField: "event_row_id",
+                        foreignField: "entity_row_id",
+                        pipeline: [{ $match: { entity_type: "event" } }],
                         as: "event_seo"
                     }
                 },
@@ -12355,9 +12361,10 @@ router.get('/deleted_events_view/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_events_seo_details",
+                            from: "cln_app_seo_details",
                             localField: "_id",
-                            foreignField: "event_row_id",
+                            foreignField: "entity_row_id",
+                            pipeline: [{ $match: { entity_type: "event" } }],
                             as: "event_seo"
                         }
                     },
@@ -13158,9 +13165,10 @@ router.get('/seo_overview', checkApiKey, async (req, res) => {
             },
             {
                 $lookup: {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "event" } }],
                     as: "event_seo"
                 }
             },

@@ -10,6 +10,7 @@ import logger from '../../../config/logger'
 
 const companyM = require('../../../models/app/company/companyM')
 const company_deleted_historyM = require('../../../models/app/company/company_deleted_historyM')
+const company_seo_detailsM = require('../../../models/app/company/company_seo_detailsM')
 
 // Raw shape written into `result` below: either the full aggregation row
 // (spread wholesale from queryRun[0], whose fields are the ones listed in
@@ -54,9 +55,10 @@ const companyIndividualDetails = async ({ user_row_id, company_id }: { user_row_
         // Essential lookups only
         {
             $lookup: {
-                from: "cln_company_seo_details",
+                from: "cln_app_seo_details",
                 localField: "_id",
-                foreignField: "company_row_id",
+                foreignField: "entity_row_id",
+                pipeline: [{ $match: { entity_type: "company" } }],
                 as: "seo_details"
             }
         },
@@ -363,6 +365,32 @@ const companyIndividualDetails = async ({ user_row_id, company_id }: { user_row_
         companyM.updateOne({ _id: company_row_id }, { $inc: { view_counts: 1 } }).catch((err: unknown) => {
             logger.error(`Update company view count. ${err instanceof Error ? err.message : String(err)}`);
         });
+
+        // CONFIRMED FIX (standardization follow-up): the public page's own standardized fallback
+        // title ("{company_name} | Coinpedia Company Listing") was only ever computed by the
+        // frontend for display - nothing persisted it, so the collection itself never ended up
+        // holding a real meta_title for a company that only ever showed the fallback. Backfilling
+        // it here, on first generation, the same way the admin SEO tab's own fetch now does
+        // (company.settings.service.ts's getCompanySeo).
+        const seoDetails = (result as any).seo_details as Record<string, unknown> | undefined;
+        const companyName = result.company_name as string | undefined;
+        if (companyName && !seoDetails?.meta_title) {
+            const defaultTitle = `${companyName} | Coinpedia Company Listing`;
+            const backfill: Record<string, unknown> = { meta_title: defaultTitle };
+            if (!seoDetails?.og_title) backfill.og_title = defaultTitle;
+            if (!seoDetails?.twitter_title) backfill.twitter_title = defaultTitle;
+            // A bare `updateOne(..., {upsert:true})` never runs CompanySeoDetailsM's own
+            // `pre('save')` counter hook, so a company with no SEO doc at all would get a raw Mongo
+            // ObjectId `_id` instead of this collection's numeric one - check existence first.
+            company_seo_detailsM.findOne({ root_document_id: company_row_id }).lean()
+                .then((existing: unknown) => existing
+                    ? company_seo_detailsM.updateOne({ root_document_id: company_row_id }, { $set: backfill })
+                    : new company_seo_detailsM({ root_document_id: company_row_id, ...backfill, created_by: { type: 'system', id: null }, created_at: new Date() }).save())
+                .catch((err: unknown) => {
+                    logger.error(`Backfill company SEO default title. ${err instanceof Error ? err.message : String(err)}`);
+                });
+            result.seo_details = { ...(seoDetails ?? {}), ...backfill };
+        }
 
         return { status: true, message: result };
     }

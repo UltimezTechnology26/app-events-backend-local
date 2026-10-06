@@ -2,7 +2,7 @@
 //
 // Ports 21dayschallenge.js's routes (list/get_user_posts/update_valid_status/
 // update_released_status, ~line 1-395).
-import { Community21DaysChallengeM } from '../professionals-community/professionals-community.models'
+import { Community21DaysChallengeM } from '../community/community.models'
 const community_postsM = require('../../../models/main/community/community_postsM')
 import { buildChallengeMatchConditions, buildChallengeListPipeline, extractChallengeListResult } from './community-admin.challenge.queries'
 import { buildPostsListPipeline, extractPostsListResult } from './community-admin.posts.queries'

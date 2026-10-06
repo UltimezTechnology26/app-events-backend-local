@@ -23,7 +23,9 @@ const ADMIN_ROW_ID_MAIN_ADMIN = 0
 
 export interface CheckAllLoginTokenActor {
   status: boolean
-  message: { user_row_id: number | string; user_type: number | string }
+  // Optional alongside status:false — checkAllLoginToken's failure shape doesn't always carry
+  // these, and both functions below only ever read `message` once `status` is already true.
+  message: { user_row_id?: number | string; user_type?: number | string }
 }
 
 /** True when this request came from an admin token - false for the event's own host via self-service, which keeps writing live. */

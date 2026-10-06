@@ -21,6 +21,7 @@ const professionalsM = require('../../../models/app/professionalsM')
 const companyM = require('../../../models/app/company/companyM')
 const event_default_imagesM = require('../../../models/app/static/event_default_imagesM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+import { buildDefaultEventMetaTitle } from '../events-seo/events-seo.title'
 const event_tagsM = require('../../../models/app/static/event_tagsM')
 const event_utc_datesM = require('../../../models/app/events/event_utc_datesM')
 const sub_admin_emailsM = require('../../../models/admin_panel/app/sub_admin_emailsM')
@@ -244,7 +245,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     // ---- UPDATE PATH ----
     const eventData = await eventM.findOne({ _id: eventRowId }, { event_url: 1, approval_status: 1 })
     const seoData = await event_seo_detailsM.findOne(
-      { event_row_id: eventRowId },
+      { root_document_id: eventRowId },
       { meta_keywords: 1, meta_description: 1, meta_title: 1, robots_index: 1, robots_follow: 1, og_title: 1, og_description: 1, twitter_title: 1, twitter_description: 1, twitter_creator: 1 }
     )
     const combinedData = { ...eventData?.toObject(), ...seoData?.toObject() }
@@ -261,7 +262,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
       }
     }
     if (insertArr.event_title) {
-      const title = insertArr.event_title
+      const title = buildDefaultEventMetaTitle(insertArr.event_title)
       if (!combinedData?.meta_title) {
         insertArr.meta_title = title
         insertArr.og_title = title
@@ -295,7 +296,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     }
 
     await eventM.updateOne({ _id: eventRowId }, { $set: eventUpdateData })
-    await event_seo_detailsM.updateOne({ event_row_id: eventRowId }, { $set: seoFields }, { upsert: true })
+    await event_seo_detailsM.updateOne({ root_document_id: eventRowId }, { $set: seoFields }, { upsert: true })
     await invalidateEventSubmitCaches()
 
     const changed =
@@ -360,9 +361,10 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     seoFields.twitter_description = cleanedBio
   }
   if (insertArr.event_title) {
-    seoFields.meta_title = insertArr.event_title
-    seoFields.og_title = insertArr.event_title
-    seoFields.twitter_title = insertArr.event_title
+    const defaultMetaTitle = buildDefaultEventMetaTitle(insertArr.event_title)
+    seoFields.meta_title = defaultMetaTitle
+    seoFields.og_title = defaultMetaTitle
+    seoFields.twitter_title = defaultMetaTitle
   }
   if (defaultKeywords) {
     seoFields.meta_keywords = defaultKeywords
@@ -398,7 +400,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
   })
 
   if (Object.keys(seoFields).length > 0) {
-    await event_seo_detailsM.updateOne({ event_row_id: dataSave._id }, { $set: seoFields }, { upsert: true })
+    await event_seo_detailsM.updateOne({ root_document_id: dataSave._id }, { $set: seoFields }, { upsert: true })
   }
 
   const hasNonEmpty = (val: unknown) => String(val ?? '').trim() !== ''
@@ -482,5 +484,5 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
 
   await calculateEventScore(eventRowId, ['build_event_page'])
 
-  return { status: true, message: { alert_message: 'New event created successfully.', event_row_id: eventRowId } }
+  return { status: true, message: { alert_message: 'Your new event has been submitted for approval.', event_row_id: eventRowId } }
 }

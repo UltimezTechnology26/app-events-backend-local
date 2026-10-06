@@ -1,9 +1,10 @@
 import { getEventsData, filterQuery } from '../../utils/helpers/events_helper';
 import redisCache, { CacheDuration } from '../../config/redis';
 import eventM from '../../models/app/events/eventM';
+const event_seo_detailsM = require('../../models/app/events/event_seo_detailsM');
 import { getDistanceFromLatLon, getIntIdFromArray, getPresentDateTime } from '../../utils/helpers/helper';
 import event_link_display_detailsM from '../../models/app/events/event_link_display_detailsM';
-import event_faqM from '../../models/app/events/event_faqM';
+import { findFaqsByRoot } from '../../src/common/app-faq/app-faq.repository';
 import event_collaborationM from '../../models/app/events/event_collaborationM';
 import event_guestsM from '../../models/app/events/event_guestsM';
 import ticketM from '../../models/app/events/ticketM';
@@ -545,9 +546,10 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             {
                 $lookup:
                 {
-                    from: "cln_events_seo_details",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "event_row_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "event" } }],
                     as: "seo_info"
                 }
             },
@@ -758,6 +760,27 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
 
             // Return SEO details as nested object
             myArr['seo_details'] = eventDetails?.seo_details || {}
+            // CONFIRMED FIX (standardization follow-up): persist the standardized fallback title
+            // (the bare event_title, same convention events.submit.service.ts's own write-time
+            // default already uses) the first time it's generated for this public page view, same
+            // reasoning as Company's/Professionals' own public-page backfills.
+            if (eventDetails?.event_title && !myArr['seo_details'].meta_title) {
+                const defaultTitle = eventDetails.event_title as string
+                const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+                if (!myArr['seo_details'].og_title) backfill.og_title = defaultTitle
+                if (!myArr['seo_details'].twitter_title) backfill.twitter_title = defaultTitle
+                // A bare `updateOne(..., {upsert:true})` never runs EventSeoDetailsM's own
+                // `pre('save')` counter hook, so an event with no SEO doc at all would get a raw
+                // Mongo ObjectId `_id` instead of this collection's numeric one.
+                event_seo_detailsM.findOne({ root_document_id: eventDetails._id }).lean()
+                    .then((existing: unknown) => existing
+                        ? event_seo_detailsM.updateOne({ root_document_id: eventDetails._id }, { $set: backfill })
+                        : new event_seo_detailsM({ root_document_id: eventDetails._id, ...backfill, created_by: { type: 'system', id: null }, created_at: new Date() }).save())
+                    .catch((err: unknown) => {
+                        console.error("Backfill event SEO default title:", err instanceof Error ? err.message : String(err))
+                    })
+                Object.assign(myArr['seo_details'], backfill)
+            }
 
             // Return profile scores as nested object
             myArr['profile_scores'] = eventDetails?.profile_scores || {}
@@ -819,7 +842,7 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             // the first flag-dependent query needs them — see further down.
             const get_event_link_display_details_promise = event_link_display_detailsM.findOne({ event_row_id: eventsList[0]._id })
 
-            const event_faqs_query = event_faqM.find({ event_row_id: eventsList[0]._id })
+            const event_faqs_query = findFaqsByRoot({ module: 'event', rootDocumentId: eventsList[0]._id })
 
             const get_collaboration_query = event_collaborationM.aggregate([
                 {
@@ -2243,7 +2266,14 @@ export const getEventIndividualDetails = async (req: any, user_row_id: number, i
             myArr['sponsors'] = sponsors_result.length > 0 ? sponsors_result : []
             myArr['partners'] = partners_result.length > 0 ? partners_result : []
 
-            myArr['event_faqs'] = event_faqs
+            // question/answer -> faq_question/faq_answer: cln_app_faqs stores the markets-
+            // matching field names internally, but this public endpoint's response contract is
+            // unchanged - see app-faq.model.ts's own doc comment.
+            myArr['event_faqs'] = (event_faqs as { _id: number; question: string; answer: string }[]).map((faq) => ({
+                _id: faq._id,
+                faq_question: faq.question,
+                faq_answer: faq.answer,
+            }))
             myArr['collaborations_ids_list'] = collaborations_list[0] ? collaborations_list[0].collaborations_ids_list : []
             myArr['tickets'] = tickets
             myArr['coupons'] = coupon

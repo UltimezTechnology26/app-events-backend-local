@@ -403,7 +403,7 @@ router.post('/create_account', [
             const userDetails = await professionalsM(user_array).save()
             const user_row_id = Number.parseInt(userDetails._id)
             await professionals_seo_detailsM.updateOne(
-                { user_row_id },
+                { root_document_id: user_row_id },
                 { $set: seo_details_data },
                 { upsert: true }
             );

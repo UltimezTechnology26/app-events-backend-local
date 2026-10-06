@@ -27,7 +27,6 @@ const companyFollowersM = require('../../models/app/company/followersM')
 const default_profile_imgM = require('../../models/app/static/default_profile_imgM')
 const professionals_created_by_adminM = require('../../models/app/professionals_created_by_adminM')
 const professionals_claimed_requestM = require('../../models/app/professionals_claimed_requestM')
-const professionals_faqM = require('../../models/app/users/professionals_faqM')
 const professionals_awardsM = require('../../models/app/users/professionals_awardsM')
 
 
@@ -1047,9 +1046,10 @@ const userDetails = async ({ user_row_id, username }) => {
         {
             $lookup:
             {
-                from: "cln_professionals_seo_details",
+                from: "cln_app_seo_details",
                 localField: "_id",
-                foreignField: "user_row_id",
+                foreignField: "entity_row_id",
+                pipeline: [{ $match: { entity_type: "professional" } }],
                 as: "seo_info"
             }
         },

@@ -4,7 +4,6 @@ const router = express.Router()
 //main - Starts here
 const attendees = require('../controllers/events/attendees')
 const sponsors_n_partners = require('../controllers/events/sponsors_n_partners')
-const faq = require('../controllers/events/faq')
 const collaboration = require('../controllers/events/collaboration')
 //main - Ends here
 
@@ -18,7 +17,13 @@ router.use('/attendees', attendees)
 const { eventsAttendeesRouter } = require('../src/modules/events-attendees/events-attendees.controller')
 router.use('/attendees_v2', eventsAttendeesRouter)
 router.use('/sponsors_n_partners', sponsors_n_partners)
-router.use('/faq', faq)
+
+// modules/events-faq/events-faq.controller.ts's eventsFaqRouter — ports controllers/events/faq.js
+// onto the shared cln_app_faqs collection (src/common/app-faq), the FAQ-unification pilot domain.
+// Mounted at the same '/faq' path prefix (full cutover, same shape as Company's own
+// companyFaqRouter in routes/app.js) — every existing frontend call site is unchanged.
+const { eventsFaqRouter } = require('../src/modules/events-faq/events-faq.controller')
+router.use('/faq', eventsFaqRouter)
 router.use('/collaboration', collaboration)
 //main ENDS HERE
 

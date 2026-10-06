@@ -277,7 +277,12 @@ router.post('/save_like_details', [
             else {
                 const checkQuery = await community_postsM.findOne({ _id: Number.parseInt(req.body.post_id) }, { _id: 1 })
                 if (!checkQuery) {
-                    res.json({ status: false, message: { alert_message: "Invalid post id" } })
+                    // FIXED (2026-10-05): this was missing a `return`, so execution fell through
+                    // into the save/update logic below with no valid post, which then tried to
+                    // send a SECOND response on the same request - throwing ERR_HTTP_HEADERS_SENT
+                    // as an unhandled rejection that crashed the entire server process, not just
+                    // this one request.
+                    return res.json({ status: false, message: { alert_message: "Invalid post id" } })
                 }
                 let post_id = req.body.post_id
 

@@ -115,10 +115,10 @@ router.post('/update_user_profile', [
                 const seo_update_array = {}
                 seo_update_array['meta_keywords'] = req.body.meta_keywords
                 seo_update_array['meta_description'] = req.body.meta_description
-                seo_update_array['user_row_id'] = user_row_id
+                seo_update_array['root_document_id'] = user_row_id
 
                 await professionals_seo_detailsM.findOneAndUpdate(
-                    { user_row_id: user_row_id },
+                    { root_document_id: user_row_id },
                     { $set: seo_update_array },
                     { upsert: true }
                 )

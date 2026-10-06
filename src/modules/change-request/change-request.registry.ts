@@ -3,7 +3,6 @@ import { buildArrayLabelResolver } from './change-request.common-resolvers'
 
 const company_seo_detailsM = require('../../../models/app/company/company_seo_detailsM')
 const company_social_linksM = require('../../../models/app/company/company_social_linksM')
-const company_faqM = require('../../../models/app/company/company_faqM')
 const company_holdingM = require('../../../models/markets/products_n_holding/company_holdingM')
 const company_productsM = require('../../../models/markets/products_n_holding/company_productsM')
 const company_revenue_growthM = require('../../../models/app/company/company_revenue_growthM')
@@ -16,13 +15,12 @@ const professionalsM = require('../../../models/app/professionalsM')
 const professionals_seo_detailsM = require('../../../models/app/professionals_seo_detailsM')
 const professionals_social_linksM = require('../../../models/app/professionals_social_linksM')
 const professionals_awardsM = require('../../../models/app/users/professionals_awardsM')
-const professionals_faqM = require('../../../models/app/users/professionals_faqM')
 const eventM = require('../../../models/app/events/eventM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
 const event_link_display_detailsM = require('../../../models/app/events/event_link_display_detailsM')
 const ticketM = require('../../../models/app/events/ticketM')
 const couponM = require('../../../models/app/events/couponM')
-const event_faq_listsM = require('../../../models/app/events/event_faqM')
+const { AppFaqM } = require('../../common/app-faq/app-faq.model')
 const event_contactsM = require('../../../models/app/events/event_contactsM')
 const event_speakersM = require('../../../models/app/events/event_speakersM')
 const event_sponsors_partner_detailsM = require('../../../models/app/events/event_sponsors_partner_detailsM')
@@ -335,11 +333,18 @@ const SOCIAL_MEDIA_FIELD_LABELS: Record<string, string> = {
   other_social_links: 'Other Social Links',
 }
 
-const FAQ_EDITABLE_FIELDS = ['faq_question', 'faq_answer'] as const
+// Shared by every FAQ section now that Company/Professionals/Events all live on the same
+// cln_app_faqs collection (src/common/app-faq/app-faq.model.ts) with markets-matching field names
+// (question/answer, not the old per-domain faq_question/faq_answer). sort_order rides along in
+// editableFields (so an admin-approved CREATE's apply-writer write includes it - see
+// <domain>-faq.service.ts's own comment on this) but is left out of displayFields - a reviewer
+// diffing a FAQ change cares about the question/answer content, not a bookkeeping position number.
+const APP_FAQ_EDITABLE_FIELDS = ['question', 'answer', 'sort_order'] as const
+const APP_FAQ_DISPLAY_FIELDS = ['question', 'answer'] as const
 
-const FAQ_FIELD_LABELS: Record<string, string> = {
-  faq_question: 'Question',
-  faq_answer: 'Answer',
+const APP_FAQ_FIELD_LABELS: Record<string, string> = {
+  question: 'Question',
+  answer: 'Answer',
 }
 
 const HOLDING_CRYPTO_EDITABLE_FIELDS = [
@@ -849,7 +854,7 @@ const PROFESSIONAL_BASIC_DETAILS_DISPLAY_FIELDS = [
  * `created_by_sub_admin_id`, `created_date_n_time`, `updated_by*`, `view_counts`) and the
  * meta/SEO/robots/og/twitter fields also present on eventM's own schema (these are legacy/unused
  * here - the live Basic Details form and the separate `event_seo` section below both read/write
- * `cln_events_seo_details`, not these duplicate fields on the event document itself).
+ * `cln_app_seo_details_event`, not these duplicate fields on the event document itself).
  */
 const EVENT_BASIC_DETAILS_EDITABLE_FIELDS = [
   'event_title',
@@ -1052,8 +1057,8 @@ const EVENT_ATTENDEE_FIELD_LABELS: Record<string, string> = {
  */
 export const SECTION_REGISTRY = {
   [SECTION_SEO]: {
-    collection: 'cln_company_seo_details',
-    keyField: 'company_row_id',
+    collection: 'cln_app_seo_details_company',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
@@ -1074,13 +1079,18 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_FAQ]: {
-    collection: 'cln_company_faq_lists',
-    keyField: 'company_row_id',
+    // 'cln_app_faqs' is a shared, module-discriminated collection (src/common/app-faq) - Company's
+    // own leg of the FAQ-unification migration (Events was the pilot). Suffixed '__company' so
+    // this stays a unique SECTION_MODELS key (change-request.apply.writers.ts); it's a lookup key
+    // here, not a literal Mongo collection name - see that file's own SECTION_MODELS doc comment.
+    collection: 'cln_app_faqs__company',
+    keyField: 'root_document_id',
     isList: true,
-    editableFields: FAQ_EDITABLE_FIELDS,
+    editableFields: APP_FAQ_EDITABLE_FIELDS,
     labelResolvers: {},
-    fieldLabels: FAQ_FIELD_LABELS,
-    schemaPaths: (field: string) => company_faqM.schema.path(field),
+    fieldLabels: APP_FAQ_FIELD_LABELS,
+    displayFields: APP_FAQ_DISPLAY_FIELDS,
+    schemaPaths: (field: string) => AppFaqM.schema.path(field),
     invalidateCache: () => invalidateFaqCaches(),
   },
   [SECTION_HOLDING_CRYPTO]: {
@@ -1253,8 +1263,8 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_PROFESSIONAL_SEO]: {
-    collection: 'cln_professionals_seo_details',
-    keyField: 'user_row_id',
+    collection: 'cln_app_seo_details_professional',
+    keyField: 'root_document_id',
     isList: false,
     editableFields: SEO_EDITABLE_FIELDS,
     labelResolvers: {},
@@ -1318,13 +1328,19 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_PROFESSIONAL_FAQ]: {
-    collection: 'cln_professionals_faq_lists',
-    keyField: 'user_row_id',
+    // 'cln_app_faqs' is a shared, module-discriminated collection (src/common/app-faq) -
+    // Professionals' own leg of the FAQ-unification migration (Events was the pilot, Company the
+    // second). Suffixed '__professional' so this stays a unique SECTION_MODELS key
+    // (change-request.apply.writers.ts); it's a lookup key here, not a literal Mongo collection
+    // name - see that file's own SECTION_MODELS doc comment.
+    collection: 'cln_app_faqs__professional',
+    keyField: 'root_document_id',
     isList: true,
-    editableFields: FAQ_EDITABLE_FIELDS,
+    editableFields: APP_FAQ_EDITABLE_FIELDS,
     labelResolvers: {},
-    fieldLabels: FAQ_FIELD_LABELS,
-    schemaPaths: (field: string) => professionals_faqM.schema.path(field),
+    fieldLabels: APP_FAQ_FIELD_LABELS,
+    displayFields: APP_FAQ_DISPLAY_FIELDS,
+    schemaPaths: (field: string) => AppFaqM.schema.path(field),
     invalidateCache: () => invalidateProfessionalsFaqCaches(),
     fieldLevelApproval: true,
   },
@@ -1400,8 +1416,10 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_EVENT_SEO]: {
-    collection: 'cln_events_seo_details',
-    keyField: 'event_row_id',
+    // Logical section key (also stored on existing change requests) - the rows now live in the
+    // shared cln_app_seo_details collection (entity_type 'event'), see events-seo.models.ts.
+    collection: 'cln_app_seo_details_event',
+    keyField: 'root_document_id',
     isList: false,
     // Same field set as Company/Professional SEO (SEO_EDITABLE_FIELDS/SEO_FIELD_LABELS above) -
     // event_seo_detailsM.js's schema matches field-for-field, so it's reused rather than
@@ -1446,15 +1464,18 @@ export const SECTION_REGISTRY = {
     invalidateCache: () => invalidateEventCaches(),
   },
   [SECTION_EVENT_FAQ]: {
-    collection: 'cln_events_faq_lists',
-    keyField: 'event_row_id',
+    // 'cln_app_faqs' is a shared, module-discriminated collection (src/common/app-faq) - the
+    // FAQ-unification pilot domain (Company/Professional now share it too). Suffixed '__event' so
+    // this stays a unique SECTION_MODELS key (change-request.apply.writers.ts); it's a lookup key
+    // here, not a literal Mongo collection name - see that file's own SECTION_MODELS doc comment.
+    collection: 'cln_app_faqs__event',
+    keyField: 'root_document_id',
     isList: true,
-    // Same field set as Company/Professional FAQ (FAQ_EDITABLE_FIELDS/FAQ_FIELD_LABELS above) -
-    // event_faqM.js's schema matches field-for-field, so it's reused rather than duplicated.
-    editableFields: FAQ_EDITABLE_FIELDS,
+    editableFields: APP_FAQ_EDITABLE_FIELDS,
     labelResolvers: {},
-    fieldLabels: FAQ_FIELD_LABELS,
-    schemaPaths: (field: string) => event_faq_listsM.schema.path(field),
+    fieldLabels: APP_FAQ_FIELD_LABELS,
+    displayFields: APP_FAQ_DISPLAY_FIELDS,
+    schemaPaths: (field: string) => AppFaqM.schema.path(field),
     invalidateCache: () => invalidateEventCaches(),
   },
   [SECTION_EVENT_CONTACT]: {

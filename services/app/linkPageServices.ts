@@ -1,5 +1,6 @@
 import { PipelineStage } from 'mongoose';
 import professionalsM from '../../models/app/professionalsM';
+const professionals_seo_detailsM = require('../../models/app/professionals_seo_detailsM');
 import redisCache, { CacheDuration } from '../../config/redis';
 import logger from '../../config/logger';
 import { array_column, createDateTime, createEndDateOnly, getIntIdFromArray, getMinusDates, getSocialURL, user_profile_completed_percentage } from '../../utils/helpers/helper';
@@ -13,7 +14,7 @@ import { getEventsData, professionalfilterQuery } from '../../utils/helpers/even
 import event_speakersM from '../../models/app/events/event_speakersM';
 import event_sponsors_partner_detailsM from '../../models/app/events/event_sponsors_partner_detailsM';
 import companyFollowersM from '../../models/app/company/followersM';
-import professionals_faqM from '../../models/app/users/professionals_faqM';
+import { findFaqsByRoot } from '../../src/common/app-faq/app-faq.repository';
 import professionals_awardsM from '../../models/app/users/professionals_awardsM';
 import countryM from '../../models/app/static/countryM';
 import sanitize from 'mongo-sanitize';
@@ -721,7 +722,7 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
 
             const designation_id = query_run.designation_id ? query_run.designation_id : []
 
-            const users_faq_query = professionals_faqM.find({ user_row_id: query_run._id }, { faq_question: 1, faq_answer: 1, _id: 1 }).lean()
+            const users_faq_query = findFaqsByRoot({ module: 'professional', rootDocumentId: Number(query_run._id) })
 
             const users_awards_query = professionals_awardsM.find({ user_row_id: query_run._id }, { award_title: 1, award_description: 1, award_image: 1, _id: 1 }).lean().sort({ _id: -1 })
 
@@ -1934,7 +1935,14 @@ export const getUserOtherDetails = async ({ username, user_row_id, query, header
 
 
             resultArray['similar_users'] = similar_users
-            resultArray['users_faq'] = users_faq
+            // question/answer -> faq_question/faq_answer: cln_app_faqs stores the markets-
+            // matching field names internally, but this endpoint's response contract is
+            // unchanged - see app-faq.model.ts's own doc comment.
+            resultArray['users_faq'] = (users_faq as { _id: number; question: string; answer: string }[]).map((faq) => ({
+                _id: faq._id,
+                faq_question: faq.question,
+                faq_answer: faq.answer,
+            }))
             resultArray['users_awards'] = users_awards
             resultArray['people_following_list'] = people_following_list
             resultArray['company_following_list'] = company_following_list
@@ -2020,9 +2028,10 @@ export const getUserDetails = async ({ username, user_row_id, isAdminCaller = fa
             {
                 $lookup:
                 {
-                    from: "cln_professionals_seo_details",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "user_row_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "professional" } }],
                     as: "seo_info"
                 }
             },
@@ -2184,6 +2193,28 @@ export const getUserDetails = async ({ username, user_row_id, isAdminCaller = fa
                     twitter_creator: query_run[0].seo_details.twitter_creator,
                     robots_index: query_run[0].seo_details.robots_index,
                     robots_follow: query_run[0].seo_details.robots_follow
+                }
+                // CONFIRMED FIX (standardization follow-up): persist the standardized fallback
+                // title the first time it's generated for this public profile view, same
+                // reasoning as Company's own public-page backfill (company.individual.ts) - the
+                // collection otherwise never ends up holding a real meta_title for a professional
+                // who's only ever been viewed via the computed fallback.
+                if (query_run[0].full_name && !resultArray['seo_details'].meta_title) {
+                    const defaultTitle = `${query_run[0].full_name} | Coinpedia User Profile`
+                    const backfill: Record<string, unknown> = { meta_title: defaultTitle }
+                    if (!resultArray['seo_details'].og_title) backfill.og_title = defaultTitle
+                    if (!resultArray['seo_details'].twitter_title) backfill.twitter_title = defaultTitle
+                    // A bare `updateOne(..., {upsert:true})` never runs ProfessionalSeoDetailsM's
+                    // own `pre('save')` counter hook, so a professional with no SEO doc at all would
+                    // get a raw Mongo ObjectId `_id` instead of this collection's numeric one.
+                    professionals_seo_detailsM.findOne({ root_document_id: query_run[0]._id }).lean()
+                        .then((existing: unknown) => existing
+                            ? professionals_seo_detailsM.updateOne({ root_document_id: query_run[0]._id }, { $set: backfill })
+                            : new professionals_seo_detailsM({ root_document_id: query_run[0]._id, ...backfill, created_by: { type: 'system', id: null }, created_at: new Date() }).save())
+                        .catch((err: unknown) => {
+                            logger.error(`Backfill professional SEO default title. ${err instanceof Error ? err.message : String(err)}`)
+                        })
+                    Object.assign(resultArray['seo_details'], backfill)
                 }
                 resultArray['profile_scores'] = {
                     professional_profile_score: query_run[0]?.profile_scores?.professional_profile_score ?? 0,

@@ -7,7 +7,7 @@ const timezone = require("dayjs/plugin/timezone");
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const professionalsM = require('../../models/app/professionalsM')
-const event_faqM = require('../../models/app/events/event_faqM')
+const { deleteFaqById, deleteFaqsByRoot, findOneFaqByRoot } = require('../../src/common/app-faq/app-faq.repository')
 const event_attendeesM = require('../../models/app/events/event_attendeesM')
 const event_speakersM = require('../../models/app/events/event_speakersM')
 const events_countM = require('../../models/app/events/events_countM')
@@ -1522,10 +1522,10 @@ export const deleteAttendees = async ({ type, event_row_id, attendee_row_id }) =
 export const deleteFAQ = async ({ type, event_row_id, faq_row_id }) => {
     try {
         if (type == 1) {
-            await event_faqM.deleteOne({ _id: faq_row_id })
+            await deleteFaqById({ module: 'event', faqRowId: faq_row_id })
         }
         else {
-            await event_faqM.deleteMany({ event_row_id: event_row_id })
+            await deleteFaqsByRoot({ module: 'event', rootDocumentId: event_row_id })
         }
     }
     catch (err) {
@@ -1648,7 +1648,7 @@ export const deleteEvent = async ({ event_row_id, deleted_reason }) => {
         }).save()
 
         await eventM.deleteOne({ _id: event_row_id })
-        await event_seo_detailsM.deleteOne({ event_row_id: event_row_id })
+        await event_seo_detailsM.deleteOne({ root_document_id: event_row_id })
         await event_speakersM.deleteMany({ event_row_id: event_row_id })
 
         const check_attendee = await event_attendeesM.findOne({ event_row_id: event_row_id })
@@ -1656,7 +1656,7 @@ export const deleteEvent = async ({ event_row_id, deleted_reason }) => {
             await deleteAttendees({ type: 2, event_row_id: event_row_id })
         }
 
-        const check_faq = await event_faqM.findOne({ event_row_id: event_row_id })
+        const check_faq = await findOneFaqByRoot({ module: 'event', rootDocumentId: event_row_id })
         if (check_faq) {
             await deleteFAQ({ type: 2, event_row_id: event_row_id })
         }

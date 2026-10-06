@@ -160,7 +160,7 @@ export interface CompanySeoDetailsForUpdate {
 /** Moved from saveOrUpdateBasicCompanyDetails. */
 export function findCompanySeoDetailsForUpdate(company_row_id: number): Promise<CompanySeoDetailsForUpdate | null> {
   return company_seo_detailsM.findOne(
-    { company_row_id },
+    { root_document_id: company_row_id },
     { meta_title: 1, meta_description: 1, meta_keywords: 1, robots_index: 1, robots_follow: 1, og_title: 1, og_description: 1, twitter_title: 1, twitter_description: 1, twitter_creator: 1 }
   )
 }
@@ -184,7 +184,7 @@ export function upsertCompanySeoDetails({
   company_row_id: number
   seoArray: Record<string, unknown>
 }): Promise<unknown> {
-  return company_seo_detailsM.updateOne({ company_row_id }, { $set: seoArray }, { upsert: true })
+  return company_seo_detailsM.updateOne({ root_document_id: company_row_id }, { $set: seoArray }, { upsert: true })
 }
 
 /** Moved from saveOrUpdateBasicCompanyDetailsTeamPanel. */
@@ -443,7 +443,7 @@ export function findCompanyByCondition(condition: Record<string, unknown>): Prom
 
 /** Moved from updateCompanySeo. */
 export function findCompanySeoDetailsRaw(company_row_id: number): Promise<Record<string, unknown> | null> {
-  return company_seo_detailsM.findOne({ company_row_id })
+  return company_seo_detailsM.findOne({ root_document_id: company_row_id })
 }
 
 // Explicit projection — CLAUDE.md forbids `SELECT *`. These are exactly the ten fields the
@@ -469,7 +469,7 @@ export const COMPANY_SEO_FIELDS_PROJECTION = {
  * caller.
  */
 export function findCompanySeoDetailsLean(company_row_id: number): Promise<Record<string, unknown> | null> {
-  return company_seo_detailsM.findOne({ company_row_id }, COMPANY_SEO_FIELDS_PROJECTION).lean()
+  return company_seo_detailsM.findOne({ root_document_id: company_row_id }, COMPANY_SEO_FIELDS_PROJECTION).lean()
 }
 
 /** Moved from updateCompanySeo. */
@@ -480,7 +480,7 @@ export function upsertCompanySeoData({
   company_row_id: number
   updateData: Record<string, unknown>
 }): Promise<{ acknowledged: boolean; matchedCount: number; upsertedCount: number }> {
-  return company_seo_detailsM.updateOne({ company_row_id }, { $set: updateData }, { upsert: true })
+  return company_seo_detailsM.updateOne({ root_document_id: company_row_id }, { $set: updateData }, { upsert: true })
 }
 
 /** Moved from getCompanySeo's `companyM.aggregate(buildGetCompanySeoPipeline(...))` inline call. */
@@ -501,7 +501,7 @@ export function buildIndividualDetailsPipeline(companyRowId: number): object[] {
     { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_company_created_by_admins', localField: '_id', foreignField: 'company_row_id', as: 'created_by_admins_info' } },
     { $unwind: { path: '$created_by_admins_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_seo_details', localField: '_id', foreignField: 'company_row_id', as: 'seo_details' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'company' } }], as: 'seo_details' } },
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_company_social_links', localField: '_id', foreignField: 'company_row_id', as: 'social_links' } },
     { $unwind: { path: '$social_links', preserveNullAndEmptyArrays: true } },
@@ -588,11 +588,25 @@ export function buildGetCompanySeoPipeline(condition: Record<string, any>): obje
     { $lookup: { from: 'cln_sub_admins', localField: 'sub_admin_row_id', foreignField: '_id', as: 'sub_admin_info', pipeline: [{ $project: { _id: 1, full_name: 1 } }] } },
     { $lookup: { from: 'cln_professionals', localField: 'user_row_id', foreignField: '_id', as: 'user_info', pipeline: [{ $project: { _id: 1, full_name: 1, user_name: 1, profile_image: 1 } }] } },
     { $unwind: { path: '$user_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_seo_details', localField: '_id', foreignField: 'company_row_id', as: 'seo_details' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'company' } }], as: 'seo_details' } },
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_company_social_links', localField: '_id', foreignField: 'company_row_id', as: 'social_links' } },
     { $unwind: { path: '$social_links', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_company_faq_lists', localField: '_id', foreignField: 'company_row_id', as: 'faq', pipeline: [{ $project: { _id: 0, faq_answer: 1, faq_question: 1 } }] } },
+    // cln_app_faqs is a shared, module-discriminated collection (src/common/app-faq) - the join
+    // matches on module + root_document_id via `let`/pipeline rather than a plain foreignField
+    // equality, and the $project renames question/answer back to faq_question/faq_answer for
+    // this endpoint's unchanged response contract.
+    {
+      $lookup: {
+        from: 'cln_app_faqs',
+        let: { companyId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $and: [{ $eq: ['$module', 'company'] }, { $eq: ['$root_document_id', '$$companyId'] }] } } },
+          { $project: { _id: 0, faq_question: '$question', faq_answer: '$answer' } },
+        ],
+        as: 'faq',
+      },
+    },
     {
       $addFields: {
         created_by_status: {
@@ -625,6 +639,11 @@ export function buildGetCompanySeoPipeline(condition: Record<string, any>): obje
         robots_index: '$seo_details.robots_index', robots_follow: '$seo_details.robots_follow', og_title: '$seo_details.og_title',
         og_description: '$seo_details.og_description', twitter_title: '$seo_details.twitter_title', twitter_description: '$seo_details.twitter_description',
         twitter_creator: '$seo_details.twitter_creator', faq: 1, created_by_status: 1,
+        // Standardized suggested title when no custom meta_title is set yet - matches the exact
+        // default the write path already saves on first save (company.settings.service.ts's
+        // `companyName + ' | Coinpedia Company Listing'`), so the admin SEO form's preview and the
+        // public page's generateMetadata() fallback stay in sync.
+        default_meta_title: { $concat: ['$company_name', ' | Coinpedia Company Listing'] },
         // Real source (setting.js:2498-2503): `email_id`/`sub_admin_name` are each set TWICE in
         // the same $project — company_email_id first, then overwritten by user_info.email_id;
         // sub_admin_name repeated identically. Preserved exactly: object key dedup means the

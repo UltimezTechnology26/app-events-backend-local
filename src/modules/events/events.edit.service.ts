@@ -236,7 +236,7 @@ export async function editEvent(
     return { status: false, message: { alert_message: 'Invalid request row Id' } }
   }
 
-  const checkEventSeo = await event_seo_detailsM.findOne({ event_row_id: eventRowId }, { meta_keywords: 1, meta_description: 1, meta_title: 1, _id: 1 })
+  const checkEventSeo = await event_seo_detailsM.findOne({ root_document_id: eventRowId }, { meta_keywords: 1, meta_description: 1, meta_title: 1, _id: 1 })
 
   const updateArr: Record<string, unknown> = {
     user_row_id: userRowId,
@@ -271,7 +271,7 @@ export async function editEvent(
   Object.assign(updateArr, updateFields, { updated_date_n_time: new Date() })
 
   await eventM.updateOne({ _id: eventRowId }, { $set: updateArr })
-  await event_seo_detailsM.updateOne({ event_row_id: eventRowId }, { $set: updateSeoArr })
+  await event_seo_detailsM.updateOne({ root_document_id: eventRowId }, { $set: updateSeoArr })
 
   const changed = body.meta_title !== checkEventSeo?.meta_title || body.meta_description !== checkEventSeo?.meta_description || body.meta_keywords !== checkEventSeo?.meta_keywords
   if (changed) {

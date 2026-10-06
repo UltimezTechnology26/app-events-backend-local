@@ -100,7 +100,7 @@ export function buildCompanySeoStatsPipeline() {
     {
       $lookup: {
         from: 'cln_company_lists',
-        localField: 'company_row_id',
+        localField: 'entity_row_id',
         foreignField: '_id',
         as: 'c',
         pipeline: [{ $match: { company_id: { $exists: true, $ne: '' }, approval_status: 1, active_status: 1 } }],

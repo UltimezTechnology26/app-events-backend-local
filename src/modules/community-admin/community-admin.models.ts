@@ -8,7 +8,7 @@
 // `CommunityGroupsM` has a wide legacy consumer list confirmed via grep (`controllers/
 // admin_panel/main/community/groups.js`, `controllers/main/community/posts.js`,
 // `controllers/main/community/pro_batch.js`, and the already-migrated
-// `professionals-community.controller.ts`, which requires it directly rather than owning it) -
+// `community.controller.ts`, which requires it directly rather than owning it) -
 // `models/main/community/community_groupsM.js` reduced to a one-line passthrough.
 //
 // CONFIRMED PRE-EXISTING BUG, preserved as-is (flagged, not fixed): the admin controller's own
