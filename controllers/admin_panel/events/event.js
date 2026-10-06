@@ -8296,9 +8296,10 @@ router.get('/view_event/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_app_seo_details_event",
+                            from: "cln_app_seo_details",
                             localField: "_id",
-                            foreignField: "root_document_id",
+                            foreignField: "entity_row_id",
+                            pipeline: [{ $match: { entity_type: "event" } }],
                             as: "event_seo"
                         }
                     },
@@ -12105,9 +12106,10 @@ router.get('/deleted_events_list/:skip/:limit', async (req, res) => {
                 {
                     $lookup:
                     {
-                        from: "cln_app_seo_details_event",
+                        from: "cln_app_seo_details",
                         localField: "_id",
-                        foreignField: "root_document_id",
+                        foreignField: "entity_row_id",
+                        pipeline: [{ $match: { entity_type: "event" } }],
                         as: "event_seo"
                     }
                 },
@@ -12346,9 +12348,10 @@ router.get('/deleted_events_view/:request_row_id', async (req, res) => {
                     {
                         $lookup:
                         {
-                            from: "cln_app_seo_details_event",
+                            from: "cln_app_seo_details",
                             localField: "_id",
-                            foreignField: "root_document_id",
+                            foreignField: "entity_row_id",
+                            pipeline: [{ $match: { entity_type: "event" } }],
                             as: "event_seo"
                         }
                     },
@@ -13149,9 +13152,10 @@ router.get('/seo_overview', checkApiKey, async (req, res) => {
             },
             {
                 $lookup: {
-                    from: "cln_app_seo_details_event",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "root_document_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "event" } }],
                     as: "event_seo"
                 }
             },

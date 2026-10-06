@@ -1404,6 +1404,8 @@ export const SECTION_REGISTRY = {
     fieldLevelApproval: true,
   },
   [SECTION_EVENT_SEO]: {
+    // Logical section key (also stored on existing change requests) - the rows now live in the
+    // shared cln_app_seo_details collection (entity_type 'event'), see events-seo.models.ts.
     collection: 'cln_app_seo_details_event',
     keyField: 'root_document_id',
     isList: false,

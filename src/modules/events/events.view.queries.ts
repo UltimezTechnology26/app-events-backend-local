@@ -79,7 +79,7 @@ export function buildSponsorsPartnersManualUserInfoWorkPipeline() {
 export function buildViewEventMainPipeline(requestRowId: number) {
   return [
     { $match: { _id: requestRowId } },
-    { $lookup: { from: 'cln_app_seo_details_event', localField: '_id', foreignField: 'root_document_id', as: 'event_seo' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'event' } }], as: 'event_seo' } },
     { $unwind: { path: '$event_seo', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_company_lists', localField: 'company_row_id', foreignField: '_id', as: 'company_info' } },
     { $unwind: { path: '$company_info', preserveNullAndEmptyArrays: true } },

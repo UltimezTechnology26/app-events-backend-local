@@ -55,9 +55,10 @@ const companyIndividualDetails = async ({ user_row_id, company_id }: { user_row_
         // Essential lookups only
         {
             $lookup: {
-                from: "cln_app_seo_details_company",
+                from: "cln_app_seo_details",
                 localField: "_id",
-                foreignField: "root_document_id",
+                foreignField: "entity_row_id",
+                pipeline: [{ $match: { entity_type: "company" } }],
                 as: "seo_details"
             }
         },

@@ -7,7 +7,7 @@
     "description": "app and events",
     "main": "index.js",
     "scripts": {
-        "dev": "ts-node-dev --max-old-space-size=4096 --respawn --transpile-only index.js",
+        "dev": "NODE_OPTIONS=--use-system-ca ts-node-dev --max-old-space-size=4096 --respawn --transpile-only index.js",
         "build": "tsc",
         "start": "node --max-old-space-size=4096 --require ts-node/register index.js",
         "typecheck": "tsc --noEmit",

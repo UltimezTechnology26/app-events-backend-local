@@ -17,7 +17,7 @@ export async function getUserSeoAggregate(userRowId: number) {
     },
     { $lookup: { from: 'cln_static_countries', localField: 'country_mobile_id', foreignField: '_id', as: 'country_info' } },
     { $unwind: { path: '$country_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_app_seo_details_professional', localField: '_id', foreignField: 'root_document_id', as: 'seo_details' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'professional' } }], as: 'seo_details' } },
     { $unwind: { path: '$seo_details', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals_social_links', localField: '_id', foreignField: 'user_row_id', as: 'social_details' } },
     { $unwind: { path: '$social_details', preserveNullAndEmptyArrays: true } },

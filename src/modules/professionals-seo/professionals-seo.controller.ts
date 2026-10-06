@@ -13,6 +13,7 @@ import { arrangeValidation } from '@ultimez-interview/coinpedia-backend-library/
 import { asyncRoute } from '../../../middleware/asyncRoute'
 import { writeEndpointRateLimiter } from '../../../middleware/rateLimiter'
 import { updateUserSeo, getUserSeo } from './professionals-seo.service'
+import { rejectDuplicateKeywords } from '../../common/app-seo/app-seo.keywords'
 import { UserAuthResult } from './professionals-seo.types'
 
 export const professionalsSeoRouter: Router = express.Router()
@@ -26,6 +27,7 @@ professionalsSeoRouter.post(
     check('meta_description').not().isEmpty().withMessage('The Meta Description field is required.'),
     check('meta_keywords').not().isEmpty().withMessage('The Meta Keywords field is required.'),
   ],
+  rejectDuplicateKeywords,
   asyncRoute('Update user SEO error:', async (req: Request, res: Response) => {
     const errObj = arrangeValidation(validationResult(req))
     if (Object.keys(errObj).length > 0) return res.json({ status: false, message: errObj })

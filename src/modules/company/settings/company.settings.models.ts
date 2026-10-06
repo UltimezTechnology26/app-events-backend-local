@@ -15,7 +15,7 @@
 // other colocated model in this migration (see professionals.models.ts's own doc comment for the
 // general reasoning).
 import mongoose from 'mongoose'
-import { createAppSeoModel } from '../../../common/app-seo/app-seo.model'
+import { createSharedAppSeoModel } from '../../../common/app-seo/app-seo.model'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getCollectionID } = require('../../../../utils/helpers/database_helper')
 
@@ -52,4 +52,6 @@ export const CompanySocialLinksM = mongoose.model('cln_company_social_links', co
 // `company_row_id`) - every call site across the repo was updated to match in the same change.
 // Dead-field removal (about_company, facebook, twitter, etc.) from the prior schema version
 // carries over unchanged - see scripts/migrations/drop-dead-seo-fields.js's own comment.
-export const CompanySeoDetailsM = createAppSeoModel('cln_app_seo_details_company')
+// Company SEO now lives in the shared `cln_app_seo_details` collection (entity_type = 'company');
+// `root_document_id` stays usable as an alias of its `entity_row_id`.
+export const CompanySeoDetailsM = createSharedAppSeoModel('company')

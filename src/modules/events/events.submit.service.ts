@@ -21,6 +21,7 @@ const professionalsM = require('../../../models/app/professionalsM')
 const companyM = require('../../../models/app/company/companyM')
 const event_default_imagesM = require('../../../models/app/static/event_default_imagesM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+import { buildDefaultEventMetaTitle } from '../events-seo/events-seo.title'
 const event_tagsM = require('../../../models/app/static/event_tagsM')
 const event_utc_datesM = require('../../../models/app/events/event_utc_datesM')
 const sub_admin_emailsM = require('../../../models/admin_panel/app/sub_admin_emailsM')
@@ -261,7 +262,7 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
       }
     }
     if (insertArr.event_title) {
-      const title = insertArr.event_title
+      const title = buildDefaultEventMetaTitle(insertArr.event_title)
       if (!combinedData?.meta_title) {
         insertArr.meta_title = title
         insertArr.og_title = title
@@ -360,9 +361,10 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
     seoFields.twitter_description = cleanedBio
   }
   if (insertArr.event_title) {
-    seoFields.meta_title = insertArr.event_title
-    seoFields.og_title = insertArr.event_title
-    seoFields.twitter_title = insertArr.event_title
+    const defaultMetaTitle = buildDefaultEventMetaTitle(insertArr.event_title)
+    seoFields.meta_title = defaultMetaTitle
+    seoFields.og_title = defaultMetaTitle
+    seoFields.twitter_title = defaultMetaTitle
   }
   if (defaultKeywords) {
     seoFields.meta_keywords = defaultKeywords
@@ -482,5 +484,5 @@ export async function submitEvent(body: Record<string, any>, checkUserToken: Che
 
   await calculateEventScore(eventRowId, ['build_event_page'])
 
-  return { status: true, message: { alert_message: 'New event created successfully.', event_row_id: eventRowId } }
+  return { status: true, message: { alert_message: 'Your new event has been submitted for approval.', event_row_id: eventRowId } }
 }

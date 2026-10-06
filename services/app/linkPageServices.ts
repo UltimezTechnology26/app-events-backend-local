@@ -2028,9 +2028,10 @@ export const getUserDetails = async ({ username, user_row_id, isAdminCaller = fa
             {
                 $lookup:
                 {
-                    from: "cln_app_seo_details_professional",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "root_document_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "professional" } }],
                     as: "seo_info"
                 }
             },

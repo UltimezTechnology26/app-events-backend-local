@@ -9,7 +9,7 @@
 // call site (`setting.js`, and the core `professionals` module's own re-export of this same model)
 // keeps resolving to the exact same compiled model object — see `professionals.models.ts`'s own
 // doc comment for the general pattern.
-import { createAppSeoModel } from '../../common/app-seo/app-seo.model'
+import { createSharedAppSeoModel } from '../../common/app-seo/app-seo.model'
 
 // Unified SEO storage (Part 4 §SEO unification): one collection per module,
 // `cln_app_seo_details_professional`, built from the shared `createAppSeoModel` factory
@@ -18,4 +18,6 @@ import { createAppSeoModel } from '../../common/app-seo/app-seo.model'
 // module gets its own physical collection, hence the `_professional` postfix). The foreign key
 // field is now `root_document_id` (was `user_row_id`) - every call site across the repo was
 // updated to match in the same change.
-export const ProfessionalSeoDetailsM = createAppSeoModel('cln_app_seo_details_professional')
+// Professionals SEO now lives in the shared `cln_app_seo_details` collection (entity_type =
+// 'professional'); `root_document_id` stays usable as an alias of its `entity_row_id`.
+export const ProfessionalSeoDetailsM = createSharedAppSeoModel('professional')

@@ -5017,7 +5017,7 @@ router.get('/seo_overview', checkApiKey, async (req, res) => {
             {
                 $lookup: {
                     from: "cln_professionals",
-                    localField: "root_document_id",
+                    localField: "entity_row_id",
                     foreignField: "_id",
                     as: "u",
                     pipeline: [

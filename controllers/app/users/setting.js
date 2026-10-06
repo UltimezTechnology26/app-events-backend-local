@@ -1,4 +1,5 @@
 const express = require('express')
+const { rejectDuplicateKeywords } = require('../../../src/common/app-seo/app-seo.keywords')
 const router = express.Router()
 const randomstring = require("randomstring")
 const sanitize = require('mongo-sanitize')
@@ -1090,9 +1091,10 @@ router.get('/new_user_individual_details', checkApiKey, async (req, res) => {
                 {
                     $lookup:
                     {
-                        from: "cln_app_seo_details_professional",
+                        from: "cln_app_seo_details",
                         localField: "_id",
-                        foreignField: "root_document_id",
+                        foreignField: "entity_row_id",
+                        pipeline: [{ $match: { entity_type: "professional" } }],
                         as: "seo_info"
                     }
                 },
@@ -2379,7 +2381,7 @@ router.post('/update_user_seo', [
     check('meta_title').not().isEmpty().withMessage('The Meta Title field is required.'),
     check('meta_description').not().isEmpty().withMessage('The Meta Description field is required.'),
     check('meta_keywords').not().isEmpty().withMessage('The Meta Keywords field is required.'),
-], async (req, res) => {
+], rejectDuplicateKeywords, async (req, res) => {
     try {
         // VALIDATION
         const errors = validationResult(req);
@@ -2558,9 +2560,10 @@ router.get('/get_user_seo/:user_row_id', async (req, res) => {
             { $unwind: { path: "$country_info", preserveNullAndEmptyArrays: true } },
             {
                 $lookup: {
-                    from: "cln_app_seo_details_professional",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "root_document_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "professional" } }],
                     as: "seo_details"
                 }
             },

@@ -759,7 +759,7 @@ export async function getNewUserIndividualDetails(userRowIdRaw: unknown, apiForT
     { $unwind: { path: '$info_img', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_professionals_social_links', localField: '_id', foreignField: 'user_row_id', as: 'social_info' } },
     { $unwind: { path: '$social_info', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'cln_app_seo_details_professional', localField: '_id', foreignField: 'root_document_id', as: 'seo_info' } },
+    { $lookup: { from: 'cln_app_seo_details', localField: '_id', foreignField: 'entity_row_id', pipeline: [{ $match: { entity_type: 'professional' } }], as: 'seo_info' } },
     { $unwind: { path: '$seo_info', preserveNullAndEmptyArrays: true } },
     { $lookup: { from: 'cln_static_user_designations', localField: 'designation_id', foreignField: '_id', as: 'info_designations', pipeline: [{ $project: { _id: 1, designation_name: 1 } }] } },
     { $lookup: { from: 'cln_push_notifications_details', localField: '_id', foreignField: 'user_row_id', as: 'info_push_notification', pipeline: [{ $project: { push_notification_status: 1 } }] } },

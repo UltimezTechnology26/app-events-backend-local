@@ -204,7 +204,7 @@ export function buildSeoOverviewRecentLogsPipeline(): object[] {
 
 export function buildSeoOverviewUserStatsPipeline(): object[] {
   return [
-    { $lookup: { from: 'cln_professionals', localField: 'root_document_id', foreignField: '_id', as: 'u', pipeline: [{ $match: { user_name: { $exists: true, $ne: '' }, approval_status: 1 } }] } },
+    { $lookup: { from: 'cln_professionals', localField: 'entity_row_id', foreignField: '_id', as: 'u', pipeline: [{ $match: { user_name: { $exists: true, $ne: '' }, approval_status: 1 } }] } },
     { $match: { u: { $ne: [] } } },
     ...SEO_FACET_STAGES,
   ]

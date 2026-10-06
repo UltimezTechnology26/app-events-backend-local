@@ -243,6 +243,8 @@ const event_tagsM = require('../../../models/app/static/event_tagsM')
 const event_default_imagesM = require('../../../models/app/static/event_default_imagesM')
 const countryM = require('../../../models/app/static/countryM')
 const event_seo_detailsM = require('../../../models/app/events/event_seo_detailsM')
+const { withEventTitleSuffix, buildDefaultEventMetaTitle } = require('../../../src/modules/events-seo/events-seo.title')
+const { rejectDuplicateKeywords } = require('../../../src/common/app-seo/app-seo.keywords')
 const event_attendeesM = require('../../../models/app/events/event_attendeesM')
 const event_speakers_manualM = require('../../../models/app/events/event_speakers_manualM')
 const professionalsM = require('../../../models/app/professionalsM')
@@ -3303,7 +3305,7 @@ router.post('/update_seo', [
     check('meta_title').not().isEmpty().withMessage('The Meta Title field is required.'),
     check('meta_description').not().isEmpty().withMessage('The Meta Description field is required.'),
     check('meta_keywords').not().isEmpty().withMessage('The Meta Keywords field is required.'),
-], async (req, res) => {
+], rejectDuplicateKeywords, async (req, res) => {
     try {
         const errors = validationResult(req);
         const errObj = arrangeValidation(errors);
@@ -3313,6 +3315,13 @@ router.post('/update_seo', [
 
         const checkUserToken = await checkAllLoginToken(req.headers, [10]);
         if (!checkUserToken.status) return res.json(checkUserToken);
+
+        // Store the same " | Events Coinpedia" title the SEO Details form shows and the live page
+        // renders. Done on req.body itself so the change-log / change-request comparisons below see
+        // the suffixed values too. Already-suffixed and empty titles pass through unchanged.
+        req.body.meta_title = withEventTitleSuffix(req.body.meta_title);
+        req.body.og_title = withEventTitleSuffix(req.body.og_title);
+        req.body.twitter_title = withEventTitleSuffix(req.body.twitter_title);
 
         let {
             module_id,
@@ -3566,9 +3575,10 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
             // SEO details lookup
             {
                 $lookup: {
-                    from: "cln_app_seo_details_event",
+                    from: "cln_app_seo_details",
                     localField: "_id",
-                    foreignField: "root_document_id",
+                    foreignField: "entity_row_id",
+                    pipeline: [{ $match: { entity_type: "event" } }],
                     as: "seo_info"
                 }
             },
@@ -3629,6 +3639,13 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
         }
 
         const data = eventData[0];
+
+        // Show the same " | Events Coinpedia" suffix the live event page renders, so the SEO Details
+        // form and the page agree. Empty titles stay empty (the form falls back to default_meta_title).
+        data.meta_title = withEventTitleSuffix(data.meta_title);
+        data.og_title = withEventTitleSuffix(data.og_title);
+        data.twitter_title = withEventTitleSuffix(data.twitter_title);
+        data.default_meta_title = buildDefaultEventMetaTitle(data.title);
 
         data.attendees_list = await event_attendeesM.aggregate([
             {
