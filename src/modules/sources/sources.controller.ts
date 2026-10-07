@@ -9,7 +9,12 @@ import { AdminAuthResult, SourcesListParams } from './sources.types'
 
 export const sourcesRouter: Router = express.Router()
 
-const SOURCES_ACCESS_IDS = [1]
+// cln_sub_admin_access_type ids 1 (Users / Professionals) and 7 (Companies):
+// these pages manage professionals' and companies' content sources. Must match
+// the "Sources" menu item's accessTypeIds in the shared AdminMenu.ts.
+const ACCESS_TYPE_USERS = 1
+const ACCESS_TYPE_COMPANIES = 7
+const SOURCES_ACCESS_IDS = [ACCESS_TYPE_USERS, ACCESS_TYPE_COMPANIES]
 
 function readListParams(req: Request): SourcesListParams {
   return {

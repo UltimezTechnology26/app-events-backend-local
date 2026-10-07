@@ -30,8 +30,8 @@ interface ModuleSource {
 const MODULE_SOURCE_FILES: Record<number, ModuleSource> = {
   // Service files are listed too: that's where the Restricted vs Full Access
   // checks live (record-ownership limits and lifecycle approvals).
-  1: { label: 'Users', files: ['src/modules/professionals/professionals.controller.ts', 'src/modules/professionals/professionals.approvals.controller.ts', 'src/modules/professionals/professionals.service.ts', 'src/modules/professionals/professionals.lifecycle-request.service.ts'] },
-  7: { label: 'Companies', files: ['src/modules/company_admin/company_admin.controller.ts', 'src/modules/company_admin/company_admin.approvals.controller.ts', 'src/modules/company/company.controller.ts', 'src/modules/company_admin/company_admin.lifecycle-request.service.ts'] },
+  1: { label: 'Users', files: ['src/modules/professionals/professionals.controller.ts', 'src/modules/professionals/professionals.approvals.controller.ts', 'src/modules/professionals/professionals.service.ts', 'src/modules/professionals/professionals.lifecycle-request.service.ts', 'src/modules/sources/sources.controller.ts'] },
+  7: { label: 'Companies', files: ['src/modules/company_admin/company_admin.controller.ts', 'src/modules/company_admin/company_admin.approvals.controller.ts', 'src/modules/company/company.controller.ts', 'src/modules/company_admin/company_admin.lifecycle-request.service.ts', 'src/modules/sources/sources.controller.ts'] },
   10: { label: 'Events', files: ['controllers/admin_panel/events/event.js', 'src/modules/events/events.edit.service.ts', 'src/modules/events/events.lifecycle-request.service.ts', 'src/modules/events-change-approvals/events.change-approvals.controller.ts'] },
   13: { label: 'Coinpedia & Academy', files: ['src/modules/community-admin/community-admin.posts.controller.ts', 'src/modules/community-admin/community-admin.groups.controller.ts', 'src/modules/community-admin/community-admin.challenge.controller.ts', 'src/modules/community-admin/community-admin.request-article.controller.ts'] },
 }
