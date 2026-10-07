@@ -13,8 +13,11 @@ const sub_admin_access_typeM = require('../../../models/admin_panel/app/sub_admi
 import type { ServiceResponse } from './sub_admin.types'
 import { buildRefreshPrompt } from './sub_admin_access_type.prompt'
 import { generateJson } from './sub_admin.gemini'
+import { findSourceRoot } from './sub_admin.source-root'
 
-const PROJECT_ROOT = path.join(__dirname, '../../../')
+// Not __dirname-relative: on staging this file runs from the compiled dist/ folder,
+// where the .ts sources below don't exist - see sub_admin.source-root.ts.
+const PROJECT_ROOT = findSourceRoot() ?? process.cwd()
 
 interface ModuleSource {
   label: string
