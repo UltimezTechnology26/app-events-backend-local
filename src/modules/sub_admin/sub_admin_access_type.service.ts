@@ -7,13 +7,13 @@
 import fs from 'fs'
 import path from 'path'
 
-const sanitize = require('mongo-sanitize')
 const sub_admin_access_typeM = require('../../../models/admin_panel/app/sub_admin_access_typeM')
 
 import type { ServiceResponse } from './sub_admin.types'
 import { buildRefreshPrompt } from './sub_admin_access_type.prompt'
 import { generateJson } from './sub_admin.gemini'
 import { findSourceRoot } from './sub_admin.source-root'
+import { validateAccessTypeText, writeAccessTypeText, type AccessTypeText } from './sub_admin_access_type.text'
 
 // Not __dirname-relative: on staging this file runs from the compiled dist/ folder,
 // where the .ts sources below don't exist - see sub_admin.source-root.ts.
@@ -65,15 +65,6 @@ function buildCodeExcerpt(relativeFiles: string[]): string {
 }
 
 
-interface RefreshedRoleData {
-  description: string
-  responsibilities: string[]
-  can_extra: string[]
-  cant_extra: string[]
-  restricted_access: string[]
-  full_access: string[]
-}
-
 /** Ports GET /access_types (legacy lines 374-394). */
 export async function listAccessTypes(): Promise<ServiceResponse> {
   const queryRun = await sub_admin_access_typeM.find(
@@ -93,19 +84,8 @@ export async function refreshAccessType(requestRowIdRaw: string): Promise<Servic
 
   const codeExcerpt = buildCodeExcerpt(module.files)
   const prompt = buildRefreshPrompt(module.label, codeExcerpt)
-  const parsed = await generateJson<RefreshedRoleData>(prompt)
-
-  await sub_admin_access_typeM.updateOne(
-    { _id: request_row_id },
-    {
-      description: sanitize(parsed.description),
-      responsibilities: sanitize(parsed.responsibilities),
-      can_extra: sanitize(parsed.can_extra),
-      cant_extra: sanitize(parsed.cant_extra),
-      restricted_access: sanitize(parsed.restricted_access),
-      full_access: sanitize(parsed.full_access),
-    },
-  )
+  const parsed = await generateJson<AccessTypeText>(prompt)
+  await writeAccessTypeText(request_row_id, parsed)
 
   return {
     status: true,
@@ -119,4 +99,26 @@ export async function refreshAccessType(requestRowIdRaw: string): Promise<Servic
       full_access: parsed.full_access,
     },
   }
+}
+
+/**
+ * POST /update_access_type/:request_row_id - saves Manager Roles text generated
+ * elsewhere. markets-backend-local's refresh generates its modules' text and
+ * saves it here (with the admin's own token + this service's API key) rather
+ * than writing to this service's database directly.
+ */
+export async function saveAccessTypeText(requestRowIdRaw: string, body: Record<string, unknown>): Promise<ServiceResponse> {
+  const request_row_id = Number.parseInt(requestRowIdRaw)
+  const accessType = Number.isNaN(request_row_id) ? null : await sub_admin_access_typeM.findOne({ _id: request_row_id }, { _id: 1 })
+  if (!accessType) {
+    return { status: false, message: { alert_message: 'Invalid access type id.' } }
+  }
+
+  const errors = validateAccessTypeText(body)
+  if (Object.keys(errors).length > 0) {
+    return { status: false, message: errors }
+  }
+
+  await writeAccessTypeText(request_row_id, body as unknown as AccessTypeText)
+  return { status: true, message: { alert_message: 'Role text saved.' } }
 }
