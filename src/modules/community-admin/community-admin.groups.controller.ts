@@ -1,8 +1,9 @@
 // modules/community-admin/community-admin.groups.controller.ts
 //
 // Phase 3 slice of the Community migration (Manage Community / Groups). Ports the routes out of
-// controllers/admin_panel/main/community/groups.js. Mounted at a temporary `_v2` prefix
-// ('/community/groups_v2') parallel to the untouched legacy '/admin_panel/community/groups' mount.
+// controllers/admin_panel/main/community/groups.js. CUTOVER COMPLETE (2026-10-07): that legacy
+// file and its '/admin_panel/community/groups' mount are gone; this module now owns the plain
+// '/community/groups' path (no more `_v2` suffix) with no parallel legacy sibling.
 import express, { Router, Request, Response } from 'express'
 const { check, validationResult } = require('express-validator')
 const { checkAdminLoginToken } = require('../../../middleware/authorization')

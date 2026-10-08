@@ -1,8 +1,9 @@
 // modules/community-admin/community-admin.overview.controller.ts
 //
 // Phase 3 slice of the Community migration (Overview page). Ports routes out of
-// controllers/admin_panel/main/community/overview.js. Mounted at a temporary `_v2` prefix
-// ('/community/overview_v2') parallel to the untouched legacy '/community/overview' mount.
+// controllers/admin_panel/main/community/overview.js. CUTOVER COMPLETE (2026-10-07): that legacy
+// file and its mount are gone; this module now owns the plain '/community/overview' path (no
+// more `_v2` suffix) with no parallel legacy sibling.
 import express, { Router, Request, Response } from 'express'
 const { checkAdminLoginToken } = require('../../../middleware/authorization')
 import { asyncRoute } from '../../../middleware/asyncRoute'

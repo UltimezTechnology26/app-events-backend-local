@@ -1,12 +1,9 @@
 // modules/community/community.controller.ts
 //
 // Phase K of the Professionals migration (see plan doc). Ports controllers/main/community/
-// pro_batch.js's GET /details (~94-265) into a dedicated community module.
-//
-// Mounted at a temporary `_v2` prefix (routes/main.js: '/pro_batch_v2') parallel to the untouched
-// legacy '/pro_batch' mount, per this migration's confirmed cutover strategy — legacy stays live
-// and unmodified until this module is verified via the characterization capture/compare cycle and
-// real frontend testing (same pattern as Phase A / Phase J).
+// pro_batch.js's GET /details (~94-265) into a dedicated community module. CUTOVER COMPLETE
+// (2026-10-07): that legacy file and its mount are gone; this module now owns the plain
+// '/pro_batch' path (no more `_v2` suffix) with no parallel legacy sibling.
 //
 // NO CACHING (deliberate, not an oversight): this GET route performs conditional writes as a
 // side effect (21-day-challenge row insert, Pro Batch badge award + points + emails) on every

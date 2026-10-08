@@ -1,8 +1,10 @@
 // modules/community-admin/community-admin.request-article.self-service.controller.ts
 //
-// Ports controllers/main/community/request_articles.js's POST /publish_request verbatim. Mounted
-// at a temporary `_v2` prefix (routes/main.js: '/request_article_v2') parallel to the untouched
-// legacy '/request_article' mount. Backend-only per the 2026-09-19 scope change.
+// Ports controllers/main/community/request_articles.js's POST /publish_request verbatim.
+// CUTOVER COMPLETE (2026-10-07): that legacy file and its mount are gone; this module now owns
+// the plain '/request_article' path (no more `_v2` suffix) with no parallel legacy sibling. Its
+// original "backend-only" note is stale - SendTopicRequest/route.ts is this route's real, live
+// caller.
 import express, { Router, Request, Response } from 'express'
 const { checkUserLoginToken } = require('../../../middleware/authorization')
 const { check, validationResult } = require('express-validator')

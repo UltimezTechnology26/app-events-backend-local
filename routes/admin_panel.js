@@ -89,12 +89,6 @@ const contests_questions = require('../controllers/admin_panel/main/contests/que
 const weekly_contests = require('../controllers/admin_panel/main/contests/weekly_contests')
 
 
-const community_groups = require('../controllers/admin_panel/main/community/groups')
-const community_posts = require('../controllers/admin_panel/main/community/posts')
-const community_overview = require('../controllers/admin_panel/main/community/overview')
-
-const community_request_article = require('../controllers/admin_panel/main/community/request_article')
-const community_21days_challenge = require('../controllers/admin_panel/main/community/21dayschallenge')
 
 const job_skill = require('../controllers/admin_panel/app/jobs/skills')
 const education_type = require('../controllers/admin_panel/app/jobs/education_type')
@@ -341,23 +335,33 @@ router.use('/academy/chapters', academy_chapters)
 router.use('/academy/chapters_v2', academyChaptersRouter)
 router.use('/academy/overview', academy_overview)
 
-router.use('/community/groups', community_groups)
-// Phase 3 of the Community migration (Manage Community / Groups) - temporary `_v2` parallel
-// mount, legacy '/community/groups' above stays live and untouched.
-router.use('/community/groups_v2', communityGroupsRouter)
-router.use('/community/posts', community_posts)
-router.use('/community/posts_v2', communityPostsRouter)
-router.use('/community/overview', community_overview)
-// Final slice of the Community migration (Overview page) - temporary `_v2` parallel mount,
-// legacy '/community/overview' above stays live and untouched.
-router.use('/community/overview_v2', communityOverviewRouter)
-router.use('/community/challenge', community_21days_challenge)
-router.use('/community/challenge_v2', communityChallengeRouter)
-router.use('/community/request_article', community_request_article)
-// Phase 4 (backend-only) of the Community migration (Requested Articles) - temporary `_v2`
-// parallel mount, legacy '/community/request_article' above stays live and untouched. No
-// admin-panel frontend page exists for this per the 2026-09-19 scope change.
-router.use('/community/request_article_v2', communityRequestArticleRouter)
+// Phase 3 of the Community migration (Manage Community / Groups) - CUTOVER COMPLETE (2026-10-07):
+// legacy '/community/groups' (controllers/admin_panel/main/community/groups.js) removed after
+// confirming the frontend's only live caller (`add_n_update_details`) was switched to this route
+// and no other consumer (admin-coinpedia confirmed retired) depended on it. `_v2` suffix dropped
+// now that the legacy mount is gone and the plain path is free again.
+router.use('/community/groups', communityGroupsRouter)
+// Phase 3 of the Community migration (All Posts / Deleted Posts) - CUTOVER COMPLETE (2026-10-07):
+// legacy '/community/posts' (controllers/admin_panel/main/community/posts.js) removed. Its own
+// `delete_post` route was already superseded by the shared `app/community/delete_post`
+// (modules/community/community.posts.controller.ts) before this cutover, not by this module's own
+// (now-removed) delete_post - see that file's own history. `_v2` suffix dropped from this mount
+// now that the legacy mount is gone and the plain path is free again.
+router.use('/community/posts', communityPostsRouter)
+// Final slice of the Community migration (Overview page) - CUTOVER COMPLETE (2026-10-07): legacy
+// '/community/overview' (controllers/admin_panel/main/community/overview.js) removed, `_v2`
+// suffix dropped now that the plain path is free again.
+router.use('/community/overview', communityOverviewRouter)
+// Phase 3 of the Community migration (21 Days Challenge tab) - CUTOVER COMPLETE (2026-10-07):
+// legacy '/community/challenge' (controllers/admin_panel/main/community/21dayschallenge.js)
+// removed, `_v2` suffix dropped now that the plain path is free again.
+router.use('/community/challenge', communityChallengeRouter)
+// Phase 4 of the Community migration (Requested Articles) - CUTOVER COMPLETE (2026-10-07): legacy
+// '/community/request_article' (controllers/admin_panel/main/community/request_article.js)
+// removed, `_v2` suffix dropped now that the plain path is free again. The "no admin-panel
+// frontend page" note this comment used to carry is stale - RequestArticleTab.tsx was added later
+// and is this route's real, live caller.
+router.use('/community/request_article', communityRequestArticleRouter)
 
 router.use('/job/skill', job_skill)
 router.use('/job/education_type', education_type)

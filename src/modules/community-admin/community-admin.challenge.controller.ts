@@ -1,9 +1,9 @@
 // modules/community-admin/community-admin.challenge.controller.ts
 //
 // Phase 3 slice of the Community migration (21 Days Challenge tab). Ports routes out of
-// controllers/admin_panel/main/community/21dayschallenge.js. Mounted at a temporary `_v2` prefix
-// ('/community/challenge_v2') parallel to the untouched legacy '/admin_panel/community/challenge'
-// mount.
+// controllers/admin_panel/main/community/21dayschallenge.js. CUTOVER COMPLETE (2026-10-07): that
+// legacy file and its mount are gone; this module now owns the plain '/community/challenge' path
+// (no more `_v2` suffix) with no parallel legacy sibling.
 import express, { Router, Request, Response } from 'express'
 const { checkAdminLoginToken } = require('../../../middleware/authorization')
 import { asyncRoute } from '../../../middleware/asyncRoute'

@@ -1,11 +1,11 @@
 // modules/community-admin/community-admin.request-article.controller.ts
 //
-// Phase 4 (backend-only) slice of the Community migration: Requested Articles. Ports
-// controllers/admin_panel/main/community/request_article.js. Mounted at a temporary `_v2` prefix
-// ('/community/request_article_v2') parallel to the untouched legacy
-// '/community/request_article' mount. Per the 2026-09-19 scope change, no admin-panel frontend
-// page is built against this route - it exists purely so the backend migration for Community is
-// complete module-based/CLAUDE.md-compliant, matching every other phase this session.
+// Phase 4 slice of the Community migration: Requested Articles. Ports
+// controllers/admin_panel/main/community/request_article.js. CUTOVER COMPLETE (2026-10-07): that
+// legacy file and its mount are gone; this module now owns the plain '/community/request_article'
+// path (no more `_v2` suffix) with no parallel legacy sibling. Its original "no admin-panel
+// frontend page" note is stale - RequestArticleTab.tsx was added later and is this route's real,
+// live caller.
 import express, { Router, Request, Response } from 'express'
 const { checkAdminLoginToken } = require('../../../middleware/authorization')
 import { asyncRoute } from '../../../middleware/asyncRoute'

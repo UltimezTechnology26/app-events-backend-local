@@ -1,10 +1,11 @@
 // modules/community-posts/community-posts.controller.ts
 //
-// Migrates the remaining user-only routes from controllers/main/community/posts.js, one at a time
-// (community-user-admin-unification-plan.md's "finish migrating the rest" step). First route:
-// GET /leaderboard. Mounted at a temporary `_v2` prefix ('/main/posts_v2'), parallel to the
-// untouched legacy '/main/posts' mount. No checkAllLoginToken needed here or on any route this
-// module will add - there's no admin equivalent for any of them, same as benefits_v2/pro_batch_v2.
+// Migrates the user-only routes from controllers/main/community/posts.js. CUTOVER COMPLETE
+// (2026-10-07): that legacy file (and its own service file, services/main/community/posts.ts)
+// are gone; this module now owns the plain '/main/posts' path (no more `_v2` suffix) alongside
+// community-posts.feed.controller.ts, with no parallel legacy sibling. No checkAllLoginToken
+// needed here or on any route in this module - there's no admin equivalent for any of them, same
+// as benefits/pro_batch.
 //
 // Auth is OPTIONAL on this route (not required, not absent either): legacy's own /leaderboard
 // works for a logged-out visitor (no `your_rank` in the response) and personalizes it when a

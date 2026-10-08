@@ -36,24 +36,6 @@ export async function getDeletedPostsList(params: GetPostsListParams) {
   return getPostsListByStatus(params, false)
 }
 
-/** Ports /delete_post/:post_id (~line 268-294) verbatim - a soft delete (post_status: false). */
-export async function deletePost(postIdRaw: string) {
-  const postId = Number.parseInt(postIdRaw)
-  if (Number.isNaN(postId)) {
-    return { status: false, message: 'Invalid post id.' }
-  }
-
-  const post = await community_postsM.findOne({ _id: postId, post_status: true })
-  if (!post) {
-    return { status: false, message: 'Post not found.' }
-  }
-
-  post.post_status = false
-  await post.save()
-
-  return { status: true, message: 'Post status set to deleted successfully.' }
-}
-
 /** Ports /overview (~line 296-419) verbatim. */
 export async function getPostsOverview() {
   const now = new Date()
