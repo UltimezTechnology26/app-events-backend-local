@@ -3628,6 +3628,8 @@ router.get('/get_event_seo/:event_row_id', async (req, res) => {
                     twitter_title: { $ifNull: ["$seo_info.twitter_title", ""] },
                     twitter_description: { $ifNull: ["$seo_info.twitter_description", ""] },
                     twitter_creator: { $ifNull: ["$seo_info.twitter_creator", ""] },
+                    // Saved H1/H2/H3 outline - the SEO tab falls back to it when the live page cannot be crawled.
+                    header_structure: { $ifNull: ["$seo_info.header_structure", []] },
                     updated_date_n_time: 1,
                     created_date_n_time: 1,
                     faq: 1,

@@ -24,6 +24,8 @@ import { getIntIdFromArray, validateAndSaveImage, createDateTime } from '../../.
 import { getUpdateTrackerFields } from '../../../utils/helpers/app_helper'
 import { updateNotification } from '../../../utils/helpers/notification_helper'
 import { invalidateEventEditCaches } from './events.cache'
+import { findEventHostRowId } from './events.host-user.queries'
+import { organizerUserFilter } from './events.host-user.service'
 
 interface SpeakerInput {
   user_row_id?: number
@@ -186,8 +188,11 @@ export async function editEvent(
   if (body.event_list_id) {
     const eventListId = sanitize(body.event_list_id)
     const listEventType = Number.parseInt(body.list_event_type)
+    // The event's own current host may stay on it even while their account is pending/rejected -
+    // see organizerUserFilter. Only looked up when a person is (part of) the organizer.
+    const currentHostRowId = listEventType == 1 || listEventType == 3 ? await findEventHostRowId(eventRowId) : null
     if (listEventType == 1) {
-      const checkUserQuery = await professionalsM.findOne({ user_name: eventListId, login_status: 1, approval_status: 1 }, { _id: 1, full_name: 1 })
+      const checkUserQuery = await professionalsM.findOne(organizerUserFilter(eventListId, currentHostRowId), { _id: 1, full_name: 1 })
       if (!checkUserQuery) errObj['event_list_id'] = 'Invalid Username'
       else userRowId = checkUserQuery._id
     } else if (listEventType == 2) {
@@ -198,7 +203,7 @@ export async function editEvent(
         userRowId = checkCompanyQuery.user_row_id ? checkCompanyQuery.user_row_id : 0
       }
     } else if (listEventType == 3) {
-      const checkUserQuery = await professionalsM.findOne({ user_name: eventListId, login_status: 1, approval_status: 1 }, { _id: 1 })
+      const checkUserQuery = await professionalsM.findOne(organizerUserFilter(eventListId, currentHostRowId), { _id: 1 })
       if (checkUserQuery) {
         userRowId = checkUserQuery._id
         const checkCompanyQuery2 = await companyM.findOne({ user_row_id: userRowId, approval_status: 1, active_status: 1 }, { _id: 1, user_row_id: 1 })
