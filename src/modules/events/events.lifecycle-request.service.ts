@@ -27,6 +27,7 @@ import { toActorRefWithId } from '../../common/status-audit/status-audit.actor'
 import { insertChangeLog } from '../../common/status-audit/status-audit.queries'
 import { ActorRef } from '../../common/status-audit/status-audit.types'
 import logger from '../../../config/logger'
+import { checkHostUserAllowsReview } from './events.host-user.service'
 
 // Callers pass whatever `checkAdminLoginToken` shape their own module declares - kept permissive
 // here, same reasoning as company_admin.lifecycle-request.service.ts's own AdminAuthResult.
@@ -182,6 +183,9 @@ export async function submitApproveEventRequest(admin: AdminAuthResult, requestR
   const checkAccess = await checkSubadminAccess(subadminAccessParams(admin, eventRowId))
   if (!checkAccess.status) return { status: false, message: { alert_message: checkAccess.message } }
 
+  const hostBlock = await checkHostUserAllowsReview(eventRowId)
+  if (hostBlock) return hostBlock
+
   return submitLifecycleAction({ admin, eventRowId, intendedAction: 'approve', oldLabel: 'Pending', newLabel: 'Approved' })
 }
 
@@ -195,6 +199,9 @@ export async function submitRejectEventRequest(admin: AdminAuthResult, requestRo
 
   const checkEvent = await eventM.findOne({ _id: eventRowId, approval_status: 0 }, { event_title: 1 })
   if (!checkEvent) return { status: false, message: { alert_message: 'Invalid Request Row Id' } }
+
+  const hostBlock = await checkHostUserAllowsReview(eventRowId)
+  if (hostBlock) return hostBlock
 
   return submitLifecycleAction({ admin, eventRowId, intendedAction: 'reject', reason: reasonForReject, oldLabel: 'Pending', newLabel: 'Rejected' })
 }

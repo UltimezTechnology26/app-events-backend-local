@@ -23,6 +23,7 @@ import { editEvent } from './events.edit.service'
 import { getDeletedEventsList } from './events.deleted-list.service'
 import { getDisabledEventsList } from './events.disabled-list.service'
 import { getPendingEventsList } from './events.pending-list.service'
+import { getEventHostUserStatus } from './events.host-user.service'
 import { submitEnableEventRequest, submitDisableEventRequest, submitApproveEventRequest, submitRejectEventRequest, submitDeleteEventRequest } from './events.lifecycle-request.service'
 import { getEventView } from './events.view.service'
 import { AdminAuthFailure } from './events.types'
@@ -210,6 +211,19 @@ eventsRouter.get(
       tagStatusRaw: req.query.tag_status as string | undefined,
     })
     res.json(result)
+  })
+)
+
+// Host user's approval state for the admin View/Edit pages' Approve/Reject popup (the Pending
+// Events list already gets it per row from its own query).
+eventsRouter.get(
+  '/host_user_status/:event_row_id',
+  asyncRoute('Event host user status.', async (req: Request, res: Response) => {
+    const checkAdminToken = checkAdminLoginToken(req.headers, EVENTS_ACCESS_IDS)
+    if (!checkAdminToken.status) {
+      return res.json(checkAdminToken)
+    }
+    res.json(await getEventHostUserStatus(req.params.event_row_id as string))
   })
 )
 
