@@ -15,6 +15,8 @@ const { updateNotification } = require('../../../utils/helpers/notification_help
 const { eventsList } = require('../../../services/admin_panel/events')
 const { getPositionResolutionStages } = require('../../../src/modules/work-experience/work-experience.queries')
 const { joinPositionNamesExpr } = require('../../../src/modules/funding/funding.queries')
+const { findEventHostRowId } = require('../../../src/modules/events/events.host-user.queries')
+const { organizerUserFilter } = require('../../../src/modules/events/events.host-user.service')
 
 const { findFaqsByRoot } = require('../../../src/common/app-faq/app-faq.repository')
 const countryM = require('../../../models/app/static/countryM')
@@ -5041,8 +5043,11 @@ router.get('/check_username/:username', async (req, res) => {
             }
 
             if (list_type === 1 || list_type == 0) {
+                // event_row_id (admin Edit page prefill): that event's own current host is found
+                // even while their account is pending/rejected - see organizerUserFilter.
+                const currentHostRowId = req.query.event_row_id ? await findEventHostRowId(Number.parseInt(req.query.event_row_id)) : null
                 const get_data = await professionalsM.aggregate([
-                    { $match: { user_name: username, login_status: 1, approval_status: 1 } },
+                    { $match: organizerUserFilter(username, currentHostRowId) },
                     {
                         $lookup:
                         {
@@ -5102,6 +5107,7 @@ router.get('/check_username/:username', async (req, res) => {
                             _id: 1,
                             full_name: 1,
                             user_name: 1,
+                            approval_status: 1,
                             pro_batch: 1,
                             user_position_name: "$info_work.position_name",
                             user_company_name: "$info_work.company_name",
@@ -5121,7 +5127,7 @@ router.get('/check_username/:username', async (req, res) => {
                     res.json({ status: true, message: get_data[0] })
                 }
                 else {
-                    res.json({ status: false, message: 'Inavalid User name' })
+                    res.json({ status: false, message: 'Invalid User name' })
                 }
             }
             else if (list_type === 2) {
@@ -5165,7 +5171,7 @@ router.get('/check_username/:username', async (req, res) => {
                     res.json({ status: true, message: get_data[0] })
                 }
                 else {
-                    res.json({ status: false, message: 'Inavalid company ID' })
+                    res.json({ status: false, message: 'Invalid company ID' })
                 }
             }
             else {
