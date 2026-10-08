@@ -1,9 +1,9 @@
 // modules/community-posts/community-posts.feed.controller.ts
 //
-// Migrates controllers/main/community/posts.js's GET /get_posts/:skip/:limit and
-// GET /get_single_post/:post_id (community-user-admin-unification-plan.md's "finish migrating the
-// rest" step). Mounted at the same temporary `_v2` prefix ('/main/posts_v2') as
-// community-posts.controller.ts, parallel to the untouched legacy '/main/posts' mount.
+// Migrates controllers/main/community/posts.js's GET /get_posts/:skip/:limit,
+// GET /get_single_post/:post_id and GET /get_user_posts/:skip/:limit. CUTOVER COMPLETE
+// (2026-10-07): that legacy file is gone; this module now owns the plain '/main/posts' path (no
+// more `_v2` suffix) alongside community-posts.controller.ts, with no parallel legacy sibling.
 //
 // GET /get_posts uses `checkAllLoginToken(req.headers, [13])` same as legacy - not because an
 // admin gets different data (they don't; only a self-service user, `user_type === 1`, gets

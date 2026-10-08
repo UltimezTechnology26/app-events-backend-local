@@ -1,10 +1,10 @@
 // modules/community/community.groups.controller.ts
 //
 // First shared admin+user route of the Community unification (see
-// community-user-admin-unification-plan.md). Mounted at a temporary `_v2` prefix
-// ('/app/community/group_list_v2'), parallel to both untouched legacy routes:
-// `admin_panel/community/groups/group_list` (admin-gated) and `main/community/posts.js`'s
-// `/group_list` (fully public, no auth check at all - confirmed by reading it directly).
+// community-user-admin-unification-plan.md). CUTOVER COMPLETE (2026-10-08): both legacy routes
+// this replaced - `admin_panel/community/groups/group_list` (admin-gated) and
+// `main/community/posts.js`'s `/group_list` (fully public, no auth check at all) - are deleted;
+// this module now owns the plain '/app/community/group_list' path (no more `_v2` suffix).
 //
 // NO AUTH GATE (deliberate, not an oversight): unlike company.faq/company_holdings/etc., this
 // data has no permission differences between callers at all - every visitor, logged in or not,

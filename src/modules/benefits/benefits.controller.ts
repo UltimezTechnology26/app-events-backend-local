@@ -1,7 +1,8 @@
 // modules/benefits/benefits.controller.ts
 //
-// Ports controllers/main/community/benefits.js's GET /details. Mounted at a temporary `_v2`
-// prefix ('/benefits_v2') parallel to the untouched legacy '/benefits' mount.
+// Ports controllers/main/community/benefits.js's GET /details. CUTOVER COMPLETE (2026-10-07):
+// that legacy file (and its own service file, services/main/benefits.ts) are gone; this module
+// now owns the plain '/benefits' path (no more `_v2` suffix) with no parallel legacy sibling.
 import express, { Router, Request, Response } from 'express'
 import { getBenefitsDetails } from './benefits.service'
 

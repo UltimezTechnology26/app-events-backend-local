@@ -190,16 +190,16 @@ router.use('/company/employee', appTeamMembersRouter)
 // now lives directly in modules/company_manual/company_manual.controller.ts's companyManualAppRouter.
 router.use('/company/manual_company', companyManualAppRouter)
 // Community admin+user unification, step 1 (community-user-admin-unification-plan.md): shared
-// group list, same checkAllLoginToken pattern as companyFaqRouter above. Both legacy
-// `admin_panel/community/groups/group_list` and `main/community/posts.js`'s `/group_list` stay
-// live and unmodified until both frontends are confirmed on this route.
-router.use('/community/group_list_v2', communityGroupListRouter)
+// group list, same checkAllLoginToken pattern as companyFaqRouter above. CUTOVER COMPLETE
+// (2026-10-08): both legacy sources this replaced (`admin_panel/community/groups/group_list` and
+// `main/community/posts.js`'s own `/group_list`) are deleted, so the `_v2` suffix is dropped too.
+router.use('/community/group_list', communityGroupListRouter)
 // Community admin+user unification, step 2: shared delete-post, branches on actor.message.user_type
-// (admin: unconditional moderation delete; self-service user: ownership + 24h window). Both
-// `community/posts_v2/delete_post/:post_id` (admin) and `main/community/posts.js`'s
-// `/delete_post/:post_id` (user) stay live and unmodified until both frontends are confirmed on
-// this route.
-router.use('/community/delete_post_v2', communityDeletePostRouter)
+// (admin: unconditional moderation delete; self-service user: ownership + 24h window). CUTOVER
+// COMPLETE (2026-10-08): both legacy sources this replaced (`admin_panel/community/posts.js`'s
+// own `delete_post` and `main/community/posts.js`'s own `/delete_post/:post_id`) are deleted, so
+// the `_v2` suffix is dropped too.
+router.use('/community/delete_post', communityDeletePostRouter)
 // controllers/app/company/faq.js fully migrated and deleted — every route it defined now lives
 // directly in modules/company/faq/company.faq.controller.ts's companyFaqRouter.
 router.use('/company/faq', companyFaqRouter)

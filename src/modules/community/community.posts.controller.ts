@@ -1,10 +1,11 @@
 // modules/community/community.posts.controller.ts
 //
 // Second shared admin+user route of the Community unification (step 2 of
-// community-user-admin-unification-plan.md). Mounted at a temporary `_v2` prefix
-// ('/app/community/delete_post_v2/:post_id'), parallel to both untouched existing routes:
-// `admin_panel/community/posts_v2/delete_post/:post_id` (admin-only, unconditional) and
-// `main/community/posts.js`'s `/delete_post/:post_id` (user-only, ownership + 24h window).
+// community-user-admin-unification-plan.md). CUTOVER COMPLETE (2026-10-08): both legacy routes
+// this replaced - `admin_panel/community/posts.js`'s own `delete_post` (admin-only, unconditional)
+// and `main/community/posts.js`'s `/delete_post/:post_id` (user-only, ownership + 24h window) -
+// are deleted; this module now owns the plain '/app/community/delete_post/:post_id' path (no more
+// `_v2` suffix).
 //
 // Gated by checkAllLoginToken (access-type id 13, same as every other Community admin route) -
 // unlike group list, both legacy sides here genuinely require a known caller (the user side needs

@@ -12,10 +12,6 @@ const onboarding = require('../controllers/main/academy/onboarding')
 const overview = require('../controllers/main/academy/overview')
 const bookmarks = require('../controllers/main/academy/bookmarks')
 const courses = require('../controllers/main/academy/courses')
-const posts = require('../controllers/main/community/posts')
-const pro_batch = require('../controllers/main/community/pro_batch')
-const request_article = require('../controllers/main/community/request_articles')
-const benefits = require('../controllers/main/community/benefits')
 const { professionalsAcademyRouter } = require('../src/modules/professionals-academy/professionals-academy.controller')
 const { communityRouter } = require('../src/modules/community/community.controller')
 const { benefitsRouter } = require('../src/modules/benefits/benefits.controller')
@@ -40,14 +36,10 @@ router.use('/overview', overview)
 router.use('/bookmarks', bookmarks)
 router.use('/courses', courses)
 router.use('/lesson/faq', courses)
-router.use('/posts', posts)
-router.use('/pro_batch', pro_batch)
-router.use('/request_article', request_article)
-// Phase 4 (backend-only) of the Community migration (Requested Articles, self-service submit) -
-// temporary `_v2` parallel mount, legacy '/request_article' above stays live and untouched.
-router.use('/request_article_v2', communityRequestArticleSelfServiceRouter)
-router.use('/benefits', benefits)
-
+// Phase 4 of the Community migration (Requested Articles, self-service submit) - CUTOVER
+// COMPLETE (2026-10-07): legacy '/request_article' (controllers/main/community/request_articles.js)
+// removed, `_v2` suffix dropped now that the plain path is free again.
+router.use('/request_article', communityRequestArticleSelfServiceRouter)
 // Professionals migration, Phase J: certificate_list / save_n_update_visibility /
 // certificate_visible / save_certificate_urls ported out of controllers/main/users.js into
 // src/modules/professionals-academy/**. Mounted at a temporary `_v2` prefix, parallel to the
@@ -58,20 +50,24 @@ router.use('/benefits', benefits)
 router.use('/academy_v2', professionalsAcademyRouter)
 
 // Professionals migration, Phase K: pro_batch.js's GET /details ported into
-// src/modules/community/**. Same `_v2` parallel-mount pattern as academy_v2 above —
-// legacy '/pro_batch' stays live and unmodified until verified.
-router.use('/pro_batch_v2', communityRouter)
+// src/modules/community/**. CUTOVER COMPLETE (2026-10-07): legacy '/pro_batch'
+// (controllers/main/community/pro_batch.js) removed, `_v2` suffix dropped now that the plain
+// path is free again.
+router.use('/pro_batch', communityRouter)
 
-// New `benefits` module - ports controllers/main/community/benefits.js's GET /details, reusing
+// `benefits` module - ports controllers/main/community/benefits.js's GET /details, reusing
 // getProfileScores/getPostDates/calculateStreaks from the community module above rather than
-// redeclaring them. Legacy '/benefits' stays live and unmodified until verified.
-router.use('/benefits_v2', benefitsRouter)
+// redeclaring them. CUTOVER COMPLETE (2026-10-07): legacy '/benefits' (and its own service file,
+// services/main/benefits.ts) removed, `_v2` suffix dropped now that the plain path is free again.
+router.use('/benefits', benefitsRouter)
 
-// New `community-posts` module - migrating controllers/main/community/posts.js's remaining
-// user-only routes one at a time, starting with GET /leaderboard. Legacy '/posts' stays live and
-// unmodified until each route is verified.
-router.use('/posts_v2', communityPostsRouter)
-router.use('/posts_v2', communityPostsFeedRouter)
+// `community-posts` module - full parity port of controllers/main/community/posts.js's
+// user-only routes (group_list and delete_post excluded - those live in the shared
+// modules/community/** unification instead). CUTOVER COMPLETE (2026-10-07): legacy
+// '/posts' (and its own service file, services/main/community/posts.ts) removed, `_v2`
+// suffix dropped from both routers now that the plain path is free again.
+router.use('/posts', communityPostsRouter)
+router.use('/posts', communityPostsFeedRouter)
 
 
 
