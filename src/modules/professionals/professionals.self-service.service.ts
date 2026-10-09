@@ -276,23 +276,41 @@ export async function updateUserDetails(auth: UserAuthResult, body: UpdateUserDe
     // (the `else` branch below) always saves live, matching Company's own reverted decision on
     // create (no view page yet to review/publish a pending creation against).
     if (auth.message.user_type === 2) {
-      const liveValues = (await ProfessionalM.findOne({ _id: userRowId }).lean()) ?? {}
+      const [liveValues, liveSocialValues] = await Promise.all([
+        ProfessionalM.findOne({ _id: userRowId }).lean(),
+        ProfessionalSocialLinksM.findOne({ user_row_id: userRowId }).lean(),
+      ])
       const adminRowId = subAdminRowId
-      return submitChangeRequest({
+      const actor = toActorRefWithId(
+        {
+          updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
+          updated_by_row_id: adminRowId,
+        },
+        adminRowId,
+      )
+      const basicResult = await submitChangeRequest({
         module: AUDIT_MODULE_PROFESSIONALS,
         section: SECTION_PROFESSIONAL_BASIC_DETAILS,
         rootDocumentId: userRowId,
         targetRowId: null,
-        liveValues,
+        liveValues: liveValues ?? {},
         submitted: mainArray,
-        actor: toActorRefWithId(
-          {
-            updated_by: adminRowId === ADMIN_ROW_ID_MAIN_ADMIN ? 'admin' : 'subadmin',
-            updated_by_row_id: adminRowId,
-          },
-          adminRowId,
-        ),
+        actor,
       })
+      if (!basicResult.status || body.website === undefined) return basicResult
+
+      // Website is entered on this form but stored with the social links (see the self-service
+      // write below), so it's staged as that section's own change request.
+      const websiteResult = await submitChangeRequest({
+        module: AUDIT_MODULE_PROFESSIONALS,
+        section: SECTION_PROFESSIONAL_SOCIAL_MEDIA,
+        rootDocumentId: userRowId,
+        targetRowId: null,
+        liveValues: liveSocialValues ?? {},
+        submitted: { website: body.website ? String(body.website).trim() : '' },
+        actor,
+      })
+      return basicResult.changeCount === 0 ? websiteResult : basicResult
     }
 
     const updateFields = getUpdateTrackerFields(auth)
