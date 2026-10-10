@@ -32,12 +32,19 @@ import { updateManualDetailValidation, editManualDetailValidation, rejectManualC
 export const companyManualAppRouter: Router = express.Router()
 export const companyManualAdminRouter: Router = express.Router()
 
+// Admin access types allowed to add/edit a manual company: 1 Users and 7 Companies (the original
+// callers), plus the markets types whose owning/holding company pickers also use "Add Manually" -
+// 4 Portfolio & Markets, 14 Blockchain, 15 Exchange, 16 Tokens. Without the markets types a
+// markets-only sub-admin fell through checkAllLoginToken to its generic "token field is expired"
+// error on every Exchange/Blockchain/Token owning-company picker.
+const MANUAL_COMPANY_ACCESS_TYPES = [1, 7, 4, 14, 15, 16]
+
 // ─── App-side ───────────────────────────────────────────────────────────────
 
 // Router-level auth middleware (additive safety net — does not replace the per-route
-// checkAllLoginToken([1, 7]) checks below). Both app-side routes require the same role set.
+// checkAllLoginToken checks below). Both app-side routes require the same role set.
 companyManualAppRouter.use(async (req: Request, res: Response, next) => {
-  const auth = await checkAllLoginToken(req.headers, [1, 7])
+  const auth = await checkAllLoginToken(req.headers, MANUAL_COMPANY_ACCESS_TYPES)
   if (!auth.status) return res.json(auth)
   next()
 })
@@ -46,10 +53,10 @@ companyManualAppRouter.use(async (req: Request, res: Response, next) => {
 // no checkUserLoginToken, checkAllLoginToken, or checkApiKey, in the route or the service,
 // which trusts req.body entirely. Matches the legacy source's behavior exactly, so this was
 // not a regression from an earlier pass, but a genuine pre-existing gap. Gated here with
-// checkAllLoginToken([1, 7]) (logged-in user or admin) per explicit decision — matching the
+// checkAllLoginToken (logged-in user or admin) per explicit decision — matching the
 // pattern already used by company_acquisitions/funding's analogous app-side submission routes.
 companyManualAppRouter.post('/update_manual_detail', writeEndpointRateLimiter, updateManualDetailValidation, asyncRoute('Update manual company details', async (req, res) => {
-  const auth = await checkAllLoginToken(req.headers, [1, 7])
+  const auth = await checkAllLoginToken(req.headers, MANUAL_COMPANY_ACCESS_TYPES)
   if (!auth.status) return res.json(auth)
   const errObj = arrangeValidation(validationResult(req))
   const result = await addManualCompanyDetails({ body: req.body, preValidationErrors: errObj })
@@ -57,7 +64,7 @@ companyManualAppRouter.post('/update_manual_detail', writeEndpointRateLimiter, u
 }))
 
 companyManualAppRouter.post('/edit_manual_detail', writeEndpointRateLimiter, editManualDetailValidation, asyncRoute('Edit manual company details.', async (req, res) => {
-  const auth = await checkAllLoginToken(req.headers, [1, 7])
+  const auth = await checkAllLoginToken(req.headers, MANUAL_COMPANY_ACCESS_TYPES)
   if (!auth.status) return res.json(auth)
   const errObj = arrangeValidation(validationResult(req))
   const result = await editManualCompanyLogo({ body: req.body, preValidationErrors: errObj })

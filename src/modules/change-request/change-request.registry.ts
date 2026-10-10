@@ -139,8 +139,15 @@ async function invalidateProfessionalsFaqCaches(): Promise<void> {
   const { deleteKeysByPattern } = require('../../../config/cache_helper')
   await Promise.all([deleteKeysByPattern('user_faq_list_*'), deleteKeysByPattern('app_user_other_details_*')])
 }
-function invalidateCompanyStatusCaches(): Promise<void> {
-  return require('../../modules/company/settings/company.settings.cache').invalidateBasicDetailsCaches()
+// Enabling/disabling a company also changes what OTHER companies' public pages show - it appears
+// as their acquirer/acquired company, investor or invested-in company - so those list caches are
+// cleared too, not just this company's own.
+async function invalidateCompanyStatusCaches(): Promise<void> {
+  await Promise.all([
+    require('../../modules/company/settings/company.settings.cache').invalidateBasicDetailsCaches(),
+    invalidateCompanyAcquisitionsCaches(),
+    invalidateFundingCaches(),
+  ])
 }
 
 /**
@@ -331,6 +338,16 @@ const SOCIAL_MEDIA_FIELD_LABELS: Record<string, string> = {
   reddit: 'Reddit',
   feed_url: 'Feed URL',
   other_social_links: 'Other Social Links',
+}
+
+// A professional's Website lives on cln_professionals_social_links (every reader projects
+// `social_info.website`) but is edited from the Basic Details form - kept out of the shared list
+// above because Company's social section uses it too and stores its website elsewhere.
+const PROFESSIONAL_SOCIAL_MEDIA_EDITABLE_FIELDS = [...SOCIAL_MEDIA_EDITABLE_FIELDS, 'website'] as const
+
+const PROFESSIONAL_SOCIAL_MEDIA_FIELD_LABELS: Record<string, string> = {
+  ...SOCIAL_MEDIA_FIELD_LABELS,
+  website: 'Website',
 }
 
 // Shared by every FAQ section now that Company/Professionals/Events all live on the same
@@ -1277,9 +1294,9 @@ export const SECTION_REGISTRY = {
     collection: 'cln_professionals_social_links',
     keyField: 'user_row_id',
     isList: false,
-    editableFields: SOCIAL_MEDIA_EDITABLE_FIELDS,
+    editableFields: PROFESSIONAL_SOCIAL_MEDIA_EDITABLE_FIELDS,
     labelResolvers: {},
-    fieldLabels: SOCIAL_MEDIA_FIELD_LABELS,
+    fieldLabels: PROFESSIONAL_SOCIAL_MEDIA_FIELD_LABELS,
     schemaPaths: (field: string) => professionals_social_linksM.schema.path(field),
     invalidateCache: () => invalidateProfessionalsSocialLinksCaches(),
     fieldLevelApproval: true,

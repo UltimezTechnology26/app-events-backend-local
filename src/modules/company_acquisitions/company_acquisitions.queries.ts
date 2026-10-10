@@ -121,6 +121,20 @@ export function resolveCompanySideStages(prefix: 'acquirer' | 'acquired', as: st
 }
 
 /**
+ * A registered (registered_type 1) side must resolve to a live company - active and approved - or
+ * the public list would keep showing a disabled company as an acquirer/acquired company on every
+ * other company's page. Manual entries (registered_type 2) have no status and always pass.
+ */
+function liveCompanySideMatch(prefix: 'acquirer' | 'acquired'): object {
+  return {
+    $or: [
+      { [`${prefix}_registered_type`]: { $ne: 1 } },
+      { [`${prefix}_info.active_status`]: 1, [`${prefix}_info.approval_status`]: 1 },
+    ],
+  }
+}
+
+/**
  * Full pipeline for "every acquisition this company appears in, either as
  * acquirer or as acquired", sorted newest-first. Used by both the admin
  * per-company list and the public company-profile display route.
@@ -144,6 +158,7 @@ export function buildCompanyAcquisitionsListStages(companyRowId: number, include
     },
     ...resolveCompanySideStages('acquirer', 'acquirer_info'),
     ...resolveCompanySideStages('acquired', 'acquired_info'),
+    ...(includeAllStatuses ? [] : [{ $match: { $and: [liveCompanySideMatch('acquirer'), liveCompanySideMatch('acquired')] } }]),
     {
       $set: {
         direction: {
